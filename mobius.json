@@ -1,8 +1,8 @@
 {
   "id": "kanban",
   "name": "Kanban",
-  "version": "0.2.0",
-  "description": "Kanban boards you can share: drag-and-drop lists and cards, labels, and live collaboration with people on their own M\u00f6bius.",
+  "version": "0.4.1",
+  "description": "Kanban boards that open where you left off: drag-and-drop lists, due dates and assignees, and live collaboration with people on their own Möbius.",
   "author": "mobius-os",
   "license": "MIT",
   "homepage": "https://github.com/mobius-os/app-kanban",
@@ -28,10 +28,29 @@
   },
   "source_files": [
     "domain.js",
+    "operations.js",
+    "pendingOps.js",
     "storage.js",
     "sync.js",
     "theme.js",
+    "ui/modalFocus.js",
     "ui/Home.jsx",
     "ui/Board.jsx"
-  ]
+  ],
+  "store": {
+    "tagline": "Boards that open where you left off — and that your friends can join.",
+    "description": "Kanban keeps your projects moving with drag-and-drop boards that stay out of your way. The app opens straight onto the board you last used, with a one-tap switcher for the rest.\n\nCards carry exactly what you need at a glance: where the work stands, its due date with overdue and due-today cues, and who owns it. Add notes, color labels, and checklists when a card needs more; filter by text or label when a board grows busy.\n\nBoards are collaborative: share one and invite people by their Möbius handle — they accept on their own Möbius and edit live from their own Kanban app, with every change merging safely so nobody's work is lost. Everything also works offline and syncs when you're back.",
+    "screenshots": [
+      {
+        "src": "static/store/board-phone.png",
+        "alt": "A kanban board on a phone: To do column with cards showing a due date chip and an assignee avatar",
+        "label": "Your board, wherever you are"
+      },
+      {
+        "src": "static/store/board-desktop.png",
+        "alt": "A full-width kanban board on desktop with To do, In progress, and Done columns and status dots",
+        "label": "Room to think on the desktop"
+      }
+    ]
+  }
 }

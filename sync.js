@@ -7,7 +7,7 @@
 // the op to the freshest shared doc, write with expected_version, and on
 // conflict re-apply the op to the returned doc and retry.
 
-import { normalizeBoard, boardPath } from './storage.js'
+import { normalizeBoard, boardPath, getBoard } from './storage.js'
 
 const API = '/api/common/objects'
 const store = () => window.mobius?.storage
@@ -72,7 +72,11 @@ export async function removeShareEntry(boardId) {
 
 // ---- owner actions
 
-export async function shareBoard(boardId, doc) {
+export async function shareBoard(boardId) {
+  // Publishing establishes a new authority, so snapshot storage immediately
+  // before the request rather than trusting a possibly optimistic render prop.
+  const doc = await getBoard(boardId)
+  if (!doc) throw new Error('The latest board could not be read for sharing.')
   const res = await _json(await fetch(API, {
     method: 'POST',
     headers: _auth,
@@ -153,6 +157,17 @@ export async function pullShared(entry, sinceVersion) {
     { headers: _auth },
   ))
   return res // {status, version, doc?, object?}
+}
+
+// A shared object's poll is its only authority. The app-storage document is an
+// offline cache and its unversioned subscription must never replace a polled
+// document while sharing is active.
+export function cacheSubscriptionIsAuthoritative(shareEntry) {
+  return !shareEntry
+}
+
+export function sharedCursorAfterWrite(landed) {
+  return landed && Number.isFinite(landed.version) ? landed.version : -1
 }
 
 // Apply `op` to the shared doc with CAS retry. Returns the doc that landed.

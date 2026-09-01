@@ -9,6 +9,7 @@ import {
   loadShareMap,
   pushSharedOp,
   removeShareEntry,
+  shareBoard,
 } from '../sync.js'
 
 test.afterEach(() => {
@@ -98,6 +99,29 @@ test('shared CAS retries against the newest document and preserves concurrent fi
   assert.equal(puts[1].doc.future, 'kept')
   assert.equal(landed.version, 3)
   assert.equal(landed.doc.future, 'kept')
+})
+
+test('enabling sharing publishes a fresh storage read instead of a rendered snapshot', async () => {
+  configureSync('test-token')
+  let published = null
+  globalThis.window = { mobius: { storage: {
+    async get(path) {
+      assert.equal(path, 'boards/local.json')
+      return { v: 1, id: 'local', title: 'Fresh', columns: [], cards: {}, fresh: true }
+    },
+    async getWithVersion() { return { value: null, version: null } },
+    async durableWrite() {},
+  } } }
+  globalThis.fetch = async (_url, options) => {
+    published = JSON.parse(options.body)
+    return new Response(JSON.stringify({ id: 'shared', host: 'me.example', version: 1 }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  await shareBoard('local')
+  assert.equal(published.doc.title, 'Fresh')
+  assert.equal(published.doc.fresh, true)
 })
 
 test('shared deletion and leave retries treat an already-absent object as success', async () => {
