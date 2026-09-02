@@ -15,8 +15,13 @@ import { cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite } from '../syn
 function memoryStorage() {
   const values = new Map()
   return {
-    getItem: key => values.get(key) ?? null,
-    setItem: (key, value) => { values.set(key, String(value)) },
+    async list(prefix) {
+      return [...values.entries()]
+        .filter(([path]) => path.startsWith(prefix))
+        .map(([path, content]) => ({ path, name: path.split('/').at(-1), content: structuredClone(content) }))
+    },
+    async set(path, value) { values.set(path, structuredClone(value)) },
+    async remove(path) { values.delete(path) },
   }
 }
 
@@ -33,14 +38,34 @@ const boardDoc = () => ({
 
 test.afterEach(() => { delete globalThis.window })
 
+test('the former browser queue migrates into per-operation app storage without losing intent', async () => {
+  const appStorage = memoryStorage()
+  const legacyValues = new Map([[
+    'kanban:pending-board-ops:v1:board',
+    JSON.stringify([{ id: 'legacy-1', op: { type: 'rename-board', title: 'Recovered' } }]),
+  ]])
+  globalThis.window = {
+    localStorage: {
+      getItem: key => legacyValues.get(key) ?? null,
+      removeItem: key => legacyValues.delete(key),
+    },
+  }
+
+  const migrated = await readPendingBoardOps('board', appStorage)
+  assert.deepEqual(migrated, [
+    { id: 'legacy-1', op: { type: 'rename-board', title: 'Recovered' } },
+  ])
+  assert.equal(legacyValues.has('kanban:pending-board-ops:v1:board'), false)
+})
+
 test('offline reconnect conflict rebases every queued operation or retains an explicit failure', async () => {
   const uiStorage = memoryStorage()
-  enqueuePendingBoardOp('board', {
+  await enqueuePendingBoardOp('board', {
     type: 'add-card',
     columnId: 'todo',
     card: { id: 'b', title: 'B', notes: '', label: 'none', due: '', checklist: [], assignee: '' },
   }, uiStorage)
-  enqueuePendingBoardOp('board', {
+  await enqueuePendingBoardOp('board', {
     type: 'update-card', cardId: 'a', patch: { title: 'A edited offline' },
   }, uiStorage)
 
@@ -72,7 +97,7 @@ test('offline reconnect conflict rebases every queued operation or retains an ex
     { storage: uiStorage },
   )
   assert.equal(result.ok, true)
-  assert.deepEqual(readPendingBoardOps('board', uiStorage), [])
+  assert.deepEqual(await readPendingBoardOps('board', uiStorage), [])
   assert.equal(server.cards.a.title, 'A edited offline')
   assert.equal(server.cards.b.title, 'B')
   assert.equal(server.cards.concurrent.title, 'Concurrent')

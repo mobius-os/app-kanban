@@ -501,6 +501,7 @@ export default function Board({
   const onlineRef = useRef(online)
   const filtersRef = useRef({ text: filterText, labels: filterLabels })
   const replayingRef = useRef(false)
+  const pendingEntriesRef = useRef([])
   const cardSheetRef = useModalFocus(Boolean(openCardId), () => setOpenCardId(null))
   const columnConfirmRef = useModalFocus(Boolean(confirmDeleteCol), () => setConfirmDeleteCol(null))
   boardRef.current = board
@@ -543,20 +544,25 @@ export default function Board({
   useEffect(() => {
     let unsub = null
     let alive = true
-    getBoard(boardId).then(doc => {
+    Promise.all([getBoard(boardId), readPendingBoardOps(boardId)]).then(([doc, pendingEntries]) => {
       if (!alive) return
+      pendingEntriesRef.current = pendingEntries
       if (doc) {
-        const initial = shareRef.current ? doc : applyPendingBoardOps(doc, boardId)
+        const initial = applyPendingBoardOps(doc, pendingEntries)
         boardRef.current = initial
         setBoard(initial)
       }
-      setQueuedCount(readPendingBoardOps(boardId).length)
-      unsub = subscribeBoard(boardId, v => {
+      setQueuedCount(pendingEntries.length)
+      unsub = subscribeBoard(boardId, async v => {
         if (!v) return
         if (!cacheSubscriptionIsAuthoritative(shareRef.current)) return
         if (pendingRef.current > 0) return
         if (dragRef.current) return
-        const next = applyPendingBoardOps(v, boardId)
+        const queued = await readPendingBoardOps(boardId)
+        if (!alive) return
+        pendingEntriesRef.current = queued
+        setQueuedCount(queued.length)
+        const next = applyPendingBoardOps(v, queued)
         boardRef.current = next
         setBoard(next)
       })
@@ -584,15 +590,16 @@ export default function Board({
           const normalized = normalizeBoard(state.doc)
           window.mobius?.storage?.set(boardPath(boardId), normalized).catch(() => {})
           if (pendingRef.current === 0 && !dragRef.current) {
-            boardRef.current = normalized
-            setBoard(normalized)
+            const rendered = applyPendingBoardOps(normalized, pendingEntriesRef.current)
+            boardRef.current = rendered
+            setBoard(rendered)
           }
         }
         if (state.object) {
           const nextMembers = memberRecords(state.object)
           if (nextMembers) setMembers(nextMembers)
         }
-        setSyncNote('')
+        if (pendingEntriesRef.current.length === 0) setSyncNote('')
       } catch (e) {
         setSyncNote('Reconnecting — showing your last copy')
       } finally {
@@ -615,24 +622,28 @@ export default function Board({
     const apply = base => applyBoardOp(base, operation)
     const optimistic = apply(structuredClone(current)) || current
 
-    // Local-offline intent belongs to the app. Persist it synchronously before
-    // rendering it; if UI storage rejects the queue, report failure and leave
-    // the rendered board untouched.
+    // Offline intent belongs to the app. Each operation gets its own app-
+    // storage document, avoiding the browser-only queue that could become
+    // stranded or be overwritten by another frame.
     const runtimeOnline = onlineRef.current && window.mobius?.online !== false
-    const alreadyQueued = !entry && readPendingBoardOps(boardId).length > 0
-    if (!entry && (!runtimeOnline || alreadyQueued)) {
-      try {
-        enqueuePendingBoardOp(boardId, operation)
-      } catch (error) {
-        window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-queue' })
-        setSyncNote('Offline change was not saved')
-        return false
-      }
+    const alreadyQueued = pendingEntriesRef.current.length > 0
+    if (alreadyQueued || (!entry && !runtimeOnline)) {
       boardRef.current = optimistic
       setBoard(optimistic)
-      const count = readPendingBoardOps(boardId).length
-      setQueuedCount(count)
-      setSyncNote(`${count} change${count === 1 ? '' : 's'} waiting to reconnect`)
+      pendingRef.current += 1
+      writeChain.current = writeChain.current.catch(() => {}).then(async () => {
+        const queued = await enqueuePendingBoardOp(boardId, operation)
+        pendingEntriesRef.current = [...pendingEntriesRef.current, queued]
+          .sort((left, right) => left.id.localeCompare(right.id))
+        const count = pendingEntriesRef.current.length
+        setQueuedCount(count)
+        setSyncNote(`${count} change${count === 1 ? '' : 's'} waiting to sync`)
+      }).catch(error => {
+        boardRef.current = before
+        setBoard(before)
+        setSyncNote('Offline change was not saved')
+        window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-queue' })
+      }).finally(() => { pendingRef.current -= 1 })
       return true
     }
 
@@ -653,10 +664,19 @@ export default function Board({
           settled = landed.doc
           onCommit?.()
         } else {
-          // A poll may have advanced while the optimistic write hid its doc.
-          // Resetting forces the next tick to fetch the full authority again.
+          try {
+            const queued = await enqueuePendingBoardOp(boardId, operation)
+            pendingEntriesRef.current = [...pendingEntriesRef.current, queued]
+              .sort((left, right) => left.id.localeCompare(right.id))
+            setQueuedCount(pendingEntriesRef.current.length)
+            setSyncNote('Change saved locally — reconnecting')
+            settled = optimistic
+          } catch (error) {
+            settled = before
+            setSyncNote('Change could not be saved')
+            window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-queue' })
+          }
           versionRef.current = -1
-          settled = before
         }
         return
       }
@@ -669,9 +689,12 @@ export default function Board({
       // The connection can disappear after the click but before durableWrite.
       // Convert that unconfirmed attempt into our own replayable queue.
       try {
-        enqueuePendingBoardOp(boardId, operation)
-        setQueuedCount(readPendingBoardOps(boardId).length)
+        const queued = await enqueuePendingBoardOp(boardId, operation)
+        pendingEntriesRef.current = [...pendingEntriesRef.current, queued]
+          .sort((left, right) => left.id.localeCompare(right.id))
+        setQueuedCount(pendingEntriesRef.current.length)
         setSyncNote('Change saved locally — reconnecting')
+        settled = optimistic
       } catch (error) {
         settled = before
         window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-queue' })
@@ -687,7 +710,7 @@ export default function Board({
         } else {
           getBoard(boardId).then(v => {
             if (v && pendingRef.current === 0 && !dragRef.current) {
-              const rendered = applyPendingBoardOps(v, boardId)
+              const rendered = applyPendingBoardOps(v, pendingEntriesRef.current)
               boardRef.current = rendered
               setBoard(rendered)
             }
@@ -699,22 +722,39 @@ export default function Board({
   }, [boardId])
 
   // Reconnect replay is serialized with ordinary writes and retains an op until
-  // CAS confirms it landed. The interval also retries transient reconnects
-  // without requiring another online/offline transition.
+  // the local or shared authority confirms it landed. The interval also retries
+  // transient reconnects without requiring another online/offline transition.
   useEffect(() => {
-    if (share || !online) return undefined
+    if (!online) return undefined
     let alive = true
     const flush = () => {
-      if (!alive || replayingRef.current || readPendingBoardOps(boardId).length === 0) return
+      if (!alive || replayingRef.current || pendingEntriesRef.current.length === 0) return
       replayingRef.current = true
       writeChain.current = writeChain.current.catch(() => {}).then(async () => {
         const result = await replayPendingBoardOps(
           boardId,
-          op => casMutate(boardId, base => applyBoardOp(base, op), error => {
-            window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-replay' })
-          }),
+          async op => {
+            const activeShare = shareRef.current
+            if (!activeShare) {
+              return casMutate(boardId, base => applyBoardOp(base, op), error => {
+                window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-replay' })
+              })
+            }
+            const landed = await pushSharedOp(
+              activeShare,
+              base => applyBoardOp(base, op),
+              error => window.mobius?.signal?.('error', {
+                message: String(error?.message || error), source: 'shared-replay',
+              }),
+            )
+            if (!landed) return null
+            versionRef.current = sharedCursorAfterWrite(landed)
+            await window.mobius?.storage?.set(boardPath(boardId), landed.doc).catch(() => {})
+            return landed.doc
+          },
           {
             onLanded: (landed, remaining) => {
+              pendingEntriesRef.current = remaining
               if (!alive || dragRef.current) return
               const rendered = remaining.reduce(
                 (doc, entry) => applyBoardOp(doc, entry.op) || doc,
@@ -726,6 +766,7 @@ export default function Board({
           },
         )
         if (!alive) return
+        pendingEntriesRef.current = result.entries
         setQueuedCount(result.pending)
         setSyncNote(result.ok ? '' : `${result.pending} change${result.pending === 1 ? '' : 's'} could not sync — retrying`)
       }).finally(() => { replayingRef.current = false })
@@ -1289,7 +1330,7 @@ export default function Board({
           onShared={onShared}
           beforeShare={async () => {
             await writeChain.current.catch(() => {})
-            const pending = readPendingBoardOps(boardId).length
+            const pending = (await readPendingBoardOps(boardId)).length
             if (pending) throw new Error(`Reconnect before sharing so ${pending} pending change${pending === 1 ? '' : 's'} can sync.`)
           }}
           onClose={() => setShareOpen(false)}
