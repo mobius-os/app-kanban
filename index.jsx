@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { CSS } from './theme.js'
 import { listBoards, createBoard, deleteBoard, loadUi, migrateLegacy, saveLastBoardId, seedFirstBoard } from './storage.js'
-import { configureSync, loadShareMap, listInvitations, acceptInvitation, declineInvitation, leaveBoard, deleteSharedObject, removeShareEntry } from './sync.js'
+import { configureSync, loadShareMap, listInvitations, acceptInvitation, joinWithInvite, declineInvitation, leaveBoard, deleteSharedObject, removeShareEntry } from './sync.js'
 import Home from './ui/Home.jsx'
 import Board from './ui/Board.jsx'
 
@@ -192,6 +192,13 @@ export default function App({ appId, token }) {
     setInvitations(list => list.filter(i => !(i.id === inv.id && i.host === inv.host)))
   }, [])
 
+  const onJoin = useCallback(async invite => {
+    const { boardId } = await joinWithInvite(invite)
+    window.mobius?.signal?.('item_created', { type: 'joined-board' })
+    await refresh()
+    openBoard(boardId)
+  }, [refresh, openBoard])
+
   return (
     <div className="kb-root">
       <style>{CSS}</style>
@@ -220,6 +227,7 @@ export default function App({ appId, token }) {
           onDelete={onDelete}
           onAccept={onAccept}
           onDecline={onDecline}
+          onJoin={onJoin}
         />
       ) : null}
     </div>

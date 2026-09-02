@@ -1,9 +1,62 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus, Trash } from '@openai/apps-sdk-ui/components/Icon'
 import { invitationKey } from '../domain.js'
 import { useModalFocus } from './modalFocus.js'
 
-export default function Home({ boards, shareMap = {}, invitations = [], online, onOpen, onCreate, onDelete, onAccept, onDecline }) {
+function JoinInviteTile({ onJoin }) {
+  const [open, setOpen] = useState(false)
+  const [invite, setInvite] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const triggerRef = useRef(null)
+  const inputRef = useRef(null)
+
+  useEffect(() => { if (open) inputRef.current?.focus() }, [open])
+
+  const close = () => {
+    setOpen(false)
+    setError('')
+    requestAnimationFrame(() => triggerRef.current?.focus())
+  }
+  const submit = async () => {
+    const value = invite.trim()
+    if (!value || busy) return
+    setBusy(true); setError('')
+    try { await onJoin(value) } catch (e) { setError(String(e?.message || e)) }
+    finally { setBusy(false) }
+  }
+
+  if (!open) return (
+    <button ref={triggerRef} className="kb-tile kb-join-tile" onClick={() => setOpen(true)}>
+      <span className="kb-tile-title">Join with an invite</span>
+      <span className="kb-tile-meta">Paste a Kanban invite from another Möbius user</span>
+    </button>
+  )
+
+  return (
+    <div className="kb-tile kb-join-tile kb-join-open">
+      <div className="kb-tile-title">Join with an invite</div>
+      <div className="kb-inline-field">
+        <input
+          ref={inputRef}
+          className="kb-input"
+          value={invite}
+          placeholder="Paste invite…"
+          aria-label="Kanban invite"
+          onChange={event => setInvite(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter') { event.preventDefault(); submit() }
+            if (event.key === 'Escape') { event.preventDefault(); close() }
+          }}
+        />
+        <button className="kb-btn kb-btn-primary" disabled={busy || !invite.trim()} onClick={submit}>Join</button>
+      </div>
+      {error && <div className="kb-notice kb-error">{error}</div>}
+    </div>
+  )
+}
+
+export default function Home({ boards, shareMap = {}, invitations = [], online, onOpen, onCreate, onDelete, onAccept, onDecline, onJoin }) {
   const [confirmId, setConfirmId] = useState(null)
   const [invError, setInvError] = useState(null)
   const [busyInv, setBusyInv] = useState(null)
@@ -57,6 +110,7 @@ export default function Home({ boards, shareMap = {}, invitations = [], online, 
         <button className="kb-tile kb-newtile" onClick={onCreate}>
           <Plus /> New board
         </button>
+        <JoinInviteTile onJoin={onJoin} />
         {invitations.map(inv => {
           const key = invitationKey(inv)
           return (

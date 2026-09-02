@@ -38,6 +38,7 @@ test('normalization repairs known fields while preserving future fields', () => 
   assert.equal(normalized.columns[0].color, null)
   assert.equal(normalized.cards.card.due, '')
   assert.equal(normalized.cards.card.assignee, '')
+  assert.equal(normalized.cards.card.assigneeHost, '')
   assert.deepEqual(normalized.cards.card.checklist, [
     { id: 'item', text: '', done: false, futureItem: true },
   ])
@@ -58,6 +59,7 @@ test('normalization defaults status colors by initial position and assignees add
   })
   assert.deepEqual(doc.columns.map(column => column.color), [null, 'blue', 'green', 'amber', 'purple', 'pink', 'amber'])
   assert.equal(doc.cards.kept.assignee, 'Ada Lovelace')
+  assert.equal(doc.cards.kept.assigneeHost, '')
   assert.equal(doc.cards.kept.future, true)
 })
 

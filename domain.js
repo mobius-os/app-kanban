@@ -89,7 +89,7 @@ export function formatDueDate(due, today = new Date(), locale) {
 }
 
 export function assigneeInitials(name) {
-  const words = String(name || '').trim().split(/\s+/u).filter(Boolean)
+  const words = String(name || '').trim().replace(/^@/u, '').split(/\s+/u).filter(Boolean)
   if (!words.length) return ''
   const first = Array.from(words[0])
   const chars = words.length === 1

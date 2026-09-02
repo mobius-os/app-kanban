@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, Plus, Share, Trash } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, casMutate, boardPath, normalizeBoard } from '../storage.js'
-import { pullShared, pushSharedOp, inviteByHandle, getMembers, revokeMember, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite } from '../sync.js'
+import { pullShared, pushSharedOp, createInvite, inviteByHandle, getMembers, revokeMember, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
 import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { useModalFocus } from './modalFocus.js'
@@ -78,18 +78,36 @@ function Card({ card, lifted, onOpen, onDragStart, canWrite }) {
   )
 }
 
-function memberDisplayNames(metadata) {
+function memberRecords(metadata) {
   const members = metadata?.members
     ?? metadata?.metadata?.members
     ?? metadata?.member_names
     ?? metadata?.metadata?.member_names
-  const values = Array.isArray(members)
-    ? members
-    : members && typeof members === 'object' ? Object.values(members) : []
-  return [...new Set(values.map(member => {
-    if (typeof member === 'string') return member.trim()
-    return String(member?.displayName || member?.display_name || member?.name || '').trim()
-  }).filter(Boolean))]
+  if (members === undefined || members === null) return null
+  const entries = Array.isArray(members)
+    ? members.map((member, index) => [String(index), member, true])
+    : members && typeof members === 'object'
+      ? Object.entries(members).map(([host, member]) => [host, member, false])
+      : []
+  return entries.map(([key, member, fromArray]) => {
+    if (typeof member === 'string') {
+      return { host: fromArray ? '' : key, handle: '', name: member.trim(), role: '', pending: false }
+    }
+    const value = member && typeof member === 'object' ? member : {}
+    return {
+      host: String(value.host || value.host_key || value.member_host || (fromArray ? '' : key) || '').trim(),
+      handle: String(value.handle || '').trim(),
+      name: String(value.name || value.displayName || value.display_name || '').trim(),
+      role: String(value.role || '').trim(),
+      pending: value.pending === true,
+    }
+  })
+}
+
+function memberLabel(member) {
+  const handle = String(member?.handle || '').trim().replace(/^@/u, '')
+  if (handle) return `@${handle}`
+  return String(member?.name || member?.host || '').trim()
 }
 
 function BoardSwitcher({ board, boardId, boards, shareMap, canWrite, open, onOpenChange, onRename, onSelect, onCreate }) {
@@ -162,7 +180,7 @@ function BoardSwitcher({ board, boardId, boards, shareMap, canWrite, open, onOpe
   )
 }
 
-function AssigneeEditor({ card, canWrite, suggestions, onUpdate }) {
+function AssigneeEditor({ card, canWrite, onUpdate }) {
   const [value, setValue] = useState(card.assignee || '')
   useEffect(() => { setValue(card.assignee || '') }, [card.id, card.assignee])
   const commit = nextValue => {
@@ -182,14 +200,35 @@ function AssigneeEditor({ card, canWrite, suggestions, onUpdate }) {
         onBlur={() => commit(value)}
         onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur() }}
       />
-      {canWrite && suggestions.length > 0 && <div className="kb-chips kb-assignee-suggestions" aria-label="Board members">
-        {suggestions.map(name => <button
-          key={name}
-          className="kb-chip"
+    </div>
+  )
+}
+
+function MemberAssigneeEditor({ card, canWrite, members, onUpdate }) {
+  const joined = (members || []).filter(member => !member.pending && member.host)
+  return (
+    <div className="kb-chips kb-assignee-picker" aria-label="Board members">
+      <button
+        className={`kb-chip${!card.assigneeHost && !card.assignee ? ' kb-on' : ''}`}
+        type="button"
+        disabled={!canWrite}
+        aria-pressed={!card.assigneeHost && !card.assignee}
+        onClick={() => canWrite && onUpdate({ assignee: '', assigneeHost: '' })}
+      >Unassigned</button>
+      {joined.map(member => {
+        const label = memberLabel(member)
+        const selected = card.assigneeHost
+          ? card.assigneeHost === member.host
+          : card.assignee === label
+        return <button
+          key={member.host}
+          className={`kb-chip${selected ? ' kb-on' : ''}`}
           type="button"
-          onClick={() => commit(name)}
-        >{name}</button>)}
-      </div>}
+          disabled={!canWrite}
+          aria-pressed={selected}
+          onClick={() => canWrite && onUpdate({ assignee: label, assigneeHost: member.host })}
+        >{label}</button>
+      })}
     </div>
   )
 }
@@ -240,20 +279,14 @@ function ChecklistEditor({ checklist, canWrite, onAdd, onToggle, onDelete }) {
   )
 }
 
-function ShareSheet({ boardId, share, onShared, onClose, beforeShare }) {
+function ShareSheet({ boardId, share, members, onMembersChange, onShared, onClose, beforeShare }) {
   const [handle, setHandle] = useState('')
   const [role, setRole] = useState('editor')
-  const [members, setMembers] = useState(null)
+  const [inviteLink, setInviteLink] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState(null) // {kind: 'ok'|'warn'|'error', text}
   const hosted = !!share?.hosted
   const sheetRef = useModalFocus(true, onClose)
-
-  useEffect(() => {
-    if (hosted) {
-      getMembers(share.oid).then(o => setMembers(o.members || {})).catch(() => setMembers(null))
-    }
-  }, [hosted, share?.oid])
 
   const start = async () => {
     setBusy(true); setNotice(null)
@@ -273,10 +306,10 @@ function ShareSheet({ boardId, share, onShared, onClose, beforeShare }) {
     setBusy(true); setNotice(null)
     try {
       const res = await inviteByHandle(share.oid, who, role)
-      setMembers(ms => ({
-        ...(ms || {}),
-        [res.host]: { role: res.role, name: who, pending: true },
-      }))
+      onMembersChange(ms => [
+        ...(ms || []).filter(member => member.host !== res.host),
+        { host: res.host || '', handle: res.handle || '', name: who, role: res.role, pending: true },
+      ])
       setHandle('')
       setNotice(res.delivery === 'delivered'
         ? { kind: 'ok', text: `Invited — it's waiting on their Möbius.` }
@@ -285,6 +318,27 @@ function ShareSheet({ boardId, share, onShared, onClose, beforeShare }) {
       setNotice({ kind: 'error', text: String(e?.message || e) })
     }
     setBusy(false)
+  }
+
+  const makeInviteLink = async () => {
+    if (busy) return
+    setBusy(true); setNotice(null)
+    try {
+      const res = await createInvite(share.oid, role)
+      setInviteLink(res.invite || '')
+      if (!res.invite) throw new Error('The invite link could not be created.')
+    } catch (e) {
+      setNotice({ kind: 'error', text: String(e?.message || e) })
+    }
+    setBusy(false)
+  }
+
+  const copyInviteLink = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) return
+      await navigator.clipboard.writeText(inviteLink)
+      setNotice({ kind: 'ok', text: 'Invite link copied.' })
+    } catch { /* the read-only field remains selectable for manual copy */ }
   }
 
   return (
@@ -319,24 +373,37 @@ function ShareSheet({ boardId, share, onShared, onClose, beforeShare }) {
               <div className="kb-chips kb-field-spaced" role="radiogroup" aria-label="Invitation role">
                 <button role="radio" aria-checked={role === 'editor'} className={`kb-chip${role === 'editor' ? ' kb-on' : ''}`} onClick={() => setRole('editor')}>Can edit</button>
                 <button role="radio" aria-checked={role === 'viewer'} className={`kb-chip${role === 'viewer' ? ' kb-on' : ''}`} onClick={() => setRole('viewer')}>View only</button>
-                <button className="kb-btn kb-btn-primary" disabled={busy || !handle.trim()} onClick={invite}>Invite</button>
               </div>
+              <button className="kb-btn kb-btn-primary kb-field-spaced" disabled={busy || !handle.trim()} onClick={invite}>Invite</button>
+            </div>
+            <div>
+              <h3>Share an invite</h3>
+              <button className="kb-btn kb-btn-quiet kb-field-spaced" disabled={busy} onClick={makeInviteLink}>
+                Create invite link
+              </button>
+              {inviteLink && <>
+                <div className="kb-inline-field kb-field-spaced">
+                  <input className="kb-input" readOnly value={inviteLink} aria-label="Invite link" />
+                  <button className="kb-btn kb-btn-quiet" onClick={copyInviteLink}>Copy</button>
+                </div>
+                <div className="kb-sub kb-field-spaced">Send this to any Möbius user — they paste it in Kanban to join.</div>
+              </>}
             </div>
             <div>
               <h3>People</h3>
               <div className="kb-people-list">
                 {members === null && <div className="kb-empty">Loading…</div>}
-                {members && Object.entries(members).map(([host, m]) => (
-                  <div key={host} className="kb-sheet-row kb-sheet-row-between">
+                {members && members.map((m, index) => (
+                  <div key={`${m.host || memberLabel(m)}-${index}`} className="kb-sheet-row kb-sheet-row-between">
                     <span className="kb-person-name">
-                      {m.name || host}{' '}
+                      {memberLabel(m)}{' '}
                       <span className="kb-sub">
-                        · {host === share.host ? 'you' : m.pending ? `invited · ${m.role}` : m.role}
+                        · {m.host === share.host ? 'you' : m.pending ? `invited · ${m.role}` : m.role}
                       </span>
                     </span>
-                    {host !== share.host && (
+                    {m.host !== share.host && (
                       <button className="kb-btn kb-btn-quiet kb-danger" onClick={async () => {
-                        try { await revokeMember(share.oid, host); setMembers(ms => { const n = { ...ms }; delete n[host]; return n }) } catch (e) { setNotice({ kind: 'error', text: String(e?.message || e) }) }
+                        try { await revokeMember(share.oid, m.host); onMembersChange(ms => (ms || []).filter(member => member.host !== m.host)) } catch (e) { setNotice({ kind: 'error', text: String(e?.message || e) }) }
                       }}>{m.pending ? 'Cancel invite' : 'Remove'}</button>
                     )}
                   </div>
@@ -419,7 +486,7 @@ export default function Board({
   const [filterText, setFilterText] = useState('')
   const [filterLabels, setFilterLabels] = useState([])
   const [switcherOpen, setSwitcherOpen] = useState(false)
-  const [memberNames, setMemberNames] = useState([])
+  const [members, setMembers] = useState(null)
   const [animateColumns, setAnimateColumns] = useState(true)
   const [queuedCount, setQueuedCount] = useState(0)
 
@@ -453,14 +520,25 @@ export default function Board({
 
   useEffect(() => {
     let alive = true
-    setMemberNames([])
+    setMembers(null)
     if (share?.hosted) {
       getMembers(share.oid).then(result => {
-        if (alive) setMemberNames(memberDisplayNames(result))
+        const next = memberRecords(result)
+        if (alive) setMembers(next || [])
       }).catch(() => {})
     }
     return () => { alive = false }
   }, [share?.hosted, share?.oid])
+
+  useEffect(() => {
+    if (!shareOpen || !share?.hosted) return undefined
+    let alive = true
+    getMembers(share.oid).then(result => {
+      const next = memberRecords(result)
+      if (alive) setMembers(next || [])
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [shareOpen, share?.hosted, share?.oid])
 
   useEffect(() => {
     let unsub = null
@@ -510,9 +588,9 @@ export default function Board({
             setBoard(normalized)
           }
         }
-        if (!share.hosted && state.object) {
-          const names = memberDisplayNames(state.object)
-          if (names.length) setMemberNames(names)
+        if (state.object) {
+          const nextMembers = memberRecords(state.object)
+          if (nextMembers) setMembers(nextMembers)
         }
         setSyncNote('')
       } catch (e) {
@@ -663,7 +741,7 @@ export default function Board({
     mutate({
       type: 'add-card',
       columnId: colId,
-      card: { id, title, notes: '', label: 'none', due: '', checklist: [], assignee: '', createdAt },
+      card: { id, title, notes: '', label: 'none', due: '', checklist: [], assignee: '', assigneeHost: '', createdAt },
     }, () => window.mobius?.signal?.('item_created', { type: 'card' }))
   }
 
@@ -1142,12 +1220,16 @@ export default function Board({
             </div>}
             <div>
               <h3>Assignee</h3>
-              <AssigneeEditor
-                card={openCard_}
-                canWrite={access.canWrite}
-                suggestions={share ? memberNames : []}
-                onUpdate={assignee => updateCard(openCard_.id, { assignee })}
-              />
+              {share ? <MemberAssigneeEditor
+                  card={openCard_}
+                  canWrite={access.canWrite}
+                  members={members}
+                  onUpdate={patch => updateCard(openCard_.id, patch)}
+                /> : <AssigneeEditor
+                  card={openCard_}
+                  canWrite={access.canWrite}
+                  onUpdate={assignee => updateCard(openCard_.id, { assignee })}
+                />}
             </div>
             {access.canWrite && openCardColumn && <div>
               <h3>Position</h3>
@@ -1202,6 +1284,8 @@ export default function Board({
         <ShareSheet
           boardId={boardId}
           share={share}
+          members={members}
+          onMembersChange={setMembers}
           onShared={onShared}
           beforeShare={async () => {
             await writeChain.current.catch(() => {})

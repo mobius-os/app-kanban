@@ -54,6 +54,7 @@ export function normalizeBoard(doc) {
     if (!card || typeof card !== 'object' || Array.isArray(card)) continue
     if (!isIsoDate(card.due)) card.due = ''
     if (typeof card.assignee !== 'string') card.assignee = ''
+    if (typeof card.assigneeHost !== 'string') card.assigneeHost = ''
     if (!Array.isArray(card.checklist)) card.checklist = []
     card.checklist = card.checklist.filter(item => item && typeof item === 'object' && !Array.isArray(item))
     card.checklist.forEach((item, index) => {

@@ -4,7 +4,9 @@ import assert from 'node:assert/strict'
 import {
   acceptInvitation,
   configureSync,
+  createInvite,
   deleteSharedObject,
+  joinWithInvite,
   leaveBoard,
   loadShareMap,
   pushSharedOp,
@@ -20,6 +22,25 @@ test.afterEach(() => {
 test('malformed sharing metadata becomes an empty map', async () => {
   globalThis.window = { mobius: { storage: { async get() { return [] } } } }
   assert.deepEqual(await loadShareMap(), { byBoard: {} })
+})
+
+test('creating a shareable invite omits the address from the request', async () => {
+  configureSync('test-token')
+  let request = null
+  globalThis.fetch = async (url, options) => {
+    request = { url, options, body: JSON.parse(options.body) }
+    return new Response(JSON.stringify({
+      invite: 'object@host.example#secret',
+      role: 'viewer',
+      expires_at: '2026-09-08T00:00:00Z',
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+
+  const result = await createInvite('object', 'viewer')
+  assert.equal(request.url, '/api/common/objects/object/invites')
+  assert.equal(request.options.method, 'POST')
+  assert.deepEqual(request.body, { role: 'viewer' })
+  assert.equal(result.invite, 'object@host.example#secret')
 })
 
 test('share-map updates retry conflicts without dropping a concurrent board', async () => {
@@ -71,6 +92,35 @@ test('accepting an invitation durably saves both the board and membership', asyn
     path: 'shared.json',
     value: { byBoard: { 'remote-id': { oid: 'remote-id', host: 'peer.example', role: 'viewer', version: 0 } } },
     options: { ifNoneMatch: true },
+  })
+})
+
+test('joining with an invite sends the capability string and sets up the local board', async () => {
+  configureSync('test-token')
+  const writes = []
+  globalThis.window = { mobius: { storage: {
+    async durableWrite(path, value, options = {}) {
+      writes.push({ path, value: structuredClone(value), options })
+    },
+    async getWithVersion() { return { value: null, version: null } },
+  } } }
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/common/objects/join')
+    assert.deepEqual(JSON.parse(options.body), {
+      app: 'kanban',
+      invite: 'remote-id@peer.example#secret',
+    })
+    return new Response(JSON.stringify({
+      membership: { id: 'remote-id', host: 'peer.example', role: 'editor', label: 'Joined' },
+      doc: { v: 1, title: 'Joined', columns: [], cards: {} },
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+
+  const result = await joinWithInvite('  remote-id@peer.example#secret  ')
+  assert.equal(result.boardId, 'remote-id')
+  assert.equal(writes[0].path, 'boards/remote-id.json')
+  assert.deepEqual(writes[1].value.byBoard['remote-id'], {
+    oid: 'remote-id', host: 'peer.example', role: 'editor', version: 0,
   })
 })
 

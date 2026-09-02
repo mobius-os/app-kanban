@@ -70,6 +70,7 @@ test('due-date face copy is compact and timezone-independent', () => {
 test('assignee initials and avatar colors are compact and deterministic', () => {
   assert.equal(assigneeInitials('  Ada Lovelace  '), 'AL')
   assert.equal(assigneeInitials('Prince'), 'PR')
+  assert.equal(assigneeInitials('@hamza'), 'HA')
   assert.equal(assigneeInitials(''), '')
   assert.equal(assigneeHue('Ada Lovelace'), assigneeHue('Ada Lovelace'))
   assert.ok(assigneeHue('Ada Lovelace') >= 0 && assigneeHue('Ada Lovelace') < 360)

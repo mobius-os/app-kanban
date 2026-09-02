@@ -425,6 +425,9 @@ export const CSS = `
   .kb-sheet-grab { width: 40px; height: 4px; border-radius: 2px; background: var(--border); margin: 0 auto; }
   .kb-sheet-row { display: flex; align-items: center; gap: 10px; }
   .kb-sheet-row-between { justify-content: space-between; }
+  .kb-inline-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .kb-inline-field .kb-input { flex: 1 1 auto; min-width: 0; }
+  .kb-inline-field .kb-btn { flex: 0 0 auto; }
   .kb-sheet h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
   .kb-field-spaced { margin-top: 8px; }
   .kb-people-list { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
@@ -482,6 +485,7 @@ export const CSS = `
   .kb-chip:focus-visible { outline: 2px solid var(--accent); }
   .kb-assignee-editor { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
   .kb-assignee-suggestions .kb-chip { min-height: 44px; padding-block: 8px; }
+  .kb-assignee-picker { margin-top: 8px; }
   .kb-position-actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .kb-position-actions .kb-btn { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; }
   .kb-position-actions svg { width: 17px; height: 17px; }
@@ -566,6 +570,8 @@ export const CSS = `
   .kb-invite-tile { cursor: default; border-color: color-mix(in srgb, var(--accent) 58%, var(--border)); }
   .kb-invite-tile .kb-tile-title { padding-right: 0; }
   .kb-invite-tile .kb-composer-row { margin-top: auto; }
+  .kb-join-tile .kb-tile-title { padding-right: 0; }
+  .kb-join-open { cursor: default; gap: 6px; }
   .kb-home-empty {
     grid-column: 1 / -1;
     text-align: center;
