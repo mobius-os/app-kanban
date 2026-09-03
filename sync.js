@@ -7,7 +7,7 @@
 // the op to the freshest shared doc, write with expected_version, and on
 // conflict re-apply the op to the returned doc and retry.
 
-import { normalizeBoard, boardPath } from './storage.js'
+import { normalizeBoard, boardPath, getBoard } from './storage.js'
 
 const API = '/api/common/objects'
 const store = () => window.mobius?.storage
@@ -72,7 +72,11 @@ export async function removeShareEntry(boardId) {
 
 // ---- owner actions
 
-export async function shareBoard(boardId, doc) {
+export async function shareBoard(boardId) {
+  // Publishing establishes a new authority, so snapshot storage immediately
+  // before the request rather than trusting a possibly optimistic render prop.
+  const doc = await getBoard(boardId)
+  if (!doc) throw new Error('The latest board could not be read for sharing.')
   const res = await _json(await fetch(API, {
     method: 'POST',
     headers: _auth,
@@ -85,17 +89,32 @@ export async function shareBoard(boardId, doc) {
   return entry
 }
 
-export async function inviteByHandle(oid, address, role) {
+export async function createInvite(oid, role, address) {
+  const body = { role }
+  if (typeof address === 'string' && address.trim()) body.address = address.trim()
   return _json(await fetch(`${API}/${oid}/invites`, {
     method: 'POST',
     headers: _auth,
-    body: JSON.stringify({ role, address }),
+    body: JSON.stringify(body),
   }))
+}
+
+export async function inviteByHandle(oid, address, role) {
+  return createInvite(oid, role, address)
 }
 
 export async function listInvitations() {
   const res = await _json(await fetch(`${API}/invitations`, { headers: _auth }))
   return res.invitations || []
+}
+
+async function saveJoinedBoard(res) {
+  const m = res.membership
+  const doc = normalizeBoard(res.doc) || { v: 1, title: m.label || 'Shared board', columns: [], cards: {} }
+  const boardId = m.id
+  await store().durableWrite(boardPath(boardId), doc)
+  await saveShareEntry(boardId, { oid: m.id, host: m.host, role: m.role, version: 0 })
+  return { boardId, doc }
 }
 
 export async function acceptInvitation(inv) {
@@ -104,12 +123,16 @@ export async function acceptInvitation(inv) {
     headers: _auth,
     body: JSON.stringify({ app: 'kanban', host: inv.host, id: inv.id, label: inv.label }),
   }))
-  const m = res.membership
-  const doc = normalizeBoard(res.doc) || { v: 1, title: m.label || 'Shared board', columns: [], cards: {} }
-  const boardId = m.id
-  await store().durableWrite(boardPath(boardId), doc)
-  await saveShareEntry(boardId, { oid: m.id, host: m.host, role: m.role, version: 0 })
-  return { boardId, doc }
+  return saveJoinedBoard(res)
+}
+
+export async function joinWithInvite(invite) {
+  const res = await _json(await fetch(`${API}/join`, {
+    method: 'POST',
+    headers: _auth,
+    body: JSON.stringify({ app: 'kanban', invite: String(invite || '').trim() }),
+  }))
+  return saveJoinedBoard(res)
 }
 
 export async function declineInvitation(inv) {
@@ -153,6 +176,17 @@ export async function pullShared(entry, sinceVersion) {
     { headers: _auth },
   ))
   return res // {status, version, doc?, object?}
+}
+
+// A shared object's poll is its only authority. The app-storage document is an
+// offline cache and its unversioned subscription must never replace a polled
+// document while sharing is active.
+export function cacheSubscriptionIsAuthoritative(shareEntry) {
+  return !shareEntry
+}
+
+export function sharedCursorAfterWrite(landed) {
+  return landed && Number.isFinite(landed.version) ? landed.version : -1
 }
 
 // Apply `op` to the shared doc with CAS retry. Returns the doc that landed.

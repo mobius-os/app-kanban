@@ -12,6 +12,8 @@
 //   the fields it knows about. A newer app version's extra fields survive a
 //   round-trip through an older app version.
 
+import { COLUMN_COLOR_KEYS, defaultColumnColor, isIsoDate } from './domain.js'
+
 export const SCHEMA_V = 1
 
 export const uid = () =>
@@ -26,9 +28,9 @@ export function newBoardDoc(title) {
     title: title || 'New board',
     createdAt: new Date().toISOString(),
     columns: [
-      { id: uid(), name: 'To do', cardIds: [] },
-      { id: uid(), name: 'In progress', cardIds: [] },
-      { id: uid(), name: 'Done', cardIds: [] },
+      { id: uid(), name: 'To do', color: null, cardIds: [] },
+      { id: uid(), name: 'In progress', color: 'blue', cardIds: [] },
+      { id: uid(), name: 'Done', color: 'green', cardIds: [] },
     ],
     cards: {},
   }
@@ -42,11 +44,69 @@ export function normalizeBoard(doc) {
   if (!Array.isArray(doc.columns)) doc.columns = []
   doc.columns = doc.columns.filter(col => col && typeof col === 'object' && !Array.isArray(col))
   if (!doc.cards || typeof doc.cards !== 'object' || Array.isArray(doc.cards)) doc.cards = {}
-  for (const col of doc.columns) {
+  doc.columns.forEach((col, index) => {
     if (!Array.isArray(col.cardIds)) col.cardIds = []
     if (typeof col.name !== 'string') col.name = 'List'
+    if (!Object.hasOwn(col, 'color')) col.color = defaultColumnColor(index)
+    else if (col.color !== null && !COLUMN_COLOR_KEYS.includes(col.color)) col.color = null
+  })
+  for (const [cardId, card] of Object.entries(doc.cards)) {
+    if (!card || typeof card !== 'object' || Array.isArray(card)) continue
+    if (!isIsoDate(card.due)) card.due = ''
+    if (typeof card.assignee !== 'string') card.assignee = ''
+    if (typeof card.assigneeHost !== 'string') card.assigneeHost = ''
+    if (!Array.isArray(card.checklist)) card.checklist = []
+    card.checklist = card.checklist.filter(item => item && typeof item === 'object' && !Array.isArray(item))
+    card.checklist.forEach((item, index) => {
+      if (typeof item.id !== 'string' || !item.id) item.id = `${cardId}-check-${index}`
+      if (typeof item.text !== 'string') item.text = ''
+      item.done = item.done === true
+    })
   }
   return doc
+}
+
+export function normalizeUi(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { lastBoardId: null }
+  if (typeof value.lastBoardId !== 'string' || !value.lastBoardId) value.lastBoardId = null
+  return value
+}
+
+export async function loadUi() {
+  return normalizeUi(await store()?.get('ui.json'))
+}
+
+let lastBoardWriteChain = Promise.resolve()
+let lastRequestedBoardId = null
+
+async function writeLatestLastBoardId() {
+  const s = store()
+  if (!s) return null
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { value, version } = await s.getWithVersion('ui.json')
+    const next = structuredClone(normalizeUi(value))
+    const requested = lastRequestedBoardId
+    next.lastBoardId = requested
+    try {
+      await s.durableWrite('ui.json', next, version
+        ? { ifMatch: version }
+        : { ifNoneMatch: true })
+      // A newer navigation choice may have arrived while this write was in
+      // flight. Keep ownership of the serial chain until that newest id lands.
+      if (requested === lastRequestedBoardId) return next
+    } catch (error) {
+      if (error?.code === 'conflict') continue
+      throw error
+    }
+  }
+  throw new Error('Could not save the last-opened board after repeated conflicts.')
+}
+
+export function saveLastBoardId(lastBoardId) {
+  lastRequestedBoardId = lastBoardId
+  const task = lastBoardWriteChain.catch(() => {}).then(writeLatestLastBoardId)
+  lastBoardWriteChain = task
+  return task
 }
 
 export const boardPath = id => `boards/${id}.json`
@@ -69,6 +129,10 @@ export async function listBoards() {
         title: doc.title,
         cardCount: Object.keys(doc.cards).length,
         columnCount: doc.columns.length,
+        columnPreview: doc.columns.slice(0, 5).map(column => ({
+          count: column.cardIds.length,
+          color: column.color,
+        })),
         createdAt: String(doc.createdAt || ''),
       })
     }
@@ -110,7 +174,12 @@ export async function casMutate(id, op, onError) {
       const base = normalizeBoard(value)
       if (!base) return null
       const next = op(base) || base
-      await s.durableWrite(boardPath(id), next, { ifMatch: version })
+      const result = await s.durableWrite(boardPath(id), next, { ifMatch: version })
+      if (result === 'queued' || result?.status === 'queued' || result?.queued === true) {
+        const queued = new Error('The storage runtime queued a blind CAS write instead of confirming it.')
+        queued.code = 'queued'
+        throw queued
+      }
       return next
     } catch (e) {
       if (e?.code === 'conflict') continue
@@ -148,12 +217,25 @@ export async function migrateLegacy() {
     doc.id = doc.id && typeof doc.id === 'string' ? doc.id : 'migrated-v0'
     doc.createdAt = doc.createdAt || new Date().toISOString()
     try {
-      await s.durableWrite(boardPath(doc.id), doc, { ifNoneMatch: true })
+      const result = await s.durableWrite(boardPath(doc.id), doc, { ifNoneMatch: true })
+      if (result === 'queued' || result?.status === 'queued' || result?.queued === true) {
+        throw new Error('Legacy migration is waiting for a durable connection.')
+      }
     } catch (e) {
-      if (e?.code !== 'conflict') throw e // already migrated elsewhere
+      if (e?.code !== 'conflict') throw e
+    }
+    // A conflict is success only when the destination is demonstrably our
+    // migration. Otherwise deleting the legacy source would discard its data.
+    const saved = normalizeBoard(await s.get(boardPath(doc.id)))
+    if (!saved || saved.createdAt !== doc.createdAt || saved.title !== doc.title) {
+      throw new Error('Legacy board migration could not verify its destination.')
     }
     await s.remove('board.json')
-  } catch {
+  } catch (error) {
     // Non-fatal: legacy board stays readable on next launch.
+    window.mobius?.signal?.('error', {
+      message: String(error?.message || error),
+      source: 'legacy-migration',
+    })
   }
 }
