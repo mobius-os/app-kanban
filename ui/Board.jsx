@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, Plus, Share, Trash } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, casMutate, boardPath, normalizeBoard } from '../storage.js'
-import { pullShared, pushSharedOp, createInvite, inviteByHandle, getMembers, revokeMember, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite } from '../sync.js'
+import { pullShared, pushSharedOp, createInvite, inviteByHandle, getMembers, revokeMember, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
 import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { useModalFocus } from './modalFocus.js'
@@ -502,12 +502,24 @@ export default function Board({
   const filtersRef = useRef({ text: filterText, labels: filterLabels })
   const replayingRef = useRef(false)
   const pendingEntriesRef = useRef([])
+  const lastInteractionAtRef = useRef(Date.now())
   const cardSheetRef = useModalFocus(Boolean(openCardId), () => setOpenCardId(null))
   const columnConfirmRef = useModalFocus(Boolean(confirmDeleteCol), () => setConfirmDeleteCol(null))
   boardRef.current = board
   shareRef.current = share
   onlineRef.current = online
   filtersRef.current = { text: filterText, labels: filterLabels }
+
+  useEffect(() => {
+    if (!share) return undefined
+    const markInteraction = () => { lastInteractionAtRef.current = Date.now() }
+    window.addEventListener('pointerdown', markInteraction, { passive: true })
+    window.addEventListener('keydown', markInteraction)
+    return () => {
+      window.removeEventListener('pointerdown', markInteraction)
+      window.removeEventListener('keydown', markInteraction)
+    }
+  }, [Boolean(share)])
 
   useEffect(() => {
     if (!board || !animateColumns) return undefined
@@ -577,9 +589,21 @@ export default function Board({
     if (!share) return undefined
     let alive = true
     let pulling = false
+    let timer = null
     versionRef.current = -1
+    lastInteractionAtRef.current = Date.now()
+    const schedule = () => {
+      if (!alive) return
+      clearTimeout(timer)
+      timer = setTimeout(tick, sharedBoardPollDelay(lastInteractionAtRef.current))
+    }
     const tick = async () => {
-      if (!alive || pulling || document.hidden) return
+      if (!alive) return
+      if (document.hidden) return
+      if (pulling) {
+        schedule()
+        return
+      }
       pulling = true
       try {
         const state = await pullShared(share, versionRef.current)
@@ -604,13 +628,18 @@ export default function Board({
         setSyncNote('Reconnecting — showing your last copy')
       } finally {
         pulling = false
+        schedule()
       }
     }
     tick()
-    const t = setInterval(tick, 3000)
-    const onVis = () => { if (!document.hidden) tick() }
+    const onVis = () => {
+      if (document.hidden) return
+      lastInteractionAtRef.current = Date.now()
+      clearTimeout(timer)
+      tick()
+    }
     document.addEventListener('visibilitychange', onVis)
-    return () => { alive = false; clearInterval(t); document.removeEventListener('visibilitychange', onVis) }
+    return () => { alive = false; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis) }
   }, [share, boardId])
 
   const mutate = useCallback((operation, onCommit) => {

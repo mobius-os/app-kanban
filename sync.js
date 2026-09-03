@@ -178,6 +178,12 @@ export async function pullShared(entry, sinceVersion) {
   return res // {status, version, doc?, object?}
 }
 
+// A board the owner is actively using should feel collaborative; an idle one
+// can relax to the former cadence without creating a permanent fast poll.
+export function sharedBoardPollDelay(lastInteractionAt, now = Date.now()) {
+  return now - lastInteractionAt < 15_000 ? 1000 : 3000
+}
+
 // A shared object's poll is its only authority. The app-storage document is an
 // offline cache and its unversioned subscription must never replace a polled
 // document while sharing is active.

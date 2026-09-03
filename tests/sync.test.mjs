@@ -12,7 +12,13 @@ import {
   pushSharedOp,
   removeShareEntry,
   shareBoard,
+  sharedBoardPollDelay,
 } from '../sync.js'
+
+test('an actively viewed shared board polls quickly and relaxes when idle', () => {
+  assert.equal(sharedBoardPollDelay(10_000, 20_000), 1000)
+  assert.equal(sharedBoardPollDelay(1_000, 20_000), 3000)
+})
 
 test.afterEach(() => {
   delete globalThis.window
