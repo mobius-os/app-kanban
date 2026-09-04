@@ -34,6 +34,59 @@ export const CSS = `
   }
   .kb-board-header { white-space: nowrap; }
   .kb-header-spacer { flex: 1 1 auto; min-width: 0; }
+  .kb-presence {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border: none;
+    border-radius: 12px;
+    padding: 5px 8px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 12px/1 var(--font);
+    cursor: pointer;
+  }
+  .kb-presence-stack { display: inline-flex; align-items: center; padding-left: 6px; }
+  .kb-member-avatar {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--surface);
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: -0.02em;
+  }
+  .kb-member-avatar-small { width: 30px; height: 30px; margin-left: -6px; font-size: 10px; }
+  .kb-presence-dot {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--surface);
+    border-radius: 999px;
+    background: #22c55e;
+  }
+  .kb-presence-more {
+    width: 30px;
+    height: 30px;
+    margin-left: -6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--surface);
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+  }
   .kb-title-wrap { display: flex; flex-direction: column; min-width: 0; flex: 1; }
   .kb-title {
     font-size: 20px;
@@ -267,6 +320,17 @@ export const CSS = `
   .kb-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .kb-card.kb-readonly { cursor: pointer; }
   .kb-card-title { font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+  .kb-card-notes {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
   .kb-label { width: 34px; height: 4px; border-radius: 2px; margin-bottom: 7px; }
   .kb-card-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
   .kb-card-meta-spacer { flex: 1 1 auto; min-width: 0; }
@@ -431,7 +495,12 @@ export const CSS = `
   .kb-sheet h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
   .kb-field-spaced { margin-top: 8px; }
   .kb-people-list { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
-  .kb-person-name { min-width: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+  .kb-person-row { min-height: 52px; display: flex; align-items: center; gap: 10px; }
+  .kb-person-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .kb-person-name { min-width: 0; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .kb-person-meta { color: var(--muted); font-size: 11.5px; line-height: 1.3; overflow-wrap: anywhere; }
+  .kb-person-row .kb-btn { flex: 0 0 auto; }
+  .kb-invite-notice { margin-top: 8px; text-align: left; }
   .kb-date-input { color-scheme: light dark; }
   .kb-checklist { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
   .kb-check-item { display: flex; align-items: center; gap: 6px; min-height: 44px; }
@@ -614,6 +683,7 @@ export const CSS = `
 
   .kb-switcher-button:not(:disabled):active,
   .kb-switcher-row:not(:disabled):active,
+  .kb-presence:not(:disabled):active,
   .kb-iconbtn:not(:disabled):active,
   .kb-filter-dot-btn:not(:disabled):active,
   .kb-addcard:not(:disabled):active,
@@ -643,9 +713,24 @@ export const CSS = `
 
   @media (max-width: 640px) {
     .kb-col { width: min(86vw, 320px); }
+    .kb-swatches { flex-wrap: nowrap; gap: 4px; overflow-x: auto; padding-block: 2px; }
+    .kb-input, .kb-col-name { font-size: 16px; }
+    .kb-sheet {
+      top: max(8px, env(safe-area-inset-top));
+      bottom: auto;
+      width: calc(100% - 16px);
+      max-height: calc(100dvh - max(16px, env(safe-area-inset-top)));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding-bottom: max(16px, env(safe-area-inset-bottom));
+      overscroll-behavior: contain;
+      scroll-padding-bottom: 96px;
+    }
     .kb-board-header .kb-offline { display: none; }
     .kb-board-header .kb-header-spacer { display: none; }
     .kb-board-header .kb-switcher-wrap { flex: 1 1 0; }
+    .kb-presence { padding-inline: 3px; }
+    .kb-presence-label { display: none; }
     .kb-switcher-button { width: 100%; max-width: 100%; }
     .kb-filterbar { align-items: stretch; flex-direction: column; gap: 4px; }
     .kb-filter-input { flex-basis: auto; }

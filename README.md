@@ -11,6 +11,8 @@ A clean, mobile-first kanban board for Möbius.
 - Concurrent-edit safe: every change merges through compare-and-swap writes,
   and open boards repaint live when someone else edits, so two people editing
   the same board don't overwrite each other.
+- Invitations appear without a refresh, shared boards show who is active, and
+  cards include a compact two-line preview of their notes.
 
 Each local board lives in its own app-storage document. Sharing metadata and
 offline copies of joined boards stay in the same app-scoped storage boundary.

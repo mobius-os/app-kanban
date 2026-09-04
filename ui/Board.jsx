@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, Plus, Share, Trash } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, casMutate, boardPath, normalizeBoard } from '../storage.js'
-import { pullShared, pushSharedOp, createInvite, inviteByHandle, getMembers, revokeMember, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite } from '../sync.js'
+import { pullShared, pushSharedOp, createInvite, inviteByHandle, getMembers, revokeMember, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
 import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { useModalFocus } from './modalFocus.js'
@@ -31,6 +31,7 @@ function Card({ card, lifted, onOpen, onDragStart, canWrite }) {
   const progress = checklistProgress(card.checklist)
   const assignee = card.assignee?.trim()
   const avatar = assignee ? assigneeAvatar(assignee) : null
+  const notePreview = String(card.notes || '').trim()
   return (
     <div
       className={`kb-card${lifted ? ' kb-lifted' : ''}${canWrite ? '' : ' kb-readonly'}`}
@@ -50,6 +51,7 @@ function Card({ card, lifted, onOpen, onDragStart, canWrite }) {
         />
       )}
       <div className="kb-card-title">{card.title}</div>
+      {notePreview && <div className="kb-card-notes">{notePreview}</div>}
       {(dueStatus || progress.total > 0 || avatar) && <div className="kb-card-meta">
         {dueStatus && <span className={`kb-due kb-due-${dueStatus}`}>{formatDueDate(card.due)}</span>}
         {progress.total > 0 && <div className="kb-check-progress">
@@ -100,6 +102,7 @@ function memberRecords(metadata) {
       name: String(value.name || value.displayName || value.display_name || '').trim(),
       role: String(value.role || '').trim(),
       pending: value.pending === true,
+      active: value.active === true,
     }
   })
 }
@@ -108,6 +111,35 @@ function memberLabel(member) {
   const handle = String(member?.handle || '').trim().replace(/^@/u, '')
   if (handle) return `@${handle}`
   return String(member?.name || member?.host || '').trim()
+}
+
+function MemberAvatar({ member, small = false }) {
+  const label = memberLabel(member) || 'Board member'
+  const avatar = assigneeAvatar(label)
+  return <span
+    className={`kb-member-avatar${small ? ' kb-member-avatar-small' : ''}`}
+    style={{ background: avatar.background, color: avatar.color }}
+    title={label}
+    aria-label={label}
+  >
+    {avatar.initials}
+    {member.active && <span className="kb-presence-dot" aria-label="Active now" />}
+  </span>
+}
+
+function BoardPresence({ members, onOpen }) {
+  const active = (members || []).filter(member => member.active && !member.pending)
+  if (!active.length) return null
+  const visible = active.slice(0, 3)
+  const remainder = active.length - visible.length
+  const summary = active.length === 1 ? `${memberLabel(active[0])} is active` : `${active.length} people are active`
+  return <button className="kb-presence" type="button" onClick={onOpen} aria-label={`${summary}. Open sharing.`}>
+    <span className="kb-presence-stack" aria-hidden="true">
+      {visible.map(member => <MemberAvatar key={member.host || memberLabel(member)} member={member} small />)}
+      {remainder > 0 && <span className="kb-presence-more">+{remainder}</span>}
+    </span>
+    <span className="kb-presence-label">{active.length === 1 ? '1 active' : `${active.length} active`}</span>
+  </button>
 }
 
 function BoardSwitcher({ board, boardId, boards, shareMap, canWrite, open, onOpenChange, onRename, onSelect, onCreate }) {
@@ -279,17 +311,19 @@ function ChecklistEditor({ checklist, canWrite, onAdd, onToggle, onDelete }) {
   )
 }
 
-function ShareSheet({ boardId, share, members, onMembersChange, onShared, onClose, beforeShare }) {
+function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers, onShared, onClose, beforeShare }) {
   const [handle, setHandle] = useState('')
   const [role, setRole] = useState('editor')
   const [inviteLink, setInviteLink] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [busyAction, setBusyAction] = useState(null)
   const [notice, setNotice] = useState(null) // {kind: 'ok'|'warn'|'error', text}
+  const [inviteNotice, setInviteNotice] = useState(null)
+  const busy = busyAction !== null
   const hosted = !!share?.hosted
   const sheetRef = useModalFocus(true, onClose)
 
   const start = async () => {
-    setBusy(true); setNotice(null)
+    setBusyAction('sharing'); setNotice(null)
     try {
       await beforeShare?.()
       const entry = await shareBoard(boardId)
@@ -297,13 +331,13 @@ function ShareSheet({ boardId, share, members, onMembersChange, onShared, onClos
     } catch (e) {
       setNotice({ kind: 'error', text: String(e?.message || e) })
     }
-    setBusy(false)
+    setBusyAction(null)
   }
 
   const invite = async () => {
     const who = handle.trim()
     if (!who || busy) return
-    setBusy(true); setNotice(null)
+    setBusyAction('inviting'); setInviteNotice(null)
     try {
       const res = await inviteByHandle(share.oid, who, role)
       onMembersChange(ms => [
@@ -311,18 +345,19 @@ function ShareSheet({ boardId, share, members, onMembersChange, onShared, onClos
         { host: res.host || '', handle: res.handle || '', name: who, role: res.role, pending: true },
       ])
       setHandle('')
-      setNotice(res.delivery === 'delivered'
+      await onRefreshMembers?.().catch(() => {})
+      setInviteNotice(res.delivery === 'delivered'
         ? { kind: 'ok', text: `Invited — it's waiting on their Möbius.` }
         : { kind: 'warn', text: `Invited, but their Möbius couldn't be reached right now. They'll be let in automatically when their app connects.` })
     } catch (e) {
-      setNotice({ kind: 'error', text: String(e?.message || e) })
+      setInviteNotice({ kind: 'error', text: String(e?.message || e) })
     }
-    setBusy(false)
+    setBusyAction(null)
   }
 
   const makeInviteLink = async () => {
     if (busy) return
-    setBusy(true); setNotice(null)
+    setBusyAction('link'); setNotice(null)
     try {
       const res = await createInvite(share.oid, role)
       setInviteLink(res.invite || '')
@@ -330,7 +365,7 @@ function ShareSheet({ boardId, share, members, onMembersChange, onShared, onClos
     } catch (e) {
       setNotice({ kind: 'error', text: String(e?.message || e) })
     }
-    setBusy(false)
+    setBusyAction(null)
   }
 
   const copyInviteLink = async () => {
@@ -354,7 +389,7 @@ function ShareSheet({ boardId, share, members, onMembersChange, onShared, onClos
               edit it live from their own Möbius.
             </div>
             <button className="kb-btn kb-btn-primary" disabled={busy} onClick={start}>
-              Turn on sharing
+              {busyAction === 'sharing' ? 'Turning on sharing…' : 'Turn on sharing'}
             </button>
           </>
         )}
@@ -366,20 +401,25 @@ function ShareSheet({ boardId, share, members, onMembersChange, onShared, onClos
                 className="kb-input kb-field-spaced"
                 placeholder="@handle or handle@their-mobius-host"
                 value={handle}
-                onChange={e => setHandle(e.target.value)}
+                onChange={e => { setHandle(e.target.value); setInviteNotice(null) }}
                 onKeyDown={e => { if (e.key === 'Enter') invite() }}
                 aria-label="Invite handle"
               />
               <div className="kb-chips kb-field-spaced" role="radiogroup" aria-label="Invitation role">
-                <button role="radio" aria-checked={role === 'editor'} className={`kb-chip${role === 'editor' ? ' kb-on' : ''}`} onClick={() => setRole('editor')}>Can edit</button>
-                <button role="radio" aria-checked={role === 'viewer'} className={`kb-chip${role === 'viewer' ? ' kb-on' : ''}`} onClick={() => setRole('viewer')}>View only</button>
+                <button role="radio" aria-checked={role === 'editor'} disabled={busy} className={`kb-chip${role === 'editor' ? ' kb-on' : ''}`} onClick={() => setRole('editor')}>Can edit</button>
+                <button role="radio" aria-checked={role === 'viewer'} disabled={busy} className={`kb-chip${role === 'viewer' ? ' kb-on' : ''}`} onClick={() => setRole('viewer')}>View only</button>
               </div>
-              <button className="kb-btn kb-btn-primary kb-field-spaced" disabled={busy || !handle.trim()} onClick={invite}>Invite</button>
+              <button className="kb-btn kb-btn-primary kb-field-spaced" disabled={busy || !handle.trim()} onClick={invite}>
+                {busyAction === 'inviting' ? 'Sending invite…' : 'Send invite'}
+              </button>
+              {inviteNotice && <div className={`kb-notice kb-invite-notice kb-${inviteNotice.kind}`} role={inviteNotice.kind === 'error' ? 'alert' : 'status'} aria-live="polite">
+                {inviteNotice.text}
+              </div>}
             </div>
             <div>
               <h3>Share an invite</h3>
               <button className="kb-btn kb-btn-quiet kb-field-spaced" disabled={busy} onClick={makeInviteLink}>
-                Create invite link
+                {busyAction === 'link' ? 'Creating invite link…' : 'Create invite link'}
               </button>
               {inviteLink && <>
                 <div className="kb-inline-field kb-field-spaced">
@@ -392,13 +432,15 @@ function ShareSheet({ boardId, share, members, onMembersChange, onShared, onClos
             <div>
               <h3>People</h3>
               <div className="kb-people-list">
-                {members === null && <div className="kb-empty">Loading…</div>}
+                {members === null && <div className="kb-empty">Loading people…</div>}
                 {members && members.map((m, index) => (
-                  <div key={`${m.host || memberLabel(m)}-${index}`} className="kb-sheet-row kb-sheet-row-between">
-                    <span className="kb-person-name">
-                      {memberLabel(m)}{' '}
-                      <span className="kb-sub">
-                        · {m.host === share.host ? 'you' : m.pending ? `invited · ${m.role}` : m.role}
+                  <div key={`${m.host || memberLabel(m)}-${index}`} className="kb-person-row">
+                    <MemberAvatar member={m} />
+                    <span className="kb-person-copy">
+                      <span className="kb-person-name">{memberLabel(m)}</span>
+                      <span className="kb-person-meta">
+                        {m.host === share.host ? 'You' : m.pending ? 'Invite pending' : m.active ? 'Active now' : 'Not active'}
+                        <span aria-hidden="true"> · </span>{m.role === 'viewer' ? 'Can view' : 'Can edit'}
                       </span>
                     </span>
                     {m.host !== share.host && (
@@ -408,6 +450,7 @@ function ShareSheet({ boardId, share, members, onMembersChange, onShared, onClos
                     )}
                   </div>
                 ))}
+                {members && members.length === 0 && <div className="kb-empty kb-empty-left">No one has joined this board yet.</div>}
               </div>
             </div>
           </>
@@ -502,12 +545,32 @@ export default function Board({
   const filtersRef = useRef({ text: filterText, labels: filterLabels })
   const replayingRef = useRef(false)
   const pendingEntriesRef = useRef([])
+  const lastInteractionAtRef = useRef(Date.now())
   const cardSheetRef = useModalFocus(Boolean(openCardId), () => setOpenCardId(null))
   const columnConfirmRef = useModalFocus(Boolean(confirmDeleteCol), () => setConfirmDeleteCol(null))
   boardRef.current = board
   shareRef.current = share
   onlineRef.current = online
   filtersRef.current = { text: filterText, labels: filterLabels }
+
+  const refreshMembers = useCallback(async () => {
+    if (!share?.hosted) return []
+    const result = await getMembers(share.oid)
+    const next = memberRecords(result) || []
+    setMembers(next)
+    return next
+  }, [share?.hosted, share?.oid])
+
+  useEffect(() => {
+    if (!share) return undefined
+    const markInteraction = () => { lastInteractionAtRef.current = Date.now() }
+    window.addEventListener('pointerdown', markInteraction, { passive: true })
+    window.addEventListener('keydown', markInteraction)
+    return () => {
+      window.removeEventListener('pointerdown', markInteraction)
+      window.removeEventListener('keydown', markInteraction)
+    }
+  }, [Boolean(share)])
 
   useEffect(() => {
     if (!board || !animateColumns) return undefined
@@ -520,26 +583,18 @@ export default function Board({
   }, [!!board, animateColumns])
 
   useEffect(() => {
-    let alive = true
     setMembers(null)
     if (share?.hosted) {
-      getMembers(share.oid).then(result => {
-        const next = memberRecords(result)
-        if (alive) setMembers(next || [])
-      }).catch(() => {})
+      refreshMembers().catch(() => {})
     }
-    return () => { alive = false }
-  }, [share?.hosted, share?.oid])
+    return undefined
+  }, [share?.hosted, share?.oid, refreshMembers])
 
   useEffect(() => {
     if (!shareOpen || !share?.hosted) return undefined
-    let alive = true
-    getMembers(share.oid).then(result => {
-      const next = memberRecords(result)
-      if (alive) setMembers(next || [])
-    }).catch(() => {})
-    return () => { alive = false }
-  }, [shareOpen, share?.hosted, share?.oid])
+    refreshMembers().catch(() => {})
+    return undefined
+  }, [shareOpen, share?.hosted, share?.oid, refreshMembers])
 
   useEffect(() => {
     let unsub = null
@@ -577,9 +632,21 @@ export default function Board({
     if (!share) return undefined
     let alive = true
     let pulling = false
+    let timer = null
     versionRef.current = -1
+    lastInteractionAtRef.current = Date.now()
+    const schedule = () => {
+      if (!alive) return
+      clearTimeout(timer)
+      timer = setTimeout(tick, sharedBoardPollDelay(lastInteractionAtRef.current))
+    }
     const tick = async () => {
-      if (!alive || pulling || document.hidden) return
+      if (!alive) return
+      if (document.hidden) return
+      if (pulling) {
+        schedule()
+        return
+      }
       pulling = true
       try {
         const state = await pullShared(share, versionRef.current)
@@ -604,13 +671,18 @@ export default function Board({
         setSyncNote('Reconnecting — showing your last copy')
       } finally {
         pulling = false
+        schedule()
       }
     }
     tick()
-    const t = setInterval(tick, 3000)
-    const onVis = () => { if (!document.hidden) tick() }
+    const onVis = () => {
+      if (document.hidden) return
+      lastInteractionAtRef.current = Date.now()
+      clearTimeout(timer)
+      tick()
+    }
     document.addEventListener('visibilitychange', onVis)
-    return () => { alive = false; clearInterval(t); document.removeEventListener('visibilitychange', onVis) }
+    return () => { alive = false; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis) }
   }, [share, boardId])
 
   const mutate = useCallback((operation, onCommit) => {
@@ -1034,6 +1106,7 @@ export default function Board({
           {queuedCount > 0 ? `${queuedCount} change${queuedCount === 1 ? '' : 's'} pending` : access.status}
         </span>}
         {syncNote && <span className="kb-offline">{syncNote}</span>}
+        {share && <BoardPresence members={members} onOpen={() => setShareOpen(true)} />}
         <button
           className={`kb-iconbtn${hasFilters ? ' kb-filter-active' : ''}`}
           aria-label="Filter cards"
@@ -1327,6 +1400,7 @@ export default function Board({
           share={share}
           members={members}
           onMembersChange={setMembers}
+          onRefreshMembers={refreshMembers}
           onShared={onShared}
           beforeShare={async () => {
             await writeChain.current.catch(() => {})
