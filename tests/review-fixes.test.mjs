@@ -164,6 +164,14 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(boardSource, /<h3>Position<\/h3>/)
   assert.match(boardSource, /Move up/)
   assert.match(boardSource, /Move down/)
+  assert.ok(
+    boardSource.indexOf('<h3>Checklist</h3>') < boardSource.indexOf('className="kb-property-list kb-mobile-only"'),
+    'the phone checklist stays between notes and card properties',
+  )
+  assert.match(boardSource, /className="kb-card-danger-zone kb-mobile-only"/)
+  assert.match(boardSource, /className="kb-btn kb-btn-danger kb-delete-card"/)
+  assert.match(boardSource, /className="kb-btn kb-btn-primary kb-card-toolbar-done"/)
+  assert.doesNotMatch(boardSource, /kb-card-more-heading/)
   assert.match(boardSource, /role="radiogroup"/)
   assert.match(boardSource, /role="radio" aria-checked=/)
   assert.match(boardSource, /<BoardPresence members=\{members\}/)
@@ -175,6 +183,7 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(focusSource, /event\.key !== 'Tab'/)
   assert.match(focusSource, /opener\.focus\(\)/)
   assert.match(themeSource, /\.kb-position-actions \.kb-btn[^}]*min-height: 44px/s)
+  assert.match(themeSource, /\.kb-status-seg button \{[^}]*min-height: 44px/s)
   assert.match(themeSource, /\.kb-col-reorder \.kb-col-action \{ width: 36px; height: 36px; \}/)
   assert.match(themeSource, /\.kb-input, \.kb-col-name \{ font-size: 16px; \}/)
   assert.match(themeSource, /\.kb-swatches \{ flex-wrap: nowrap; gap: 4px; overflow-x: auto;/)
