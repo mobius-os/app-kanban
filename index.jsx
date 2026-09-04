@@ -18,13 +18,24 @@ export default function App({ appId, token }) {
 
   configureSync(token)
 
+  const refreshInvitations = useCallback(async () => {
+    try {
+      const next = await listInvitations()
+      setInvitations(next)
+      return next
+    } catch {
+      // Invitations are additive UI: a temporary federation failure must not
+      // disturb local boards or erase an invitation already on screen.
+      return null
+    }
+  }, [])
+
   const refresh = useCallback(async () => {
     try {
       const [b, map] = await Promise.all([listBoards(), loadShareMap()])
       setBoards(b)
       setShareMap(map)
-      // Invitations are additive UI: their fetch failing must not blank boards.
-      listInvitations().then(setInvitations).catch(() => {})
+      refreshInvitations()
       if (!readySignalled.current) {
         readySignalled.current = true
         window.mobius?.signal?.('app_ready', { item_count: b.length })
@@ -35,7 +46,7 @@ export default function App({ appId, token }) {
       window.mobius?.signal?.('error', { message: String(e?.message || e), source: 'list' })
       return null
     }
-  }, [])
+  }, [refreshInvitations])
 
   useEffect(() => {
     ;(async () => {
@@ -56,7 +67,7 @@ export default function App({ appId, token }) {
           openBoardIdRef.current = ui.lastBoardId
           saveLastBoardId(ui.lastBoardId).catch(() => {})
         }
-        listInvitations().then(setInvitations).catch(() => {})
+        refreshInvitations()
         if (!readySignalled.current) {
           readySignalled.current = true
           window.mobius?.signal?.('app_ready', { item_count: b.length })
@@ -72,7 +83,19 @@ export default function App({ appId, token }) {
     })()
     const t = setInterval(() => setOnline(window.mobius?.online !== false), 3000)
     return () => clearInterval(t)
-  }, [refresh])
+  }, [refresh, refreshInvitations])
+
+  useEffect(() => {
+    const check = () => {
+      if (!document.hidden && window.mobius?.online !== false) refreshInvitations()
+    }
+    const timer = setInterval(check, 3000)
+    document.addEventListener('visibilitychange', check)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', check)
+    }
+  }, [refreshInvitations])
 
   const showBoard = useCallback(id => {
     openBoardIdRef.current = id
