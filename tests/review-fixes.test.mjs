@@ -184,7 +184,7 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(focusSource, /opener\.focus\(\)/)
   assert.match(themeSource, /\.kb-position-actions \.kb-btn[^}]*min-height: 44px/s)
   assert.match(themeSource, /\.kb-status-seg button \{[^}]*min-height: 44px/s)
-  assert.match(themeSource, /\.kb-col-reorder \.kb-col-action \{ width: 36px; height: 36px; \}/)
+  assert.match(themeSource, /\.kb-col-reorder \.kb-col-action \{ width: 44px; height: 44px; \}/)
   assert.match(themeSource, /\.kb-input, \.kb-col-name \{ font-size: 16px; \}/)
   assert.match(themeSource, /\.kb-swatches \{ flex-wrap: nowrap; gap: 4px; overflow-x: auto;/)
   assert.match(themeSource, /\.kb-sheet \{[^}]*top: max\(8px, env\(safe-area-inset-top\)\)/s)

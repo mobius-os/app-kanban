@@ -24,3 +24,17 @@ Run `npm test` for the storage, sharing, access, and migration contracts.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Invitations across deployments
+
+With an account-aware Möbius server, a bare account handle invites every
+currently registered deployment for that account. Full addresses still invite
+one deployment. People and presence group these verified deployments into one
+collaborator, and **Remove from all** revokes the whole invited group. Identical
+display handles alone never merge memberships.
+
+This is a snapshot of the account's deployments at invitation time: invite the
+handle again after a new deployment is added, using the existing role. Delivery
+failures are reported per deployment; **Send invite** retries pending delivery,
+not an automatic background job. Invitations do not move the board's hosting
+location or synchronize unrelated Social messages.
