@@ -238,31 +238,67 @@ function AssigneeEditor({ card, canWrite, onUpdate }) {
 
 function MemberAssigneeEditor({ card, canWrite, members, onUpdate }) {
   const joined = (members || []).filter(member => !member.pending && member.host)
+  const selectedHost = card.assigneeHost || joined.find(member => memberLabel(member) === card.assignee)?.host || ''
   return (
-    <div className="kb-chips kb-assignee-picker" aria-label="Board members">
-      <button
-        className={`kb-chip${!card.assigneeHost && !card.assignee ? ' kb-on' : ''}`}
-        type="button"
+    <div className="kb-assignee-picker">
+      <select
+        className="kb-input kb-assignee-select"
+        value={selectedHost}
+        aria-label="Card assignee"
         disabled={!canWrite}
-        aria-pressed={!card.assigneeHost && !card.assignee}
-        onClick={() => canWrite && onUpdate({ assignee: '', assigneeHost: '' })}
-      >Unassigned</button>
-      {joined.map(member => {
-        const label = memberLabel(member)
-        const selected = card.assigneeHost
-          ? card.assigneeHost === member.host
-          : card.assignee === label
-        return <button
-          key={member.host}
-          className={`kb-chip${selected ? ' kb-on' : ''}`}
+        onChange={event => {
+          const member = joined.find(candidate => candidate.host === event.target.value)
+          onUpdate(member
+            ? { assignee: memberLabel(member), assigneeHost: member.host }
+            : { assignee: '', assigneeHost: '' })
+        }}
+      >
+        <option value="">Unassigned</option>
+        {joined.map(member => <option key={member.host} value={member.host}>{memberLabel(member)}</option>)}
+      </select>
+      <div className="kb-chips kb-assignee-chips" aria-label="Board members">
+        <button
+          className={`kb-chip${!card.assigneeHost && !card.assignee ? ' kb-on' : ''}`}
           type="button"
           disabled={!canWrite}
-          aria-pressed={selected}
-          onClick={() => canWrite && onUpdate({ assignee: label, assigneeHost: member.host })}
-        >{label}</button>
-      })}
+          aria-pressed={!card.assigneeHost && !card.assignee}
+          onClick={() => canWrite && onUpdate({ assignee: '', assigneeHost: '' })}
+        >Unassigned</button>
+        {joined.map(member => {
+          const label = memberLabel(member)
+          const selected = card.assigneeHost
+            ? card.assigneeHost === member.host
+            : card.assignee === label
+          return <button
+            key={member.host}
+            className={`kb-chip${selected ? ' kb-on' : ''}`}
+            type="button"
+            disabled={!canWrite}
+            aria-pressed={selected}
+            onClick={() => canWrite && onUpdate({ assignee: label, assigneeHost: member.host })}
+          >{label}</button>
+        })}
+      </div>
     </div>
   )
+}
+
+function AutoGrowTextarea({ valueKey, onCommit, ...props }) {
+  const textareaRef = useRef(null)
+  const resize = useCallback(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${textarea.scrollHeight}px`
+  }, [])
+  useEffect(resize, [resize, valueKey])
+  return <textarea
+    {...props}
+    ref={textareaRef}
+    onInput={resize}
+    onFocus={resize}
+    onBlur={event => onCommit?.(event.target.value)}
+  />
 }
 
 function ChecklistEditor({ checklist, canWrite, onAdd, onToggle, onDelete }) {
@@ -1276,38 +1312,34 @@ export default function Board({
       {openCard_ && (
         <>
           <div className="kb-scrim" onClick={() => setOpenCardId(null)} />
-          <div ref={cardSheetRef} tabIndex={-1} className="kb-sheet" role="dialog" aria-modal="true" aria-label="Card details">
-            <div className="kb-sheet-grab" />
-            <textarea
-              className="kb-input"
-              rows={2}
+          <div ref={cardSheetRef} tabIndex={-1} className="kb-sheet kb-card-sheet" role="dialog" aria-modal="true" aria-label="Card details">
+            <div className="kb-card-toolbar kb-mobile-only">
+              <span className="kb-card-toolbar-title">Card details</span>
+              <button className="kb-btn kb-btn-primary kb-card-toolbar-done" type="button" onClick={() => setOpenCardId(null)}>Done</button>
+            </div>
+            <div className="kb-sheet-grab kb-desktop-only" />
+            <AutoGrowTextarea
+              className="kb-input kb-title-input"
+              rows={1}
               defaultValue={openCard_.title}
               key={`st-${openCard_.id}`}
+              valueKey={`${openCard_.id}:${openCard_.title}`}
               aria-label="Card title"
               readOnly={!access.canWrite}
-              onBlur={e => { const v = e.target.value.trim(); if (v && v !== openCard_.title) updateCard(openCard_.id, { title: v }) }}
+              onCommit={value => { const next = value.trim(); if (next && next !== openCard_.title) updateCard(openCard_.id, { title: next }) }}
             />
-            <textarea
-              className="kb-input"
-              rows={3}
+            <AutoGrowTextarea
+              className="kb-input kb-notes-input"
+              rows={2}
               placeholder="Notes…"
               defaultValue={openCard_.notes}
               key={`sn-${openCard_.id}`}
+              valueKey={`${openCard_.id}:${openCard_.notes}`}
               aria-label="Card notes"
               readOnly={!access.canWrite}
-              onBlur={e => { if (e.target.value !== openCard_.notes) updateCard(openCard_.id, { notes: e.target.value }) }}
+              onCommit={value => { if (value !== openCard_.notes) updateCard(openCard_.id, { notes: value }) }}
             />
-            <div>
-              <h3>Due date</h3>
-              <input
-                className="kb-input kb-date-input kb-field-spaced"
-                type="date"
-                value={openCard_.due || ''}
-                aria-label="Card due date"
-                readOnly={!access.canWrite}
-                onChange={event => updateCard(openCard_.id, { due: event.target.value })}
-              />
-            </div>
+
             <div>
               <h3>Checklist</h3>
               <ChecklistEditor
@@ -1318,7 +1350,103 @@ export default function Board({
                 onDelete={itemId => removeCheckItem(openCard_.id, itemId)}
               />
             </div>
-            {access.canWrite && <div>
+
+            <div className="kb-property-list kb-mobile-only">
+              <div className="kb-property-row">
+                <span className="kb-property-label">Due date</span>
+                <input
+                  className="kb-property-control kb-date-input"
+                  type="date"
+                  value={openCard_.due || ''}
+                  aria-label="Card due date"
+                  readOnly={!access.canWrite}
+                  onChange={event => updateCard(openCard_.id, { due: event.target.value })}
+                />
+              </div>
+              <div className="kb-property-row">
+                <span className="kb-property-label">Assignee</span>
+                {share ? <MemberAssigneeEditor
+                    card={openCard_}
+                    canWrite={access.canWrite}
+                    members={members}
+                    onUpdate={patch => updateCard(openCard_.id, patch)}
+                  /> : <AssigneeEditor
+                    card={openCard_}
+                    canWrite={access.canWrite}
+                    onUpdate={assignee => updateCard(openCard_.id, { assignee })}
+                  />}
+              </div>
+              {access.canWrite && <details className="kb-property-details">
+                <summary className="kb-property-row">
+                  <span className="kb-property-label">Label</span>
+                  <span className="kb-property-value">
+                    {(openCard_.label || 'none') === 'none'
+                      ? 'None'
+                      : <><span className="kb-property-dot" style={{ background: LABELS[openCard_.label] }} />{openCard_.label}</>}
+                    <ChevronDown aria-hidden="true" />
+                  </span>
+                </summary>
+                <div className="kb-swatches kb-property-options">
+                  {Object.entries(LABELS).map(([name, color]) => (
+                    <button
+                      key={name}
+                      className={`kb-swatch${name === 'none' ? ' kb-none' : ''}${(openCard_.label || 'none') === name ? ' kb-on' : ''}`}
+                      style={name === 'none' ? undefined : { background: color }}
+                      aria-label={`Label ${name}`}
+                      onClick={() => updateCard(openCard_.id, { label: name })}
+                    />
+                  ))}
+                </div>
+              </details>}
+            </div>
+
+            {openCardColumn && <div className="kb-status-block kb-mobile-only">
+              <h3>Status</h3>
+              {access.canWrite ? <div className="kb-status-seg" role="radiogroup" aria-label="Card status">
+                {board.columns.map(column => {
+                  const here = column.cardIds.includes(openCard_.id)
+                  return <button
+                    key={column.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={here}
+                    className={here ? 'is-active' : ''}
+                    onClick={() => { if (!here) { moveCard(openCard_.id, column.id, null); setOpenCardId(null) } }}
+                  >{column.name}</button>
+                })}
+              </div> : <div className="kb-property-row kb-status-readonly">
+                <span className="kb-property-label">Status</span>
+                <span className="kb-property-value">{openCardColumn.name}</span>
+              </div>}
+            </div>}
+
+            <div className="kb-card-meta-grid kb-desktop-only">
+              <div className="kb-card-field">
+                <h3>Due date</h3>
+                <input
+                  className="kb-input kb-date-input kb-field-spaced"
+                  type="date"
+                  value={openCard_.due || ''}
+                  aria-label="Card due date"
+                  readOnly={!access.canWrite}
+                  onChange={event => updateCard(openCard_.id, { due: event.target.value })}
+                />
+              </div>
+              <div className="kb-card-field">
+                <h3>Assignee</h3>
+                {share ? <MemberAssigneeEditor
+                    card={openCard_}
+                    canWrite={access.canWrite}
+                    members={members}
+                    onUpdate={patch => updateCard(openCard_.id, patch)}
+                  /> : <AssigneeEditor
+                    card={openCard_}
+                    canWrite={access.canWrite}
+                    onUpdate={assignee => updateCard(openCard_.id, { assignee })}
+                  />}
+              </div>
+            </div>
+            {access.canWrite && <div className="kb-desktop-only">
               <h3>Label</h3>
               <div className="kb-swatches kb-field-spaced">
                 {Object.entries(LABELS).map(([name, color]) => (
@@ -1332,20 +1460,7 @@ export default function Board({
                 ))}
               </div>
             </div>}
-            <div>
-              <h3>Assignee</h3>
-              {share ? <MemberAssigneeEditor
-                  card={openCard_}
-                  canWrite={access.canWrite}
-                  members={members}
-                  onUpdate={patch => updateCard(openCard_.id, patch)}
-                /> : <AssigneeEditor
-                  card={openCard_}
-                  canWrite={access.canWrite}
-                  onUpdate={assignee => updateCard(openCard_.id, { assignee })}
-                />}
-            </div>
-            {access.canWrite && openCardColumn && <div>
+            {access.canWrite && openCardColumn && <div className="kb-desktop-only">
               <h3>Position</h3>
               <div className="kb-position-actions kb-field-spaced">
                 <button
@@ -1366,7 +1481,7 @@ export default function Board({
                 </button>
               </div>
             </div>}
-            {access.canWrite && <div>
+            {access.canWrite && <div className="kb-desktop-only">
               <h3>Move to</h3>
               <div className="kb-chips kb-field-spaced">
                 {board.columns.map(c => {
@@ -1384,7 +1499,14 @@ export default function Board({
                 })}
               </div>
             </div>}
-            <div className="kb-sheet-row kb-sheet-row-between">
+            {access.canWrite && <div className="kb-card-danger-zone kb-mobile-only">
+              <button className="kb-btn kb-btn-danger kb-delete-card" onClick={() => deleteCard(openCard_.id)}>
+                <Trash aria-hidden="true" />
+                Delete card
+              </button>
+            </div>}
+
+            <div className="kb-sheet-row kb-sheet-row-between kb-card-actions kb-desktop-only">
               {access.canWrite && <button className="kb-btn kb-btn-quiet kb-danger" onClick={() => deleteCard(openCard_.id)}>
                 Delete card
               </button>}
