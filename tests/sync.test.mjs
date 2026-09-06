@@ -204,3 +204,60 @@ test('shared deletion and leave retries treat an already-absent object as succes
     options: { ifMatch: 'v1' },
   })
 })
+
+test('verified collaborators appear once without merging lookalike handles', async () => {
+  const { groupCollaborators } = await import('../sync.js')
+  const result = groupCollaborators([
+    { host: 'one.example', handle: 'ana', collaborator_id: 'verified-group', pending: true, active: false },
+    { host: 'two.example', handle: 'ana', collaborator_id: 'verified-group', pending: false, active: true },
+    { host: 'other.example', handle: 'ana', pending: true },
+  ])
+  assert.equal(result.length, 2)
+  assert.deepEqual(result[0].hosts, ['one.example', 'two.example'])
+  assert.equal(result[0].pending, false)
+  assert.equal(result[0].active, true)
+})
+
+test('delivery feedback distinguishes partial success and never promises an automatic retry', async () => {
+  const { inviteDeliveryNotice } = await import('../sync.js')
+  const partial = inviteDeliveryNotice({ recipients: [
+    { delivery: 'delivered' }, { delivery: 'unreachable' },
+  ] })
+  assert.equal(partial.kind, 'warn')
+  assert.match(partial.text, /1 of 2/)
+  assert.match(partial.text, /Send again/)
+  assert.equal(inviteDeliveryNotice({ delivery: 'unreachable' }).kind, 'warn')
+  assert.equal(inviteDeliveryNotice({ delivery: 'delivered' }).kind, 'ok')
+  assert.match(inviteDeliveryNotice({ recipients: [{ delivery: 'delivered' }, { delivery: 'delivered' }] }).text, /all 2/)
+})
+
+test('remove collaborator explicitly revokes all grouped deployments, but legacy members stay scoped', async () => {
+  const { revokeCollaborator } = await import('../sync.js')
+  configureSync('test-token')
+  const urls = []
+  globalThis.fetch = async (url, options) => {
+    urls.push(url)
+    assert.equal(options.method, 'DELETE')
+    return new Response(JSON.stringify({ status: 'revoked' }), { status: 200 })
+  }
+  await revokeCollaborator('oid', { host: 'one.example', collaborator_id: 'group' })
+  await revokeCollaborator('oid', { host: 'legacy.example' })
+  assert.deepEqual(urls, [
+    '/api/common/objects/oid/members/one.example?all_deployments=true',
+    '/api/common/objects/oid/members/legacy.example',
+  ])
+})
+
+test('assignees on any verified deployment retain their collaborator selection without changing the card', async () => {
+  const { groupCollaborators, collaboratorForHost } = await import('../sync.js')
+  const members = groupCollaborators([
+    { host: 'one.example', collaborator_id: 'group', pending: false },
+    { host: 'two.example', collaborator_id: 'group', pending: false },
+    { host: 'other.example', pending: false },
+  ])
+  const card = { assignee: 'Test member', assigneeHost: 'two.example' }
+  assert.equal(collaboratorForHost(members, card.assigneeHost).host, 'one.example')
+  assert.equal(card.assigneeHost, 'two.example')
+  assert.equal(collaboratorForHost(members, 'other.example').host, 'other.example')
+  assert.equal(collaboratorForHost(members, 'unknown.example'), undefined)
+})

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, Plus, Share, Trash } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, casMutate, boardPath, normalizeBoard } from '../storage.js'
-import { pullShared, pushSharedOp, createInvite, inviteByHandle, getMembers, revokeMember, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite, sharedBoardPollDelay } from '../sync.js'
+import { pullShared, pushSharedOp, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
 import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { useModalFocus } from './modalFocus.js'
@@ -91,7 +91,7 @@ function memberRecords(metadata) {
     : members && typeof members === 'object'
       ? Object.entries(members).map(([host, member]) => [host, member, false])
       : []
-  return entries.map(([key, member, fromArray]) => {
+  return groupCollaborators(entries.map(([key, member, fromArray]) => {
     if (typeof member === 'string') {
       return { host: fromArray ? '' : key, handle: '', name: member.trim(), role: '', pending: false }
     }
@@ -101,10 +101,11 @@ function memberRecords(metadata) {
       handle: String(value.handle || '').trim(),
       name: String(value.name || value.displayName || value.display_name || '').trim(),
       role: String(value.role || '').trim(),
+      collaborator_id: value.collaborator_id || null,
       pending: value.pending === true,
       active: value.active === true,
     }
-  })
+  }))
 }
 
 function memberLabel(member) {
@@ -168,7 +169,12 @@ function BoardSwitcher({ board, boardId, boards, shareMap, canWrite, open, onOpe
         <div className="kb-scrim kb-switcher-scrim" onClick={() => onOpenChange(false)} />
         <div ref={panelRef} tabIndex={-1} className="kb-sheet kb-switcher-panel" role="dialog" aria-modal="true" aria-label="Switch boards">
           <div className="kb-sheet-grab" />
-          <input
+          <div className="kb-sheet-row kb-sheet-row-between">
+            <h3>Switch boards</h3>
+            <button className="kb-btn kb-btn-quiet" onClick={() => onOpenChange(false)}>Close</button>
+          </div>
+          <label className="kb-field-label" htmlFor="kb-current-board-name">Board name</label>
+          <input id="kb-current-board-name"
             className="kb-input kb-switcher-title"
             defaultValue={board.title}
             key={`switch-title-${board.title}`}
@@ -238,7 +244,9 @@ function AssigneeEditor({ card, canWrite, onUpdate }) {
 
 function MemberAssigneeEditor({ card, canWrite, members, onUpdate }) {
   const joined = (members || []).filter(member => !member.pending && member.host)
-  const selectedHost = card.assigneeHost || joined.find(member => memberLabel(member) === card.assignee)?.host || ''
+  const selectedHost = card.assigneeHost
+    ? collaboratorForHost(joined, card.assigneeHost)?.host || card.assigneeHost
+    : joined.find(member => memberLabel(member) === card.assignee)?.host || ''
   return (
     <div className="kb-assignee-picker">
       <select
@@ -266,9 +274,7 @@ function MemberAssigneeEditor({ card, canWrite, members, onUpdate }) {
         >Unassigned</button>
         {joined.map(member => {
           const label = memberLabel(member)
-          const selected = card.assigneeHost
-            ? card.assigneeHost === member.host
-            : card.assignee === label
+          const selected = selectedHost === member.host
           return <button
             key={member.host}
             className={`kb-chip${selected ? ' kb-on' : ''}`}
@@ -376,15 +382,15 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
     setBusyAction('inviting'); setInviteNotice(null)
     try {
       const res = await inviteByHandle(share.oid, who, role)
-      onMembersChange(ms => [
+      if (res.members) onMembersChange(memberRecords(res))
+      else onMembersChange(ms => [
         ...(ms || []).filter(member => member.host !== res.host),
-        { host: res.host || '', handle: res.handle || '', name: who, role: res.role, pending: true },
+        { host: res.host, handle: '', name: who, role: res.role, pending: true },
       ])
-      setHandle('')
+      const deliveryNotice = inviteDeliveryNotice(res)
+      if (deliveryNotice.kind === 'ok') setHandle('')
+      setInviteNotice(deliveryNotice)
       await onRefreshMembers?.().catch(() => {})
-      setInviteNotice(res.delivery === 'delivered'
-        ? { kind: 'ok', text: `Invited — it's waiting on their Möbius.` }
-        : { kind: 'warn', text: `Invited, but their Möbius couldn't be reached right now. They'll be let in automatically when their app connects.` })
     } catch (e) {
       setInviteNotice({ kind: 'error', text: String(e?.message || e) })
     }
@@ -433,6 +439,7 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
           <>
             <div>
               <h3>Invite someone</h3>
+              <div className="kb-sub kb-field-spaced">Use their Möbius account handle to invite every currently linked deployment. A full address invites just that deployment.</div>
               <input
                 className="kb-input kb-field-spaced"
                 placeholder="@handle or handle@their-mobius-host"
@@ -477,12 +484,13 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
                       <span className="kb-person-meta">
                         {m.host === share.host ? 'You' : m.pending ? 'Invite pending' : m.active ? 'Active now' : 'Not active'}
                         <span aria-hidden="true"> · </span>{m.role === 'viewer' ? 'Can view' : 'Can edit'}
+                        {m.hosts?.length > 1 && <> · {m.hosts.length} deployments</>}
                       </span>
                     </span>
                     {m.host !== share.host && (
-                      <button className="kb-btn kb-btn-quiet kb-danger" onClick={async () => {
-                        try { await revokeMember(share.oid, m.host); onMembersChange(ms => (ms || []).filter(member => member.host !== m.host)) } catch (e) { setNotice({ kind: 'error', text: String(e?.message || e) }) }
-                      }}>{m.pending ? 'Cancel invite' : 'Remove'}</button>
+                      <button className="kb-btn kb-btn-quiet kb-danger" title={m.collaborator_id ? 'Remove access from all invited deployments' : 'Remove access'} onClick={async () => {
+                        try { await revokeCollaborator(share.oid, m); onMembersChange(ms => (ms || []).filter(member => member.host !== m.host)) } catch (e) { setNotice({ kind: 'error', text: String(e?.message || e) }) }
+                      }}>{m.hosts?.length > 1 ? (m.pending ? 'Cancel all' : 'Remove from all') : (m.pending ? 'Cancel invite' : 'Remove')}</button>
                     )}
                   </div>
                 ))}
@@ -1156,6 +1164,22 @@ export default function Board({
         </button>
       </div>
       <div className="kb-divider" />
+      {board.columns.length > 1 && <nav className="kb-list-nav" aria-label="Jump to list">
+        {board.columns.map(column => <button
+          key={column.id}
+          className="kb-list-jump"
+          aria-label={`Go to list ${column.name}`}
+          onClick={() => {
+            const lane = Array.from(boardScrollRef.current?.children || [])
+              .find(element => element.dataset.colId === column.id)
+            lane?.scrollIntoView({ block: 'nearest', inline: 'start', behavior: 'auto' })
+          }}
+        >
+          <span className="kb-col-status" aria-hidden="true" style={{ background: LABELS[column.color] || 'var(--muted)' }} />
+          <span className="kb-list-jump-name">{column.name}</span>
+          <span className="kb-list-jump-count">{column.cardIds.length}</span>
+        </button>)}
+      </nav>}
       {filtersOpen && <div className="kb-filterbar" aria-label="Card filters">
         <input
           className="kb-input kb-filter-input"
@@ -1170,7 +1194,7 @@ export default function Board({
             const active = filterLabels.includes(name)
             return <button
               key={name}
-              className={`kb-filter-dot-btn${active ? ' kb-on' : ''}`}
+              className={`kb-filter-label-btn${active ? ' kb-on' : ''}`}
               aria-label={name === 'none' ? 'Filter unlabeled cards' : `Filter ${name} cards`}
               aria-pressed={active}
               onClick={() => setFilterLabels(labels =>
@@ -1181,9 +1205,11 @@ export default function Board({
                 className={`kb-filter-dot${name === 'none' ? ' kb-none' : ''}`}
                 style={name === 'none' ? undefined : { background: color }}
               />
+              <span>{name === 'none' ? 'Unlabeled' : name}</span>
             </button>
           })}
         </div>
+        {hasFilters && <button className="kb-btn kb-btn-quiet kb-clear-filters" onClick={() => { setFilterText(''); setFilterLabels([]) }}>Clear filters</button>}
       </div>}
       <div className={`kb-board${animateColumns ? ' kb-board-enter' : ''}${board.columns.length === 0 ? ' kb-board-empty' : ''}`} ref={boardScrollRef}>
         {board.columns.length === 0 && <div className="kb-empty-board-state">

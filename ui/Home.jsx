@@ -51,7 +51,8 @@ function JoinInviteTile({ onJoin }) {
         />
         <button className="kb-btn kb-btn-primary" disabled={busy || !invite.trim()} onClick={submit}>Join</button>
       </div>
-      {error && <div className="kb-notice kb-error">{error}</div>}
+      <button className="kb-btn kb-btn-quiet kb-join-cancel" disabled={busy} onClick={close}>Cancel</button>
+      {error && <div className="kb-notice kb-error" role="alert">{error}</div>}
     </div>
   )
 }

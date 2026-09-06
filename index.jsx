@@ -11,6 +11,8 @@ export default function App({ appId, token }) {
   const [invitations, setInvitations] = useState([])
   const [openId, setOpenId] = useState(null)
   const [resolved, setResolved] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   const [online, setOnline] = useState(() => window.mobius?.online !== false)
   const navRef = useRef(null)
   const openBoardIdRef = useRef(null)
@@ -34,6 +36,7 @@ export default function App({ appId, token }) {
     try {
       const [b, map] = await Promise.all([listBoards(), loadShareMap()])
       setBoards(b)
+      setLoadError(false)
       setShareMap(map)
       refreshInvitations()
       if (!readySignalled.current) {
@@ -42,7 +45,7 @@ export default function App({ appId, token }) {
       }
       return b
     } catch (e) {
-      setBoards([])
+      setLoadError(true)
       window.mobius?.signal?.('error', { message: String(e?.message || e), source: 'list' })
       return null
     }
@@ -50,8 +53,8 @@ export default function App({ appId, token }) {
 
   useEffect(() => {
     ;(async () => {
-      await migrateLegacy()
       try {
+        await migrateLegacy()
         let [b, map, ui] = await Promise.all([listBoards(), loadShareMap(), loadUi()])
         // First run: seed one board so the app is immediately useful.
         if (b.length === 0) {
@@ -59,6 +62,7 @@ export default function App({ appId, token }) {
           b = await listBoards()
         }
         setBoards(b)
+        setLoadError(false)
         setShareMap(map)
         if (ui.lastBoardId && b.some(board => board.id === ui.lastBoardId)) {
           // This is intentionally plain state, not nav.open: system Back from
@@ -73,7 +77,7 @@ export default function App({ appId, token }) {
           window.mobius?.signal?.('app_ready', { item_count: b.length })
         }
       } catch (e) {
-        setBoards([])
+        setLoadError(true)
         window.mobius?.signal?.('error', { message: String(e?.message || e), source: 'initial-load' })
       } finally {
         // The loading root remains the only rendered view until the launch
@@ -83,7 +87,7 @@ export default function App({ appId, token }) {
     })()
     const t = setInterval(() => setOnline(window.mobius?.online !== false), 3000)
     return () => clearInterval(t)
-  }, [refresh, refreshInvitations])
+  }, [refresh, refreshInvitations, loadAttempt])
 
   useEffect(() => {
     const check = () => {
@@ -225,6 +229,15 @@ export default function App({ appId, token }) {
   return (
     <div className="kb-root">
       <style>{CSS}</style>
+      {resolved && loadError && <section className="kb-load-error" role="alert">
+        <h2>Boards couldn’t be loaded</h2>
+        <p>{boards ? 'Your last loaded boards are still here. Try refreshing the list.' : 'We couldn’t read your boards. Try again to load them.'}</p>
+        <button className="kb-btn kb-btn-primary" onClick={() => {
+          setLoadError(false)
+          if (boards === null) { setResolved(false); setLoadAttempt(attempt => attempt + 1) }
+          else refresh()
+        }}>Try again</button>
+      </section>}
       {!resolved ? null : openId ? (
         <Board
           key={openId}

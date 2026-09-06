@@ -146,8 +146,45 @@ export async function getMembers(oid) {
   return _json(await fetch(`${API}/${oid}/members`, { headers: _auth }))
 }
 
-export async function revokeMember(oid, host) {
-  return _json(await fetch(`${API}/${oid}/members/${encodeURIComponent(host)}`, {
+// Older servers return one host; account-aware servers return per-deployment
+// delivery results. Keep the result honest during independently timed upgrades.
+export function inviteDeliveryNotice(result) {
+  const deliveries = result.recipients || [{ host: result.host, delivery: result.delivery }]
+  const delivered = deliveries.filter(item => item.delivery === 'delivered').length
+  if (delivered === deliveries.length) {
+    return { kind: 'ok', text: deliveries.length > 1
+      ? `Invitation delivered to all ${deliveries.length} linked deployments.`
+      : 'Invitation delivered — it is waiting on their Möbius.' }
+  }
+  return { kind: 'warn', text: delivered
+    ? `Invitation delivered to ${delivered} of ${deliveries.length} deployments. Some could not be reached. Send again to retry delivery.`
+    : 'Access is ready, but the invitation could not be delivered. Send again when their Möbius is reachable.' }
+}
+
+export function groupCollaborators(members) {
+  const groups = new Map()
+  for (const member of members) {
+    // Never group by handle: unverified peers can use identical display names.
+    const key = member.collaborator_id || member.host || member
+    const existing = groups.get(key)
+    if (!existing) {
+      groups.set(key, { ...member, hosts: [member.host] })
+    } else {
+      existing.hosts.push(member.host)
+      existing.pending = existing.pending && member.pending
+      existing.active = existing.active || member.active
+    }
+  }
+  return [...groups.values()]
+}
+
+export function collaboratorForHost(members, host) {
+  return members.find(member => member.host === host || member.hosts?.includes(host))
+}
+
+export async function revokeCollaborator(oid, member) {
+  const scope = member.collaborator_id ? '?all_deployments=true' : ''
+  return _json(await fetch(`${API}/${oid}/members/${encodeURIComponent(member.host)}${scope}`, {
     method: 'DELETE',
     headers: _auth,
   }))
