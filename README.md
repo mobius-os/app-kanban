@@ -14,8 +14,17 @@ A clean, mobile-first kanban board for Möbius.
 - Invitations appear without a refresh, shared boards show who is active, and
   cards include a compact two-line preview of their notes.
 
-Each local board lives in its own app-storage document. Sharing metadata and
-offline copies of joined boards stay in the same app-scoped storage boundary.
+Private board documents are authoritative in app storage. Once shared, the
+federated object is authoritative and the app-storage board is an offline copy.
+Use `boardRepository.js` for authoritative access; `storage.js` is the low-level
+private/cache transport, not a universal board API.
+
+## Agent use
+
+See [kanban-agent.md](kanban-agent.md) for board discovery and card operations.
+Run `node scripts/kanban.mjs list` inside a Möbius agent turn. The helper and UI
+share board routing and mutation logic; agents do not need to distinguish
+private storage from shared-object storage themselves.
 
 ## Development
 

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Check, ChevronDown, ChevronLeft, Filter, Grid, Plus, Share, Trash } from '@openai/apps-sdk-ui/components/Icon'
-import { uid, subscribeBoard, getBoard, casMutate, boardPath, normalizeBoard } from '../storage.js'
-import { pullShared, pushSharedOp, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite, sharedBoardPollDelay } from '../sync.js'
+import { createPortal } from 'react-dom'
+import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
+import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
+import { pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
 import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, replayPendingBoardOps } from '../pendingOps.js'
+import { createBoardRepository } from '../boardRepository.js'
 import { useModalFocus } from './modalFocus.js'
 import {
   assigneeAvatar,
@@ -218,92 +220,167 @@ function BoardSwitcher({ board, boardId, boards, shareMap, canWrite, open, onOpe
   )
 }
 
-function AssigneeEditor({ card, canWrite, onUpdate }) {
-  const [value, setValue] = useState(card.assignee || '')
-  useEffect(() => { setValue(card.assignee || '') }, [card.id, card.assignee])
-  const commit = nextValue => {
-    const next = String(nextValue).trim()
-    setValue(next)
-    if (next !== (card.assignee || '')) onUpdate(next)
-  }
-  return (
-    <div className="kb-assignee-editor">
-      <input
-        className="kb-input"
-        value={value}
-        placeholder="Display name…"
-        aria-label="Card assignee"
-        readOnly={!canWrite}
-        onChange={event => setValue(event.target.value)}
-        onBlur={() => commit(value)}
-        onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur() }}
-      />
-    </div>
-  )
-}
-
-function MemberAssigneeEditor({ card, canWrite, members, onUpdate }) {
+function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
+  const rootRef = useRef(null)
+  const searchRef = useRef(null)
+  const [open, setOpen] = useState(false)
+  const menuRef = useModalFocus(open, () => setOpen(false))
+  const [query, setQuery] = useState('')
+  const [menuStyle, setMenuStyle] = useState(undefined)
   const joined = (members || []).filter(member => !member.pending && member.host)
-  const selectedHost = card.assigneeHost
-    ? collaboratorForHost(joined, card.assigneeHost)?.host || card.assigneeHost
-    : joined.find(member => memberLabel(member) === card.assignee)?.host || ''
+  const selectedMember = card.assigneeHost
+    ? collaboratorForHost(joined, card.assigneeHost)
+    : joined.find(member => memberLabel(member) === card.assignee)
+  const selectedLabel = selectedMember ? memberLabel(selectedMember) : String(card.assignee || '').trim()
+  const selectedAvatar = selectedLabel ? assigneeAvatar(selectedLabel) : null
+  const localCandidates = share && !share.hosted
+    ? joined.filter(member => member.host !== share.host && member.active)
+    : []
+  const selfMember = share?.hosted
+    ? collaboratorForHost(joined, share.host)
+    : localCandidates.length === 1 ? localCandidates[0] : null
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const visibleMembers = joined.filter(member => {
+    if (!normalizedQuery) return true
+    return [memberLabel(member), member.name, member.handle, member.host]
+      .some(value => String(value || '').toLocaleLowerCase().includes(normalizedQuery))
+  })
+  const privateName = !share ? query.trim() : ''
+
+  useEffect(() => {
+    if (!open) return undefined
+    const closeOnOutsidePress = event => {
+      if (!rootRef.current?.contains(event.target) && !menuRef.current?.contains(event.target)) setOpen(false)
+    }
+    const closeOnResize = () => setOpen(false)
+    document.addEventListener('pointerdown', closeOnOutsidePress)
+    window.addEventListener('resize', closeOnResize)
+    requestAnimationFrame(() => searchRef.current?.focus())
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePress)
+      window.removeEventListener('resize', closeOnResize)
+    }
+  }, [open])
+
+  const choose = patch => {
+    onUpdate(patch)
+    setQuery('')
+    setOpen(false)
+  }
+  const chooseMember = member => choose({ assignee: memberLabel(member), assigneeHost: member.host })
+  const chooseMe = () => {
+    if (selfMember) chooseMember(selfMember)
+    else if (!share) choose({ assignee: 'Me', assigneeHost: '' })
+  }
+  const togglePicker = () => {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    const rect = rootRef.current?.getBoundingClientRect()
+    const mobile = window.matchMedia('(max-width: 640px)').matches
+    const menuHeight = Math.min(420, window.innerHeight * 0.58)
+    setMenuStyle(!mobile && rect ? {
+      top: `${Math.max(16, Math.min(rect.bottom + 6, window.innerHeight - menuHeight - 16))}px`,
+      left: `${Math.max(16, Math.min(rect.right - 320, window.innerWidth - 336))}px`,
+    } : undefined)
+    setOpen(true)
+  }
+
   return (
-    <div className="kb-assignee-picker">
-      <select
-        className="kb-input kb-assignee-select"
-        value={selectedHost}
-        aria-label="Card assignee"
+    <div className="kb-assignee-picker" ref={rootRef}>
+      <button
+        type="button"
+        className="kb-assignee-trigger"
+        aria-label={selectedLabel ? `Assignee: ${selectedLabel}` : 'Choose assignee'}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         disabled={!canWrite}
-        onChange={event => {
-          const member = joined.find(candidate => candidate.host === event.target.value)
-          onUpdate(member
-            ? { assignee: memberLabel(member), assigneeHost: member.host }
-            : { assignee: '', assigneeHost: '' })
-        }}
+        onClick={() => canWrite && togglePicker()}
       >
-        <option value="">Unassigned</option>
-        {joined.map(member => <option key={member.host} value={member.host}>{memberLabel(member)}</option>)}
-      </select>
-      <div className="kb-chips kb-assignee-chips" aria-label="Board members">
-        <button
-          className={`kb-chip${!card.assigneeHost && !card.assignee ? ' kb-on' : ''}`}
-          type="button"
-          disabled={!canWrite}
-          aria-pressed={!card.assigneeHost && !card.assignee}
-          onClick={() => canWrite && onUpdate({ assignee: '', assigneeHost: '' })}
-        >Unassigned</button>
-        {joined.map(member => {
-          const label = memberLabel(member)
-          const selected = selectedHost === member.host
-          return <button
-            key={member.host}
-            className={`kb-chip${selected ? ' kb-on' : ''}`}
-            type="button"
-            disabled={!canWrite}
-            aria-pressed={selected}
-            onClick={() => canWrite && onUpdate({ assignee: label, assigneeHost: member.host })}
-          >{label}</button>
-        })}
-      </div>
+        {selectedAvatar
+          ? <span className="kb-assignee-avatar" style={{ background: selectedAvatar.background, color: selectedAvatar.color }}>{selectedAvatar.initials}</span>
+          : <span className="kb-assignee-avatar kb-assignee-avatar-empty"><User aria-hidden="true" /></span>}
+        <span className={`kb-assignee-trigger-label${selectedLabel ? '' : ' is-empty'}`}>{selectedLabel || 'Unassigned'}</span>
+        {canWrite && <ChevronDown aria-hidden="true" />}
+      </button>
+      {open && createPortal(<>
+        <div className="kb-assignee-backdrop" aria-hidden="true" onClick={() => setOpen(false)} />
+        <div ref={menuRef} className="kb-assignee-menu" style={menuStyle} role="dialog" aria-modal="true" aria-label="Assign card">
+          <div className="kb-assignee-mobile-head">
+            <strong>Assign card</strong>
+            <button type="button" className="kb-btn kb-btn-quiet" onClick={() => setOpen(false)}>Done</button>
+          </div>
+          <label className="kb-assignee-search">
+            <MagnifyingGlassSearch aria-hidden="true" />
+            <input
+              ref={searchRef}
+              value={query}
+              aria-label={share ? 'Search board members' : 'Search or enter a name'}
+              placeholder={share ? 'Search people…' : 'Search or enter a name…'}
+              onChange={event => setQuery(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' && privateName) {
+                  event.preventDefault()
+                  choose({ assignee: privateName, assigneeHost: '' })
+                }
+              }}
+            />
+          </label>
+          <div className="kb-assignee-options" role="group" aria-label="Assignee options">
+            {(!share || selfMember) && <button type="button" className="kb-assignee-option kb-assignee-me" onClick={chooseMe}>
+              <span className="kb-assignee-option-icon"><User aria-hidden="true" /></span>
+              <span className="kb-assignee-option-copy"><strong>Assign to me</strong><small>{selfMember ? memberLabel(selfMember) : 'Me'}</small></span>
+              {selectedLabel === (selfMember ? memberLabel(selfMember) : 'Me') && <Check aria-hidden="true" />}
+            </button>}
+            <button type="button" className="kb-assignee-option" aria-pressed={!selectedLabel} onClick={() => choose({ assignee: '', assigneeHost: '' })}>
+              <span className="kb-assignee-avatar kb-assignee-avatar-empty"><User aria-hidden="true" /></span>
+              <span className="kb-assignee-option-copy"><strong>Unassigned</strong></span>
+              {!selectedLabel && <Check aria-hidden="true" />}
+            </button>
+            {visibleMembers.map(member => {
+              const label = memberLabel(member)
+              const selected = selectedMember?.host === member.host
+              return <button key={member.host} type="button" className="kb-assignee-option" aria-pressed={selected} onClick={() => chooseMember(member)}>
+                <MemberAvatar member={member} small />
+                <span className="kb-assignee-option-copy"><strong>{label}</strong>{member.name && member.name !== label && <small>{member.name}</small>}</span>
+                {selected && <Check aria-hidden="true" />}
+              </button>
+            })}
+            {privateName && privateName.toLocaleLowerCase() !== selectedLabel.toLocaleLowerCase() && <button type="button" className="kb-assignee-option" aria-pressed="false" onClick={() => choose({ assignee: privateName, assigneeHost: '' })}>
+              <span className="kb-assignee-avatar" style={{ background: assigneeAvatar(privateName).background, color: assigneeAvatar(privateName).color }}>{assigneeAvatar(privateName).initials}</span>
+              <span className="kb-assignee-option-copy"><strong>Assign “{privateName}”</strong><small>Use this name</small></span>
+            </button>}
+            {share && visibleMembers.length === 0 && <div className="kb-assignee-empty">No matching people</div>}
+          </div>
+        </div>
+      </>, document.body)}
     </div>
   )
 }
 
-function AutoGrowTextarea({ valueKey, onCommit, ...props }) {
+function AutoGrowTextarea({ valueKey, onCommit, expandOnFocus = false, ...props }) {
   const textareaRef = useRef(null)
+  const [focused, setFocused] = useState(false)
   const resize = useCallback(() => {
     const textarea = textareaRef.current
     if (!textarea) return
     textarea.style.height = 'auto'
-    textarea.style.height = `${textarea.scrollHeight}px`
-  }, [])
+    const contentHeight = textarea.scrollHeight
+    const compactHeight = expandOnFocus ? Math.min(contentHeight, 144) : contentHeight
+    const writingHeight = Math.min(Math.max(contentHeight, window.innerHeight * 0.42), 520)
+    textarea.style.height = `${expandOnFocus && focused ? writingHeight : compactHeight}px`
+  }, [expandOnFocus, focused])
   useEffect(resize, [resize, valueKey])
   return <textarea
     {...props}
     ref={textareaRef}
     onInput={resize}
-    onFocus={resize}
-    onBlur={event => onCommit?.(event.target.value)}
+    onFocus={() => setFocused(true)}
+    onBlur={event => {
+      setFocused(false)
+      onCommit?.(event.target.value)
+    }}
   />
 }
 
@@ -772,35 +849,15 @@ export default function Board({
     }
     let settled = null
     writeChain.current = writeChain.current.catch(() => {}).then(async () => {
-      if (entry) {
-        const landed = await pushSharedOp(entry, apply, onErr)
-        if (landed) {
-          versionRef.current = sharedCursorAfterWrite(landed)
-          await window.mobius?.storage?.set(boardPath(boardId), landed.doc).catch(() => {})
-          settled = landed.doc
-          onCommit?.()
-        } else {
-          try {
-            const queued = await enqueuePendingBoardOp(boardId, operation)
-            pendingEntriesRef.current = [...pendingEntriesRef.current, queued]
-              .sort((left, right) => left.id.localeCompare(right.id))
-            setQueuedCount(pendingEntriesRef.current.length)
-            setSyncNote('Change saved locally — reconnecting')
-            settled = optimistic
-          } catch (error) {
-            settled = before
-            setSyncNote('Change could not be saved')
-            window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-queue' })
-          }
-          versionRef.current = -1
-        }
-        return
-      }
-      const landed = await casMutate(boardId, apply, onErr)
-      if (landed) {
-        settled = landed
+      try {
+        const landed = await createBoardRepository({ storage: window.mobius.storage }).mutate(boardId, operation)
+        if (landed.authority === 'shared') versionRef.current = sharedCursorAfterWrite(landed)
+        settled = landed.doc
         onCommit?.()
         return
+      } catch (error) {
+        onErr(error)
+        if (entry) versionRef.current = -1
       }
       // The connection can disappear after the click but before durableWrite.
       // Convert that unconfirmed attempt into our own replayable queue.
@@ -850,23 +907,14 @@ export default function Board({
         const result = await replayPendingBoardOps(
           boardId,
           async op => {
-            const activeShare = shareRef.current
-            if (!activeShare) {
-              return casMutate(boardId, base => applyBoardOp(base, op), error => {
-                window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-replay' })
-              })
+            try {
+              const landed = await createBoardRepository({ storage: window.mobius.storage }).mutate(boardId, op)
+              if (landed.authority === 'shared') versionRef.current = sharedCursorAfterWrite(landed)
+              return landed.doc
+            } catch (error) {
+              window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-replay' })
+              return null
             }
-            const landed = await pushSharedOp(
-              activeShare,
-              base => applyBoardOp(base, op),
-              error => window.mobius?.signal?.('error', {
-                message: String(error?.message || error), source: 'shared-replay',
-              }),
-            )
-            if (!landed) return null
-            versionRef.current = sharedCursorAfterWrite(landed)
-            await window.mobius?.storage?.set(boardPath(boardId), landed.doc).catch(() => {})
-            return landed.doc
           },
           {
             onLanded: (landed, remaining) => {
@@ -1357,6 +1405,7 @@ export default function Board({
             <AutoGrowTextarea
               className="kb-input kb-notes-input"
               rows={2}
+              expandOnFocus
               placeholder="Notes…"
               defaultValue={openCard_.notes}
               key={`sn-${openCard_.id}`}
@@ -1367,7 +1416,12 @@ export default function Board({
             />
 
             <div>
-              <h3>Checklist</h3>
+              <div className="kb-section-heading">
+                <h3>Checklist</h3>
+                {Array.isArray(openCard_.checklist) && openCard_.checklist.length > 0 && <span>
+                  {openCard_.checklist.filter(item => item.done).length}/{openCard_.checklist.length}
+                </span>}
+              </div>
               <ChecklistEditor
                 checklist={Array.isArray(openCard_.checklist) ? openCard_.checklist : []}
                 canWrite={access.canWrite}
@@ -1391,16 +1445,13 @@ export default function Board({
               </div>
               <div className="kb-property-row">
                 <span className="kb-property-label">Assignee</span>
-                {share ? <MemberAssigneeEditor
-                    card={openCard_}
-                    canWrite={access.canWrite}
-                    members={members}
-                    onUpdate={patch => updateCard(openCard_.id, patch)}
-                  /> : <AssigneeEditor
-                    card={openCard_}
-                    canWrite={access.canWrite}
-                    onUpdate={assignee => updateCard(openCard_.id, { assignee })}
-                  />}
+                <AssigneePicker
+                  card={openCard_}
+                  canWrite={access.canWrite}
+                  members={members}
+                  share={share}
+                  onUpdate={patch => updateCard(openCard_.id, patch)}
+                />
               </div>
               {access.canWrite && <details className="kb-property-details">
                 <summary className="kb-property-row">
@@ -1460,16 +1511,13 @@ export default function Board({
               </div>
               <div className="kb-card-field">
                 <h3>Assignee</h3>
-                {share ? <MemberAssigneeEditor
-                    card={openCard_}
-                    canWrite={access.canWrite}
-                    members={members}
-                    onUpdate={patch => updateCard(openCard_.id, patch)}
-                  /> : <AssigneeEditor
-                    card={openCard_}
-                    canWrite={access.canWrite}
-                    onUpdate={assignee => updateCard(openCard_.id, { assignee })}
-                  />}
+                <AssigneePicker
+                  card={openCard_}
+                  canWrite={access.canWrite}
+                  members={members}
+                  share={share}
+                  onUpdate={patch => updateCard(openCard_.id, patch)}
+                />
               </div>
             </div>
             {access.canWrite && <div className="kb-desktop-only">

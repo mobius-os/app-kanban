@@ -207,8 +207,8 @@ export async function leaveBoard(boardId, entry) {
 
 // ---- sync engine
 
-export async function pullShared(entry, sinceVersion) {
-  const res = await _json(await fetch(
+export async function pullShared(entry, sinceVersion, request = fetch) {
+  const res = await _json(await request(
     `${API}/${encodeURIComponent(entry.host)}/${entry.oid}/state?since_version=${sinceVersion}`,
     { headers: _auth },
   ))
@@ -233,14 +233,14 @@ export function sharedCursorAfterWrite(landed) {
 }
 
 // Apply `op` to the shared doc with CAS retry. Returns the doc that landed.
-export async function pushSharedOp(entry, op, onError) {
+export async function pushSharedOp(entry, op, onError, request = fetch) {
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      const state = await pullShared(entry, -1)
+      const state = await pullShared(entry, -1, request)
       const base = normalizeBoard(state.doc)
       if (!base) return null
       const next = op(structuredClone(base)) || base
-      const res = await _json(await fetch(
+      const res = await _json(await request(
         `${API}/${encodeURIComponent(entry.host)}/${entry.oid}/state`,
         {
           method: 'PUT',

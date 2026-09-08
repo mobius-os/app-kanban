@@ -27,6 +27,7 @@
     "execution": "full"
   },
   "source_files": [
+    "boardRepository.js",
     "domain.js",
     "operations.js",
     "pendingOps.js",
@@ -35,7 +36,9 @@
     "theme.js",
     "ui/modalFocus.js",
     "ui/Home.jsx",
-    "ui/Board.jsx"
+    "ui/Board.jsx",
+    "scripts/kanban.mjs",
+    "kanban-agent.md"
   ],
   "store": {
     "tagline": "Boards that open where you left off — and that your friends can join.",
@@ -52,5 +55,8 @@
         "label": "Room to think on the desktop"
       }
     ]
-  }
+  },
+  "skills": [
+    "kanban-agent.md"
+  ]
 }
