@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
+import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
 import { pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
 import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
+import {
+  deleteCardAttachment,
+  consumeAttachmentPaste,
+  isPreviewImage,
+  loadCardAttachment,
+  MAX_CARD_ATTACHMENTS,
+  saveCardAttachment,
+} from '../attachments.js'
 import { useModalFocus } from './modalFocus.js'
 import {
   assigneeAvatar,
@@ -28,12 +36,30 @@ export const LABELS = {
   pink: 'var(--kb-label-pink, #ec4899)',
 }
 
-function Card({ card, lifted, onOpen, onDragStart, canWrite }) {
+function AttachmentImage({ boardId, share, attachment, className, alt = '' }) {
+  const [src, setSrc] = useState('')
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setSrc(''); setFailed(false)
+    loadCardAttachment({ boardId, share, attachment }).then(value => {
+      if (alive) setSrc(value)
+    }).catch(() => { if (alive) setFailed(true) })
+    return () => { alive = false }
+  }, [boardId, share?.host, share?.oid, attachment.id, attachment.path])
+  if (failed) return <span className={`${className} kb-image-missing`} role="img" aria-label="Image unavailable" />
+  if (!src) return <span className={`${className} kb-image-loading`} aria-hidden="true" />
+  return <img className={className} src={src} alt={alt} />
+}
+
+function Card({ boardId, share, card, lifted, onOpen, onDragStart, canWrite }) {
   const dueStatus = dueDateStatus(card.due)
   const progress = checklistProgress(card.checklist)
   const assignee = card.assignee?.trim()
   const avatar = assignee ? assigneeAvatar(assignee) : null
   const notePreview = String(card.notes || '').trim()
+  const attachments = card.attachments || []
+  const cover = attachments.find(isPreviewImage)
   return (
     <div
       className={`kb-card${lifted ? ' kb-lifted' : ''}${canWrite ? '' : ' kb-readonly'}`}
@@ -52,8 +78,21 @@ function Card({ card, lifted, onOpen, onDragStart, canWrite }) {
           aria-label={`${card.label} label`}
         />
       )}
+      {cover && <div className="kb-card-cover-wrap">
+        <AttachmentImage
+          boardId={boardId}
+          share={share}
+          attachment={cover}
+          className="kb-card-cover"
+          alt=""
+        />
+        {attachments.length > 1 && <span className="kb-card-image-count">+{attachments.length - 1}</span>}
+      </div>}
       <div className="kb-card-title">{card.title}</div>
       {notePreview && <div className="kb-card-notes">{notePreview}</div>}
+      {!cover && attachments.length > 0 && <div className="kb-card-attachment-summary">
+        <Paperclip aria-hidden="true" /> {attachments.length} {attachments.length === 1 ? 'file' : 'files'}
+      </div>}
       {(dueStatus || progress.total > 0 || avatar) && <div className="kb-card-meta">
         {dueStatus && <span className={`kb-due kb-due-${dueStatus}`}>{formatDueDate(card.due)}</span>}
         {progress.total > 0 && <div className="kb-check-progress">
@@ -653,6 +692,8 @@ export default function Board({
   const [members, setMembers] = useState(null)
   const [animateColumns, setAnimateColumns] = useState(true)
   const [queuedCount, setQueuedCount] = useState(0)
+  const [attachmentBusy, setAttachmentBusy] = useState(false)
+  const [attachmentError, setAttachmentError] = useState('')
 
   const boardRef = useRef(null)
   const boardScrollRef = useRef(null)
@@ -667,12 +708,15 @@ export default function Board({
   const replayingRef = useRef(false)
   const pendingEntriesRef = useRef([])
   const lastInteractionAtRef = useRef(Date.now())
+  const fileInputRef = useRef(null)
   const cardSheetRef = useModalFocus(Boolean(openCardId), () => setOpenCardId(null))
   const columnConfirmRef = useModalFocus(Boolean(confirmDeleteCol), () => setConfirmDeleteCol(null))
   boardRef.current = board
   shareRef.current = share
   onlineRef.current = online
   filtersRef.current = { text: filterText, labels: filterLabels }
+
+  useEffect(() => { setAttachmentError('') }, [openCardId])
 
   const refreshMembers = useCallback(async () => {
     if (!share?.hosted) return []
@@ -970,7 +1014,7 @@ export default function Board({
     mutate({
       type: 'add-card',
       columnId: colId,
-      card: { id, title, notes: '', label: 'none', due: '', checklist: [], assignee: '', assigneeHost: '', createdAt },
+      card: { id, title, notes: '', label: 'none', due: '', checklist: [], attachments: [], assignee: '', assigneeHost: '', createdAt },
     }, () => window.mobius?.signal?.('item_created', { type: 'card' }))
   }
 
@@ -993,11 +1037,83 @@ export default function Board({
   }
 
   const deleteCard = cardId => {
+    const attachments = [...(boardRef.current?.cards[cardId]?.attachments || [])]
     setOpenCardId(null)
     mutate(
       { type: 'delete-card', cardId },
-      () => window.mobius?.signal?.('item_deleted'),
+      () => {
+        window.mobius?.signal?.('item_deleted')
+        Promise.allSettled(attachments.map(attachment => deleteCardAttachment({ share: shareRef.current, attachment })))
+      },
     )
+  }
+
+  const attachFiles = async filesInput => {
+    const files = [...(filesInput || [])]
+    const cardId = openCardId
+    if (!cardId || files.length === 0 || attachmentBusy) return
+    const existing = boardRef.current?.cards[cardId]?.attachments || []
+    if (existing.length + files.length > MAX_CARD_ATTACHMENTS) {
+      setAttachmentError(`A card can hold up to ${MAX_CARD_ATTACHMENTS} attachments.`)
+      return
+    }
+    setAttachmentBusy(true); setAttachmentError('')
+    try {
+      for (const file of files) {
+        const attachment = await saveCardAttachment({
+          boardId,
+          share: shareRef.current,
+          id: uid(),
+          file,
+        })
+        const current = boardRef.current?.cards[cardId]?.attachments || []
+        if (!mutate({ type: 'update-card', cardId, patch: { attachments: [...current, attachment] } })) {
+          await deleteCardAttachment({ share: shareRef.current, attachment }).catch(() => {})
+          throw new Error('This card cannot be changed right now.')
+        }
+      }
+      window.mobius?.signal?.('item_created', { type: 'card-attachment' })
+    } catch (error) {
+      setAttachmentError(String(error?.message || 'The file could not be attached.'))
+      window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'attach-file' })
+    } finally {
+      setAttachmentBusy(false)
+    }
+  }
+
+  const attachFromInput = event => {
+    const files = [...(event.target.files || [])]
+    event.target.value = ''
+    attachFiles(files)
+  }
+
+  const attachFromPaste = event => {
+    const files = consumeAttachmentPaste(event, access.canWrite)
+    if (!files.length) return
+    attachFiles(files)
+  }
+
+  const removeAttachment = (cardId, attachment) => {
+    const attachments = (boardRef.current?.cards[cardId]?.attachments || []).filter(item => item.id !== attachment.id)
+    mutate(
+      { type: 'update-card', cardId, patch: { attachments } },
+      () => deleteCardAttachment({ share: shareRef.current, attachment }).catch(error => {
+        window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'delete-attachment' })
+      }),
+    )
+  }
+
+  const downloadAttachment = async attachment => {
+    setAttachmentError('')
+    try {
+      const url = await loadCardAttachment({ boardId, share: shareRef.current, attachment })
+      const link = document.createElement('a')
+      link.href = url
+      link.download = attachment.name || 'attachment'
+      link.click()
+    } catch (error) {
+      setAttachmentError(String(error?.message || 'The attachment could not be downloaded.'))
+    }
   }
 
   const moveCard = (cardId, toColId, beforeCardId = null) => {
@@ -1303,6 +1419,8 @@ export default function Board({
             }
             cardNodes.push(<Card
               key={card.id}
+              boardId={boardId}
+              share={share}
               card={card}
               lifted={drag?.cardId === card.id && drag.moved}
               onOpen={openCard}
@@ -1410,7 +1528,15 @@ export default function Board({
       {openCard_ && (
         <>
           <div className="kb-scrim" onClick={() => setOpenCardId(null)} />
-          <div ref={cardSheetRef} tabIndex={-1} className="kb-sheet kb-card-sheet" role="dialog" aria-modal="true" aria-label="Card details">
+          <div
+            ref={cardSheetRef}
+            tabIndex={-1}
+            className="kb-sheet kb-card-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Card details"
+            onPaste={attachFromPaste}
+          >
             <div className="kb-card-toolbar kb-mobile-only">
               <span className="kb-card-toolbar-title">Card details</span>
               <button className="kb-btn kb-btn-primary kb-card-toolbar-done" type="button" onClick={() => setOpenCardId(null)}>Done</button>
@@ -1438,6 +1564,74 @@ export default function Board({
               readOnly={!access.canWrite}
               onCommit={value => { if (value !== openCard_.notes) updateCard(openCard_.id, { notes: value }) }}
             />
+
+            <section className="kb-attachments" aria-labelledby="kb-attachments-title">
+              <div className="kb-section-heading">
+                <h3 id="kb-attachments-title">Attachments</h3>
+                <span>{openCard_.attachments?.length || 0}/{MAX_CARD_ATTACHMENTS}</span>
+              </div>
+              {!!openCard_.attachments?.some(isPreviewImage) && <div className="kb-image-grid">
+                {openCard_.attachments.filter(isPreviewImage).map(attachment => <figure className="kb-image" key={attachment.id}>
+                  <AttachmentImage
+                    boardId={boardId}
+                    share={share}
+                    attachment={attachment}
+                    className="kb-image-preview"
+                    alt={attachment.name || 'Card image'}
+                  />
+                  <figcaption title={attachment.name}>{attachment.name || 'Image'}</figcaption>
+                  {access.canWrite && <button
+                    className="kb-iconbtn kb-image-remove"
+                    type="button"
+                    aria-label={`Remove ${attachment.name || 'image'}`}
+                    onClick={() => removeAttachment(openCard_.id, attachment)}
+                  ><Trash /></button>}
+                </figure>)}
+              </div>}
+              {!!openCard_.attachments?.some(attachment => !isPreviewImage(attachment)) && <div className="kb-file-list">
+                {openCard_.attachments.filter(attachment => !isPreviewImage(attachment)).map(attachment => <div className="kb-file" key={attachment.id}>
+                  <button
+                    className="kb-file-download"
+                    type="button"
+                    title={attachment.name}
+                    onClick={() => downloadAttachment(attachment)}
+                  >
+                    <Paperclip aria-hidden="true" />
+                    <span>{attachment.name || 'Attachment'}</span>
+                    <small>Download</small>
+                  </button>
+                  {access.canWrite && <button
+                    className="kb-iconbtn kb-file-remove"
+                    type="button"
+                    aria-label={`Remove ${attachment.name || 'attachment'}`}
+                    onClick={() => removeAttachment(openCard_.id, attachment)}
+                  ><Trash /></button>}
+                </div>)}
+              </div>}
+              {access.canWrite && <>
+                <input
+                  ref={fileInputRef}
+                  className="kb-visually-hidden"
+                  type="file"
+                  multiple
+                  onChange={attachFromInput}
+                />
+                <div className="kb-attach-actions">
+                  <button
+                    className="kb-btn kb-btn-quiet kb-attach-button"
+                    type="button"
+                    disabled={attachmentBusy || (openCard_.attachments?.length || 0) >= MAX_CARD_ATTACHMENTS}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Paperclip />
+                    {attachmentBusy ? 'Adding files…' : 'Attach files'}
+                  </button>
+                  <span className="kb-paste-hint">or paste with ⌘/Ctrl+V</span>
+                </div>
+              </>}
+              {attachmentError && <p className="kb-attachment-error" role="alert">{attachmentError}</p>}
+              {!openCard_.attachments?.length && !access.canWrite && <div className="kb-empty">No attachments</div>}
+            </section>
 
             <div>
               <div className="kb-section-heading">

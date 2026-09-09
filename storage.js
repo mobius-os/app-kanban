@@ -56,6 +56,14 @@ export function normalizeBoard(doc) {
     if (!isIsoDate(card.due)) card.due = ''
     if (typeof card.assignee !== 'string') card.assignee = ''
     if (typeof card.assigneeHost !== 'string') card.assigneeHost = ''
+    // Images were the first attachment type. Migrate that field into the
+    // general attachment collection without losing existing card media.
+    if (!Array.isArray(card.attachments)) {
+      card.attachments = Array.isArray(card.images) ? card.images : []
+    }
+    card.attachments = card.attachments.filter(attachment => attachment && typeof attachment === 'object'
+      && typeof attachment.id === 'string' && attachment.id)
+    delete card.images
     if (!Array.isArray(card.checklist)) card.checklist = []
     card.checklist = card.checklist.filter(item => item && typeof item === 'object' && !Array.isArray(item))
     card.checklist.forEach((item, index) => {

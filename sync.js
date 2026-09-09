@@ -215,6 +215,28 @@ export async function pullShared(entry, sinceVersion, request = fetch) {
   return res // {status, version, doc?, object?}
 }
 
+export async function putSharedAsset(entry, assetId, mime, data, request = fetch) {
+  return _json(await request(
+    `${API}/${encodeURIComponent(entry.host)}/${entry.oid}/assets/${encodeURIComponent(assetId)}`,
+    { method: 'PUT', headers: _auth, body: JSON.stringify({ mime, data }) },
+  ))
+}
+
+export async function getSharedAsset(entry, assetId, request = fetch) {
+  const result = await _json(await request(
+    `${API}/${encodeURIComponent(entry.host)}/${entry.oid}/assets/${encodeURIComponent(assetId)}`,
+    { headers: _auth },
+  ))
+  return result.asset
+}
+
+export async function deleteSharedAsset(entry, assetId, request = fetch) {
+  return _json(await request(
+    `${API}/${encodeURIComponent(entry.host)}/${entry.oid}/assets/${encodeURIComponent(assetId)}`,
+    { method: 'DELETE', headers: _auth },
+  ))
+}
+
 // A board the owner is actively using should feel collaborative; an idle one
 // can relax to the former cadence without creating a permanent fast poll.
 export function sharedBoardPollDelay(lastInteractionAt, now = Date.now()) {
