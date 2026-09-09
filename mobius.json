@@ -28,6 +28,7 @@
   },
   "source_files": [
     "boardRepository.js",
+    "attachments.js",
     "domain.js",
     "operations.js",
     "pendingOps.js",

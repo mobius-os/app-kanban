@@ -9,6 +9,9 @@ import {
   joinWithInvite,
   leaveBoard,
   loadShareMap,
+  getSharedAsset,
+  putSharedAsset,
+  deleteSharedAsset,
   pushSharedOp,
   removeShareEntry,
   shareBoard,
@@ -18,6 +21,31 @@ import {
 test('an actively viewed shared board polls quickly and relaxes when idle', () => {
   assert.equal(sharedBoardPollDelay(10_000, 20_000), 1000)
   assert.equal(sharedBoardPollDelay(1_000, 20_000), 3000)
+})
+
+test('shared image operations stay scoped to the board host and object', async () => {
+  configureSync('test-token')
+  const calls = []
+  const request = async (url, options = {}) => {
+    calls.push({ url, options })
+    const body = options.method === 'GET' || !options.method
+      ? { status: 'ok', asset: { id: 'image', mime: 'image/webp', data: 'abc' } }
+      : { status: options.method === 'DELETE' ? 'deleted' : 'ok' }
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  const entry = { host: 'peer.example', oid: 'board-object' }
+  await putSharedAsset(entry, 'image', 'image/webp', 'abc', request)
+  assert.deepEqual(await getSharedAsset(entry, 'image', request), {
+    id: 'image', mime: 'image/webp', data: 'abc',
+  })
+  await deleteSharedAsset(entry, 'image', request)
+  assert.deepEqual(calls.map(call => [call.url, call.options.method || 'GET']), [
+    ['/api/common/objects/peer.example/board-object/assets/image', 'PUT'],
+    ['/api/common/objects/peer.example/board-object/assets/image', 'GET'],
+    ['/api/common/objects/peer.example/board-object/assets/image', 'DELETE'],
+  ])
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer test-token')
+  assert.deepEqual(JSON.parse(calls[0].options.body), { mime: 'image/webp', data: 'abc' })
 })
 
 test.afterEach(() => {

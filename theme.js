@@ -226,7 +226,7 @@ export const CSS = `
     gap: 4px;
     padding: 4px 10px 6px 14px;
   }
-  .kb-col-status { width: 7px; height: 7px; border-radius: 999px; flex: 0 0 auto; }
+  .kb-col-status { width: 7px; height: 7px; margin-right: 4px; border-radius: 999px; flex: 0 0 auto; }
   .kb-col-name {
     font-size: 14px;
     font-weight: 600;
@@ -316,6 +316,40 @@ export const CSS = `
   .kb-card:active { cursor: grabbing; }
   .kb-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .kb-card.kb-readonly { cursor: pointer; }
+  .kb-card-cover-wrap {
+    position: relative;
+    height: 104px;
+    margin-bottom: 10px;
+    overflow: hidden;
+    border-radius: 9px;
+    background: var(--surface-2);
+  }
+  .kb-card-cover { width: 100%; height: 100%; display: block; object-fit: cover; }
+  .kb-card-attachment-summary {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+  .kb-card-attachment-summary svg { width: 14px; height: 14px; }
+  .kb-card-image-count {
+    position: absolute;
+    right: 7px;
+    bottom: 7px;
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 700;
+  }
   .kb-card-title { font-size: 14px; font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; }
   .kb-card-notes {
     margin-top: 7px;
@@ -493,6 +527,94 @@ export const CSS = `
   .kb-sheet h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
   .kb-section-heading { min-height: 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .kb-section-heading > span { color: var(--muted); font-size: 11.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .kb-attachments { display: grid; gap: 8px; }
+  .kb-image-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 8px;
+  }
+  .kb-image {
+    position: relative;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    border-radius: 12px;
+    background: var(--surface-2);
+  }
+  .kb-image-preview { width: 100%; aspect-ratio: 4 / 3; display: block; object-fit: cover; }
+  .kb-image figcaption {
+    padding: 7px 9px 8px;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .kb-image-remove {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  }
+  .kb-image-loading { background: color-mix(in srgb, var(--muted) 13%, var(--surface-2)); }
+  .kb-image-missing { position: relative; }
+  .kb-image-missing::after {
+    content: 'Unavailable';
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .kb-file-list { display: grid; gap: 6px; }
+  .kb-file {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    min-height: 44px;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    background: var(--surface-2);
+  }
+  .kb-file-download {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    min-height: 44px;
+    padding: 7px 8px 7px 11px;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+    flex: 1 1 auto;
+  }
+  .kb-file-download > svg { width: 17px; height: 17px; color: var(--muted); }
+  .kb-file-download > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .kb-file-download > small { color: var(--muted); font-size: 10.5px; }
+  .kb-file-download:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 10px; }
+  .kb-file-remove { width: 40px; height: 40px; margin-right: 2px; }
+  .kb-attach-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .kb-attach-button { min-height: 44px; }
+  .kb-attach-button svg { width: 17px; height: 17px; }
+  .kb-paste-hint { color: var(--muted); font-size: 11.5px; }
+  .kb-attachment-error { margin: 0; color: var(--danger); font-size: 12px; line-height: 1.45; }
+  .kb-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
   .kb-field-spaced { margin-top: 8px; }
   .kb-card-meta-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
   .kb-card-field { min-width: 0; }

@@ -39,15 +39,29 @@ test('normalization repairs known fields while preserving future fields', () => 
   assert.equal(normalized.cards.card.due, '')
   assert.equal(normalized.cards.card.assignee, '')
   assert.equal(normalized.cards.card.assigneeHost, '')
+  assert.deepEqual(normalized.cards.card.attachments, [])
   assert.deepEqual(normalized.cards.card.checklist, [
     { id: 'item', text: '', done: false, futureItem: true },
   ])
   assert.equal(normalized.cards.card.futureCard, true)
   assert.equal(normalized.cards.empty.due, '')
   assert.deepEqual(normalized.cards.empty.checklist, [])
+  assert.deepEqual(normalized.cards.empty.attachments, [])
   assert.deepEqual(normalized.future, { kept: true })
   assert.equal(normalized.columns[0].futureColumn, true)
   assert.equal(normalizeBoard([]), null)
+})
+
+test('normalization migrates image metadata into the general attachment collection', () => {
+  const image = { id: 'old-image', name: 'photo.png', mime: 'image/png' }
+  const doc = normalizeBoard({
+    v: 1,
+    title: 'Legacy images',
+    columns: [],
+    cards: { card: { title: 'Card', images: [image] } },
+  })
+  assert.deepEqual(doc.cards.card.attachments, [image])
+  assert.equal(Object.hasOwn(doc.cards.card, 'images'), false)
 })
 
 test('normalization defaults status colors by initial position and assignees additively', () => {
