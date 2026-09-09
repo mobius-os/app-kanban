@@ -11,6 +11,7 @@ import {
 } from '../pendingOps.js'
 import { casMutate } from '../storage.js'
 import { cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite } from '../sync.js'
+import { createBoardRepository, replayOutcomeForBoardError } from '../boardRepository.js'
 
 function memoryStorage() {
   const values = new Map()
@@ -93,7 +94,7 @@ test('offline reconnect conflict rebases every queued operation or retains an ex
 
   const result = await replayPendingBoardOps(
     'board',
-    op => casMutate('board', doc => applyBoardOp(doc, op)),
+    async op => ({ status: 'landed', doc: await casMutate('board', doc => applyBoardOp(doc, op)) }),
     { storage: uiStorage },
   )
   assert.equal(result.ok, true)
@@ -102,6 +103,43 @@ test('offline reconnect conflict rebases every queued operation or retains an ex
   assert.equal(server.cards.b.title, 'B')
   assert.equal(server.cards.concurrent.title, 'Concurrent')
   assert.deepEqual(server.columns[0].cardIds, ['concurrent', 'a', 'b'])
+})
+
+test('terminal queued operations are discarded without blocking later changes', async () => {
+  const uiStorage = memoryStorage()
+  await enqueuePendingBoardOp('board', { type: 'update-card', cardId: 'gone', patch: { title: 'Gone' } }, uiStorage)
+  await enqueuePendingBoardOp('board', { type: 'update-card', cardId: 'a', patch: { title: 'Landed' } }, uiStorage)
+  const discarded = []
+  const result = await replayPendingBoardOps('board', async op => {
+    if (op.cardId === 'gone') return { status: 'discarded', error: new Error('Card no longer exists.') }
+    const doc = boardDoc()
+    applyBoardOp(doc, op)
+    return { status: 'landed', doc }
+  }, { storage: uiStorage, onDiscarded: error => discarded.push(error.message) })
+  assert.equal(result.ok, true)
+  assert.equal(result.discarded, 1)
+  assert.deepEqual(discarded, ['Card no longer exists.'])
+  assert.equal(result.doc.cards.a.title, 'Landed')
+  assert.deepEqual(await readPendingBoardOps('board', uiStorage), [])
+})
+
+test('malformed authority metadata retains durable queued intent for repair', async () => {
+  const queueStorage = memoryStorage()
+  const op = { type: 'update-card', cardId: 'a', patch: { title: 'Keep me' } }
+  await enqueuePendingBoardOp('board', op, queueStorage)
+  const repository = createBoardRepository({ storage: {
+    async getWithVersion() { return { value: { byBoard: [] }, version: 'bad-map' } },
+  } })
+  const result = await replayPendingBoardOps('board', async pending => {
+    try {
+      return { status: 'landed', doc: (await repository.mutate('board', pending)).doc }
+    } catch (error) {
+      return replayOutcomeForBoardError(error)
+    }
+  }, { storage: queueStorage })
+  assert.equal(result.ok, false)
+  assert.equal(result.pending, 1)
+  assert.deepEqual((await readPendingBoardOps('board', queueStorage))[0].op, op)
 })
 
 test('shared poll/write/subscription race keeps the versioned poll as sole authority', () => {

@@ -34,6 +34,7 @@
     "storage.js",
     "sync.js",
     "theme.js",
+    "ui/focusableElements.js",
     "ui/modalFocus.js",
     "ui/Home.jsx",
     "ui/Board.jsx",

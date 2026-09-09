@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createBoardRepository } from '../boardRepository.js'
+import { createBoardRepository, isDiscardableBoardError, isRetryableBoardError } from '../boardRepository.js'
 
 const board = () => ({ v: 1, title: 'Board', columns: [{ id: 'todo', name: 'To do', cardIds: [] }], cards: {} })
 const op = { type: 'add-card', columnId: 'todo', card: { id: 'new', title: 'New' } }
@@ -71,10 +71,31 @@ test('shared failure never falls back to writing the cache', async () => {
   assert.equal(f.local().cards.new, undefined)
   assert.equal(f.writes(), 0)
 })
+test('authoritative revocation overrides a stale local editor role', async () => {
+  const f = fixture(true)
+  f.request = async () => Response.json({ detail: 'Forbidden' }, { status: 403 })
+  const error = await createBoardRepository(f).mutate('b', op).catch(value => value)
+  assert.match(error.message, /read-only/)
+  assert.equal(isRetryableBoardError(error), false)
+  assert.equal(isDiscardableBoardError(error), true)
+  assert.equal(f.local().cards.new, undefined)
+  assert.equal(f.writes(), 0)
+})
 test('sharing lookup failure never becomes a private-board edit', async () => {
   const f = fixture()
   f.storage.getWithVersion = async () => { throw new Error('Unavailable') }
   await assert.rejects(createBoardRepository(f).mutate('b', op), /Unavailable/)
+  assert.equal(f.writes(), 0)
+})
+test('malformed sharing maps are terminal and never become private-board edits', async () => {
+  const f = fixture()
+  f.storage.getWithVersion = async path => path === 'shared.json'
+    ? { value: { byBoard: [] }, version: 'map' }
+    : { value: board(), version: 'local' }
+  const error = await createBoardRepository(f).mutate('b', op).catch(value => value)
+  assert.match(error.message, /malformed/)
+  assert.equal(isRetryableBoardError(error), false)
+  assert.equal(isDiscardableBoardError(error), false)
   assert.equal(f.writes(), 0)
 })
 test('cache failure after a shared commit does not report the operation as failed', async () => {
@@ -91,6 +112,16 @@ test('viewer membership and missing targets cannot yield successful card edits',
   f.entry.role = 'editor'
   await assert.rejects(createBoardRepository(f).mutate('b', { ...op, columnId: 'missing' }), /no longer exists/)
   assert.equal(f.remote().cards.new, undefined)
+})
+test('terminal board errors are classified and unsafe entity ids are rejected', async () => {
+  const f = fixture(true)
+  f.entry.role = 'viewer'
+  const denied = await createBoardRepository(f).mutate('b', op).catch(value => value)
+  assert.equal(isRetryableBoardError(denied), false)
+  f.entry.role = 'editor'
+  const unsafe = { ...op, card: { ...op.card, id: '__proto__' } }
+  await assert.rejects(createBoardRepository(f).mutate('b', unsafe), /invalid/)
+  assert.equal(Object.hasOwn(f.remote().cards, '__proto__'), false)
 })
 test('replayed adds and deletes stay idempotent after the original column disappears', async () => {
   const f = fixture(true)

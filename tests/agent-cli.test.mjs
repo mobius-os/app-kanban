@@ -40,8 +40,8 @@ test('CLI writes private and shared boards through their authority using JSON an
     res.writeHead(404); send({})
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const run = (command, input) => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['scripts/kanban.mjs', command, 'b'], {
+  const run = (command, input, boardId = 'b') => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['scripts/kanban.mjs', command, boardId], {
       cwd: new URL('../', import.meta.url),
       env: { ...process.env, API_BASE_URL: `http://127.0.0.1:${server.address().port}`, AGENT_TOKEN: 'fixture' },
     })
@@ -63,6 +63,10 @@ test('CLI writes private and shared boards through their authority using JSON an
     await run('move-card', { type: 'delete-card', cardId: 'stable', toColumnId: 'done' })
     assert.ok(remote.cards.stable)
     assert.deepEqual(remote.columns[1].cardIds, ['stable'])
+    assert.equal(sharedWrites, 4)
+    await assert.rejects(run('update-card', { cardId: 'stable', patch: { notes: { unsafe: true } } }), /notes must be a string/)
+    await assert.rejects(run('add-card', { id: '__proto__', columnId: 'todo', title: 'Unsafe' }), /safe non-empty string/)
+    await assert.rejects(run('read', undefined, '../../2/boards/private'), /Usage/)
     assert.equal(sharedWrites, 4)
     shared = false; local = makeBoard(); cacheWrites = 0
     assert.equal((await run('add-card', input)).authority, 'private')

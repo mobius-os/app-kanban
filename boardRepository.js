@@ -4,15 +4,46 @@ import { boardPath, normalizeBoard, casMutate } from './storage.js'
 import { pullShared, pushSharedOp } from './sync.js'
 import { applyBoardOp } from './operations.js'
 
+const RESERVED_IDS = new Set(['__proto__', 'prototype', 'constructor'])
+
+export function boardError(message, code, { discardable = true } = {}) {
+  return Object.assign(new Error(message), { code, retryable: false, discardable })
+}
+
+export function isRetryableBoardError(error) {
+  return error?.retryable !== false
+}
+
+export function isDiscardableBoardError(error) {
+  return error?.discardable === true
+}
+
+export function replayOutcomeForBoardError(error) {
+  return isDiscardableBoardError(error)
+    ? { status: 'discarded', error }
+    : { status: 'retry' }
+}
+
+function isRecord(value) {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function validId(value) {
+  return typeof value === 'string' && value.trim() !== '' && !RESERVED_IDS.has(value)
+}
+
 export function createBoardRepository({ storage, request = globalThis.fetch }) {
   async function authority(boardId) {
     // A failed lookup must never be interpreted as "private".
     const { value } = await storage.getWithVersion('shared.json')
-    if (value != null && (!value.byBoard || typeof value.byBoard !== 'object')) {
-      throw new Error('Board sharing information is malformed.')
+    if (value != null && (!isRecord(value) || !isRecord(value.byBoard))) {
+      throw boardError('Board sharing information is malformed.', 'invalid-sharing-map', { discardable: false })
     }
     const entry = value?.byBoard?.[boardId] || null
-    if (entry && (!entry.host || !entry.oid)) throw new Error('Board sharing address is incomplete.')
+    if (entry && (!isRecord(entry) || !validId(entry.host) || !validId(entry.oid)
+      || !['editor', 'viewer'].includes(entry.role))) {
+      throw boardError('Board sharing address is incomplete.', 'invalid-sharing-entry', { discardable: false })
+    }
     return entry
   }
 
@@ -38,15 +69,19 @@ export function createBoardRepository({ storage, request = globalThis.fetch }) {
 
   async function mutate(boardId, op) {
     const entry = await authority(boardId)
-    if (entry && entry.role !== 'editor') throw new Error('This shared board is read-only.')
+    if (entry && entry.role !== 'editor') throw boardError('This shared board is read-only.', 'read-only')
     const apply = doc => {
-      if (op.type === 'add-card' && doc.cards[op.card?.id]) return doc
+      if (op.type === 'add-card' && !validId(op.card?.id)) throw boardError('Card id is invalid.', 'invalid-operation')
+      if (op.cardId && !validId(op.cardId)) throw boardError('Card id is invalid.', 'invalid-operation')
+      if (op.type === 'add-card' && Object.hasOwn(doc.cards, op.card.id)) return doc
       if (op.type === 'add-card' && !doc.columns.some(c => c.id === op.columnId)) {
-        throw new Error('Target column no longer exists.')
+        throw boardError('Target column no longer exists.', 'missing-column')
       }
-      if (op.cardId && op.type !== 'delete-card' && !doc.cards[op.cardId]) throw new Error('Card no longer exists.')
+      if (op.cardId && op.type !== 'delete-card' && !Object.hasOwn(doc.cards, op.cardId)) {
+        throw boardError('Card no longer exists.', 'missing-card')
+      }
       if (op.type === 'move-card' && !doc.columns.some(c => c.id === op.toColumnId)) {
-        throw new Error('Target column no longer exists.')
+        throw boardError('Target column no longer exists.', 'missing-column')
       }
       return applyBoardOp(doc, op)
     }
@@ -55,7 +90,13 @@ export function createBoardRepository({ storage, request = globalThis.fetch }) {
     const landed = entry
       ? await pushSharedOp(entry, apply, onError, request)
       : await casMutate(boardId, apply, onError, storage).then(doc => doc && ({ doc }))
-    if (!landed) throw error || new Error('Board change was not confirmed.')
+    if (!landed && entry && error?.status === 403) {
+      throw boardError('This shared board is read-only.', 'read-only')
+    }
+    if (!landed && entry && error?.status === 404) {
+      throw boardError('Board no longer exists.', 'missing-board')
+    }
+    if (!landed) throw error || boardError('Board no longer exists.', 'missing-board')
     // Only a confirmed shared write may refresh the offline copy. Cache failure
     // cannot turn a committed operation into a failed operation.
     if (entry) await storage.set(boardPath(boardId), landed.doc).catch(() => {})

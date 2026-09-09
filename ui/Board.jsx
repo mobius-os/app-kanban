@@ -5,7 +5,7 @@ import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../sto
 import { pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
 import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, replayPendingBoardOps } from '../pendingOps.js'
-import { createBoardRepository } from '../boardRepository.js'
+import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
 import { useModalFocus } from './modalFocus.js'
 import {
   assigneeAvatar,
@@ -856,8 +856,15 @@ export default function Board({
         onCommit?.()
         return
       } catch (error) {
-        onErr(error)
+        const retryable = isRetryableBoardError(error)
         if (entry) versionRef.current = -1
+        if (!retryable) {
+          window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'save' })
+          settled = before
+          setSyncNote(String(error?.message || 'Change could not be applied'))
+          return
+        }
+        onErr(error)
       }
       // The connection can disappear after the click but before durableWrite.
       // Convert that unconfirmed attempt into our own replayable queue.
@@ -910,10 +917,10 @@ export default function Board({
             try {
               const landed = await createBoardRepository({ storage: window.mobius.storage }).mutate(boardId, op)
               if (landed.authority === 'shared') versionRef.current = sharedCursorAfterWrite(landed)
-              return landed.doc
+              return { status: 'landed', doc: landed.doc }
             } catch (error) {
               window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-replay' })
-              return null
+              return replayOutcomeForBoardError(error)
             }
           },
           {
@@ -927,12 +934,29 @@ export default function Board({
               boardRef.current = rendered
               setBoard(rendered)
             },
+            onDiscarded: error => {
+              setSyncNote(String(error?.message || 'An outdated change could not be applied'))
+            },
           },
         )
         if (!alive) return
         pendingEntriesRef.current = result.entries
         setQueuedCount(result.pending)
-        setSyncNote(result.ok ? '' : `${result.pending} change${result.pending === 1 ? '' : 's'} could not sync — retrying`)
+        if (result.discarded) {
+          try {
+            const fresh = await createBoardRepository({ storage: window.mobius.storage }).read(boardId)
+            const rendered = applyPendingBoardOps(fresh.doc, result.entries)
+            boardRef.current = rendered
+            setBoard(rendered)
+            setSyncNote(`${result.discarded} outdated change${result.discarded === 1 ? '' : 's'} skipped`)
+          } catch (error) {
+            versionRef.current = -1
+            setSyncNote('An outdated change was skipped — refreshing the board')
+            window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-refresh' })
+          }
+        } else {
+          setSyncNote(result.ok ? '' : `${result.pending} change${result.pending === 1 ? '' : 's'} could not sync — retrying`)
+        }
       }).finally(() => { replayingRef.current = false })
     }
     flush()

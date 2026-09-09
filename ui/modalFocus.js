@@ -1,13 +1,5 @@
 import { useEffect, useRef } from 'react'
-
-const FOCUSABLE = [
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'textarea:not([disabled])',
-  'select:not([disabled])',
-  '[href]',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',')
+import { visibleFocusableElements } from './focusableElements.js'
 
 // Only the foremost dialog owns keyboard focus. Portalled pickers can sit above
 // a sheet without the sheet underneath pulling Tab focus away from them.
@@ -25,8 +17,7 @@ export function useModalFocus(open, onClose) {
     const dialog = dialogRef.current
     openDialogs.push(dialog)
     const isTopmost = () => openDialogs[openDialogs.length - 1] === dialog
-    const focusable = () => Array.from(dialog?.querySelectorAll(FOCUSABLE) || [])
-      .filter(element => element.getAttribute('aria-hidden') !== 'true')
+    const focusable = () => visibleFocusableElements(dialog)
 
     ;(focusable()[0] || dialog)?.focus()
     const onKeyDown = event => {

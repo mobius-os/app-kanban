@@ -2,6 +2,7 @@
 // Thin command-line transport for the same repository the board screen uses.
 import { createBoardRepository } from '../boardRepository.js'
 import { uid } from '../storage.js'
+import { isIsoDate } from '../domain.js'
 
 const base = process.env.API_BASE_URL
 const token = process.env.AGENT_TOKEN
@@ -58,27 +59,45 @@ async function input() {
   for await (const chunk of process.stdin) raw += chunk
   return JSON.parse(raw)
 }
+const labels = new Set(['none', 'red', 'amber', 'green', 'blue', 'purple', 'pink'])
+const reservedIds = new Set(['__proto__', 'prototype', 'constructor'])
+const validId = value => typeof value === 'string'
+  && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(value)
+  && !reservedIds.has(value)
+function validatePatch(patch) {
+  if (patch.title !== undefined && (typeof patch.title !== 'string' || !patch.title.trim())) throw new Error('title must be a non-empty string.')
+  for (const field of ['notes', 'assignee', 'assigneeHost']) {
+    if (patch[field] !== undefined && typeof patch[field] !== 'string') throw new Error(`${field} must be a string.`)
+  }
+  if (patch.label !== undefined && !labels.has(patch.label)) throw new Error('label is invalid.')
+  if (patch.due !== undefined && patch.due !== '' && !isIsoDate(patch.due)) throw new Error('due must be empty or a valid YYYY-MM-DD date.')
+}
 try {
   let result
   if (command === 'list') result = await repository.list()
-  else if (command === 'read' && boardId) result = await repository.read(boardId)
-  else if (['add-card', 'update-card', 'move-card'].includes(command) && boardId) {
+  else if (command === 'read' && validId(boardId)) result = await repository.read(boardId)
+  else if (['add-card', 'update-card', 'move-card'].includes(command) && validId(boardId)) {
     const data = await input()
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Input must be a JSON object.')
     let op
     if (command === 'add-card') {
-      if (!data.columnId || !data.title?.trim()) throw new Error('columnId and a non-empty title are required.')
+      if (!validId(data.columnId) || typeof data.title !== 'string' || !data.title.trim()) throw new Error('columnId and a non-empty title are required.')
+      if (data.id !== undefined && !validId(data.id)) throw new Error('id must be a safe non-empty string.')
+      if (data.notes !== undefined && typeof data.notes !== 'string') throw new Error('notes must be a string.')
       op = { type: command, columnId: data.columnId, card: {
         id: data.id || uid(), title: data.title.trim(), notes: data.notes || '',
         label: 'none', due: '', assignee: '', assigneeHost: '', checklist: [],
         createdAt: new Date().toISOString(),
       } }
     } else if (command === 'update-card') {
-      if (!data.cardId || !data.patch || typeof data.patch !== 'object') throw new Error('cardId and patch are required.')
+      if (!validId(data.cardId) || !data.patch || typeof data.patch !== 'object' || Array.isArray(data.patch)) throw new Error('cardId and patch are required.')
       const fields = ['title', 'notes', 'label', 'due', 'assignee', 'assigneeHost']
       if (Object.keys(data.patch).some(key => !fields.includes(key))) throw new Error('Patch must contain editable card fields only.')
+      validatePatch(data.patch)
       op = { type: command, cardId: data.cardId, patch: data.patch }
     } else {
-      if (!data.cardId || !data.toColumnId) throw new Error('cardId and toColumnId are required.')
+      if (!validId(data.cardId) || !validId(data.toColumnId)
+        || (data.beforeCardId != null && !validId(data.beforeCardId))) throw new Error('cardId and toColumnId are required, with an optional safe beforeCardId.')
       op = { type: command, cardId: data.cardId, toColumnId: data.toColumnId, beforeCardId: data.beforeCardId ?? null }
     }
     const saved = await repository.mutate(boardId, op)

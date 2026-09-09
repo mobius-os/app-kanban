@@ -740,6 +740,7 @@ export const CSS = `
     font: 500 13px/1.2 var(--font);
   }
   .kb-assignee-search > input::placeholder { color: var(--muted); opacity: 1; }
+  .kb-assignee-search:focus-within { box-shadow: 0 0 0 2px var(--accent); }
   .kb-assignee-options { min-height: 0; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 2px; }
   .kb-assignee-options::-webkit-scrollbar { display: none; }
   .kb-assignee-option {
@@ -763,6 +764,8 @@ export const CSS = `
   .kb-assignee-option-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
   .kb-assignee-option-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
   .kb-assignee-option-icon { background: color-mix(in srgb, var(--accent) 15%, var(--surface-2)); color: var(--accent); }
+  .kb-assignee-option:focus-visible,
+  .kb-assignee-mobile-head .kb-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .kb-assignee-me { margin-bottom: 4px; border-bottom: 1px solid var(--border); border-radius: 9px 9px 3px 3px; padding-bottom: 10px; }
   .kb-assignee-empty { padding: 18px 10px; color: var(--muted); font-size: 12.5px; text-align: center; }
   .kb-position-actions { display: flex; flex-wrap: wrap; gap: 8px; }

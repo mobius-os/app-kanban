@@ -73,21 +73,33 @@ export function applyPendingBoardOps(board, entries) {
 export async function replayPendingBoardOps(boardId, mutate, {
   storage = defaultStorage(),
   onLanded,
+  onDiscarded,
 } = {}) {
   let lastDoc = null
+  let discarded = 0
   while (true) {
     const entries = await readPendingBoardOps(boardId, storage)
     const entry = entries[0]
-    if (!entry) return { ok: true, doc: lastDoc, pending: 0, entries: [] }
-    const landed = await mutate(entry.op)
-    if (!landed) return { ok: false, doc: lastDoc, pending: entries.length, entries }
+    if (!entry) return { ok: true, doc: lastDoc, pending: 0, entries: [], discarded }
+    const outcome = await mutate(entry.op)
+    if (!outcome || outcome.status === 'retry') {
+      return { ok: false, doc: lastDoc, pending: entries.length, entries, discarded }
+    }
+    if (!['landed', 'discarded'].includes(outcome.status)) {
+      throw new Error('Pending operation returned an invalid replay outcome.')
+    }
     try {
       await removePendingBoardOp(boardId, entry.id, storage)
     } catch {
-      return { ok: false, doc: landed, pending: entries.length, entries }
+      return { ok: false, doc: outcome.doc || lastDoc, pending: entries.length, entries, discarded }
     }
-    lastDoc = landed
     const remaining = await readPendingBoardOps(boardId, storage)
-    onLanded?.(landed, remaining)
+    if (outcome.status === 'discarded') {
+      discarded += 1
+      onDiscarded?.(outcome.error, remaining)
+      continue
+    }
+    lastDoc = outcome.doc
+    onLanded?.(outcome.doc, remaining)
   }
 }
