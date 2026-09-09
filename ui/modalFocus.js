@@ -1,13 +1,9 @@
 import { useEffect, useRef } from 'react'
+import { visibleFocusableElements } from './focusableElements.js'
 
-const FOCUSABLE = [
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'textarea:not([disabled])',
-  'select:not([disabled])',
-  '[href]',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',')
+// Only the foremost dialog owns keyboard focus. Portalled pickers can sit above
+// a sheet without the sheet underneath pulling Tab focus away from them.
+const openDialogs = []
 
 // Shared modal behavior for sheets, panels, and in-place confirmations.
 export function useModalFocus(open, onClose) {
@@ -19,11 +15,13 @@ export function useModalFocus(open, onClose) {
     if (!open) return undefined
     const opener = document.activeElement
     const dialog = dialogRef.current
-    const focusable = () => Array.from(dialog?.querySelectorAll(FOCUSABLE) || [])
-      .filter(element => element.getAttribute('aria-hidden') !== 'true')
+    openDialogs.push(dialog)
+    const isTopmost = () => openDialogs[openDialogs.length - 1] === dialog
+    const focusable = () => visibleFocusableElements(dialog)
 
     ;(focusable()[0] || dialog)?.focus()
     const onKeyDown = event => {
+      if (!isTopmost()) return
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()
@@ -48,6 +46,8 @@ export function useModalFocus(open, onClose) {
     document.addEventListener('keydown', onKeyDown, true)
     return () => {
       document.removeEventListener('keydown', onKeyDown, true)
+      const index = openDialogs.lastIndexOf(dialog)
+      if (index >= 0) openDialogs.splice(index, 1)
       if (opener && typeof opener.focus === 'function' && opener.isConnected !== false) opener.focus()
     }
   }, [open])

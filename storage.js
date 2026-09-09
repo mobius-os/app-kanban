@@ -1,4 +1,5 @@
-// Data layer for Kanban boards.
+// Low-level private-board storage and offline copies.
+// Use boardRepository.js for authoritative reads/writes: shared boards live elsewhere.
 //
 // Layout: one document per board at `boards/<id>.json`. No shared index file —
 // the board list is enumerated with storage.list(), so creating or deleting a
@@ -165,8 +166,7 @@ export async function getBoard(id) {
 // in place (or returns a replacement) and must only touch fields it owns.
 // A missing document aborts the write: mutating a deleted board must never
 // resurrect it.
-export async function casMutate(id, op, onError) {
-  const s = store()
+export async function casMutate(id, op, onError, s = store()) {
   if (!s) return null
   for (let attempt = 0; attempt < 6; attempt++) {
     try {

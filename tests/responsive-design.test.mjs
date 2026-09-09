@@ -8,6 +8,9 @@ test('long lists scroll instead of compressing card content', () => {
   assert.match(CSS, /\.kb-card \{[^}]*flex-shrink: 0/s)
   assert.match(CSS, /\.kb-cards \{[^}]*overflow-y: auto/s)
 })
+test('horizontal board movement stays free instead of snapping to lists', () => {
+  assert.doesNotMatch(CSS, /scroll-snap-(?:type|align)/)
+})
 test('mobile list navigation changes the viewport, not the board data', () => {
   const nav = board.slice(board.indexOf('<nav className="kb-list-nav"'), board.indexOf('</nav>') + 6)
   assert.match(nav, /scrollIntoView/)
