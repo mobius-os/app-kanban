@@ -435,6 +435,21 @@ export const CSS = `
   .kb-input:focus { outline: none; }
   .kb-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
   .kb-composer-row { display: flex; gap: 8px; }
+  .kb-col-confirm {
+    margin: 4px 10px 10px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: color-mix(in srgb, var(--danger) 9%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--danger) 34%, var(--border));
+    border-radius: 12px;
+  }
+  .kb-col-confirm-copy { font-size: 13px; line-height: 1.45; color: var(--text); }
+  .kb-col-confirm-copy strong { font-weight: 650; }
+  .kb-col-confirm-actions { display: flex; gap: 8px; }
+  .kb-col-confirm-actions .kb-btn { flex: 1; }
+  .kb-col-confirm-actions .kb-btn-quiet { background: var(--surface-2); color: var(--text); }
   .kb-btn {
     border: none;
     border-radius: 10px;
