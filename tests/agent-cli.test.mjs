@@ -28,7 +28,7 @@ test('CLI writes private and shared boards through their authority using JSON an
       res.setHeader('ETag', '"local"')
       return send(local)
     }
-    if (req.url.startsWith('/api/common/objects/peer.example/obj/state')) {
+    if (req.url.startsWith('/api/services/common/objects/peer.example/obj/state')) {
       if (req.method === 'PUT') {
         const data = JSON.parse(body)
         if (data.expected_version !== version) return send({ status: 'conflict' })
