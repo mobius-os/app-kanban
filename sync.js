@@ -9,7 +9,7 @@
 
 import { normalizeBoard, boardPath, getBoard } from './storage.js'
 
-const API = '/api/services/common/objects'
+const API = '/api/services/social/objects'
 const store = () => window.mobius?.storage
 
 let _auth = null

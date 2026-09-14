@@ -40,9 +40,9 @@ test('shared image operations stay scoped to the board host and object', async (
   })
   await deleteSharedAsset(entry, 'image', request)
   assert.deepEqual(calls.map(call => [call.url, call.options.method || 'GET']), [
-    ['/api/services/common/objects/peer.example/board-object/assets/image', 'PUT'],
-    ['/api/services/common/objects/peer.example/board-object/assets/image', 'GET'],
-    ['/api/services/common/objects/peer.example/board-object/assets/image', 'DELETE'],
+    ['/api/services/social/objects/peer.example/board-object/assets/image', 'PUT'],
+    ['/api/services/social/objects/peer.example/board-object/assets/image', 'GET'],
+    ['/api/services/social/objects/peer.example/board-object/assets/image', 'DELETE'],
   ])
   assert.equal(calls[0].options.headers.Authorization, 'Bearer test-token')
   assert.deepEqual(JSON.parse(calls[0].options.body), { mime: 'image/webp', data: 'abc' })
@@ -71,7 +71,7 @@ test('creating a shareable invite omits the address from the request', async () 
   }
 
   const result = await createInvite('object', 'viewer')
-  assert.equal(request.url, '/api/services/common/objects/object/invites')
+  assert.equal(request.url, '/api/services/social/objects/object/invites')
   assert.equal(request.options.method, 'POST')
   assert.deepEqual(request.body, { role: 'viewer' })
   assert.equal(result.invite, 'object@host.example#secret')
@@ -110,7 +110,7 @@ test('accepting an invitation durably saves both the board and membership', asyn
     async getWithVersion() { return { value: null, version: null } },
   } } }
   globalThis.fetch = async (url, options) => {
-    assert.equal(url, '/api/services/common/objects/join')
+    assert.equal(url, '/api/services/social/objects/join')
     assert.equal(options.headers.Authorization, 'Bearer test-token')
     return new Response(JSON.stringify({
       membership: { id: 'remote-id', host: 'peer.example', role: 'viewer', label: 'Shared' },
@@ -139,7 +139,7 @@ test('joining with an invite sends the capability string and sets up the local b
     async getWithVersion() { return { value: null, version: null } },
   } } }
   globalThis.fetch = async (url, options) => {
-    assert.equal(url, '/api/services/common/objects/join')
+    assert.equal(url, '/api/services/social/objects/join')
     assert.deepEqual(JSON.parse(options.body), {
       app: 'kanban',
       invite: 'remote-id@peer.example#secret',
@@ -271,8 +271,8 @@ test('remove collaborator explicitly revokes all grouped deployments, but legacy
   await revokeCollaborator('oid', { host: 'one.example', collaborator_id: 'group' })
   await revokeCollaborator('oid', { host: 'legacy.example' })
   assert.deepEqual(urls, [
-    '/api/services/common/objects/oid/members/one.example?all_deployments=true',
-    '/api/services/common/objects/oid/members/legacy.example',
+    '/api/services/social/objects/oid/members/one.example?all_deployments=true',
+    '/api/services/social/objects/oid/members/legacy.example',
   ])
 })
 
