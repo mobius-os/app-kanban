@@ -710,7 +710,7 @@ export default function Board({
   const lastInteractionAtRef = useRef(Date.now())
   const fileInputRef = useRef(null)
   const cardSheetRef = useModalFocus(Boolean(openCardId), () => setOpenCardId(null))
-  const columnConfirmRef = useModalFocus(Boolean(confirmDeleteCol), () => setConfirmDeleteCol(null))
+  const columnConfirmRef = useModalFocus(confirmDeleteCol, () => setConfirmDeleteCol(null))
   boardRef.current = board
   shareRef.current = share
   onlineRef.current = online
@@ -1479,18 +1479,20 @@ export default function Board({
                   className="kb-iconbtn kb-col-action"
                   aria-label={`Delete list ${col.name}`}
                   disabled={!access.canWrite}
-                  onClick={() => (allCards.length ? setConfirmDeleteCol(col.id) : deleteColumn(col.id))}
+                  onClick={() => setConfirmDeleteCol(col.id)}
                 >
                   <Trash />
                   </button>
                 </div>
               </div>
               {access.canWrite && confirmDeleteCol === col.id && (
-                <div ref={columnConfirmRef} tabIndex={-1} className="kb-composer" role="alertdialog" aria-modal="true" aria-label="Confirm delete">
-                  <div className="kb-empty">Delete “{col.name}” and its {allCards.length} card{allCards.length === 1 ? '' : 's'}?</div>
-                  <div className="kb-composer-row">
-                    <button className="kb-btn kb-btn-danger" onClick={() => deleteColumn(col.id)}>Delete</button>
+                <div ref={columnConfirmRef} tabIndex={-1} className="kb-col-confirm" role="alertdialog" aria-modal="true" aria-label={`Delete list ${col.name}`}>
+                  <div className="kb-col-confirm-copy">
+                    Delete <strong>“{col.name}”</strong>{allCards.length ? ` and its ${allCards.length} card${allCards.length === 1 ? '' : 's'}` : ''}?
+                  </div>
+                  <div className="kb-col-confirm-actions">
                     <button className="kb-btn kb-btn-quiet" onClick={() => setConfirmDeleteCol(null)}>Cancel</button>
+                    <button className="kb-btn kb-btn-danger" onClick={() => deleteColumn(col.id)}>Delete</button>
                   </div>
                 </div>
               )}
