@@ -710,7 +710,7 @@ export default function Board({
   const lastInteractionAtRef = useRef(Date.now())
   const fileInputRef = useRef(null)
   const cardSheetRef = useModalFocus(Boolean(openCardId), () => setOpenCardId(null))
-  const columnConfirmRef = useModalFocus(Boolean(confirmDeleteCol), () => setConfirmDeleteCol(null))
+  const columnConfirmRef = useModalFocus(confirmDeleteCol, () => setConfirmDeleteCol(null))
   boardRef.current = board
   shareRef.current = share
   onlineRef.current = online
@@ -1491,8 +1491,8 @@ export default function Board({
                     Delete <strong>“{col.name}”</strong>{allCards.length ? ` and its ${allCards.length} card${allCards.length === 1 ? '' : 's'}` : ''}?
                   </div>
                   <div className="kb-col-confirm-actions">
-                    <button className="kb-btn kb-btn-danger" onClick={() => deleteColumn(col.id)}>Delete</button>
                     <button className="kb-btn kb-btn-quiet" onClick={() => setConfirmDeleteCol(null)}>Cancel</button>
+                    <button className="kb-btn kb-btn-danger" onClick={() => deleteColumn(col.id)}>Delete</button>
                   </div>
                 </div>
               )}
