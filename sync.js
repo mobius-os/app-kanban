@@ -103,17 +103,33 @@ export async function inviteByHandle(oid, address, role) {
   return createInvite(oid, role, address)
 }
 
-export async function listInvitations() {
-  const res = await _json(await fetch(`${API}/invitations`, { headers: _auth }))
-  return res.invitations || []
+let invitationRequest = null
+export function listInvitations() {
+  // Visibility events, startup and the polling timer share one in-flight read.
+  // Never accumulate refresh requests behind a slow federation operation.
+  if (!invitationRequest) {
+    invitationRequest = (async () => {
+      const res = await _json(await fetch(`${API}/invitations`, { headers: _auth }))
+      return res.invitations || []
+    })().finally(() => { invitationRequest = null })
+  }
+  return invitationRequest
 }
 
 async function saveJoinedBoard(res) {
   const m = res.membership
   const doc = normalizeBoard(res.doc) || { v: 1, title: m.label || 'Shared board', columns: [], cards: {} }
   const boardId = m.id
-  await store().durableWrite(boardPath(boardId), doc)
-  await saveShareEntry(boardId, { oid: m.id, host: m.host, role: m.role, version: 0 })
+  // Publish the authority before a replaceable cache. A cache-only success
+  // must never make a joined shared board look privately writable.
+  await saveShareEntry(boardId, { oid: m.id, host: m.host, role: m.role, version: 0, label: doc.title })
+  try {
+    await store().durableWrite(boardPath(boardId), doc)
+  } catch (error) {
+    // Membership is already durable; discovery includes that pointer and the
+    // board can pull its authority even with no local copy. No rollback/delete.
+    window.mobius?.signal?.('error', { source: 'joined-board-cache', message: String(error?.message || error) })
+  }
   return { boardId, doc }
 }
 
@@ -250,18 +266,41 @@ export function cacheSubscriptionIsAuthoritative(shareEntry) {
   return !shareEntry
 }
 
-export function sharedCursorAfterWrite(landed) {
-  return landed && Number.isFinite(landed.version) ? landed.version : -1
+// Keep the last confirmed version and document together. An unchanged poll or
+// late write reply must not lose a newer document deferred during local input.
+export function rememberSharedState(previous, entry, state) {
+  if (!entry) return null
+  const current = previous?.host === entry.host && previous?.oid === entry.oid ? previous : null
+  if ((state?.host && state.host !== entry.host) || (state?.oid && state.oid !== entry.oid)) return current
+  if (!Number.isSafeInteger(state?.version) || state.version < 0 || !state.doc
+    || typeof state.doc !== 'object' || Array.isArray(state.doc)) return current
+  if (current && current.version >= state.version) return current
+  return { host: entry.host, oid: entry.oid, version: state.version,
+    doc: normalizeBoard(structuredClone(state.doc)) }
 }
 
 // Apply `op` to the shared doc with CAS retry. Returns the doc that landed.
-export async function pushSharedOp(entry, op, onError, request = fetch) {
+export async function pushSharedOp(entry, op, onError, request = fetch, confirmed = null) {
+  // This is a version-bound hint, never the optimistic UI or an offline copy.
+  // The host still authorizes and CAS-checks every write.
+  let state = confirmed?.host === entry.host && confirmed?.oid === entry.oid
+    ? rememberSharedState(null, entry, confirmed) : null
+  let hinted = Boolean(state)
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      const state = await pullShared(entry, -1, request)
-      const base = normalizeBoard(state.doc)
+      state ||= await pullShared(entry, -1, request)
+      const base = normalizeBoard(structuredClone(state.doc))
       if (!base) return null
-      const next = op(structuredClone(base)) || base
+      let next
+      try { next = op(base) || base } catch (error) {
+        // A cached version may predate a card's creation. Re-read before
+        // treating a domain validation error as terminal and discarding intent.
+        if (!hinted) throw error
+        state = null
+        hinted = false
+        continue
+      }
+      hinted = false
       const res = await _json(await request(
         `${API}/${encodeURIComponent(entry.host)}/${entry.oid}/state`,
         {
@@ -270,7 +309,11 @@ export async function pushSharedOp(entry, op, onError, request = fetch) {
           body: JSON.stringify({ doc: next, expected_version: state.version }),
         },
       ))
-      if (res.status === 'conflict') continue
+      if (res.status === 'conflict') {
+        // A conflict already carries the latest authoritative document/version.
+        state = rememberSharedState(null, entry, res)
+        continue
+      }
       return { doc: next, version: res.version }
     } catch (e) {
       onError?.(e)

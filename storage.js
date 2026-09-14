@@ -144,10 +144,27 @@ export async function listBoards() {
         })),
         createdAt: String(doc.createdAt || ''),
       })
+    } else {
+      boards.push({ id: e.name.replace(/\.json$/, ''), title: 'Board unavailable',
+        unavailable: true, columnPreview: [], createdAt: '' })
     }
   }
   boards.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   return boards
+}
+
+// A joined board remains discoverable if its replaceable local copy is absent.
+// Do not call a missing preview an empty board or seed over a partial listing.
+export function includeSharedBoards(boards, shareMap) {
+  const indexed = new Map(boards.map(board => [board.id, board]))
+  for (const [id, entry] of Object.entries(shareMap?.byBoard || {})) {
+    const previous = indexed.get(id)
+    if (!previous || previous.unavailable) {
+      indexed.set(id, { id, title: entry?.label || 'Shared board', unavailable: true,
+        columnPreview: [], createdAt: previous?.createdAt || '' })
+    }
+  }
+  return [...indexed.values()]
 }
 
 export async function createBoard(title) {

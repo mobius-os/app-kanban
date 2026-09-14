@@ -33,13 +33,17 @@ function validId(value) {
 }
 
 export function createBoardRepository({ storage, request = globalThis.fetch }) {
-  async function authority(boardId) {
+  async function sharingMap() {
     // A failed lookup must never be interpreted as "private".
     const { value } = await storage.getWithVersion('shared.json')
     if (value != null && (!isRecord(value) || !isRecord(value.byBoard))) {
       throw boardError('Board sharing information is malformed.', 'invalid-sharing-map', { discardable: false })
     }
-    const entry = value?.byBoard?.[boardId] || null
+    return value?.byBoard || {}
+  }
+
+  async function authority(boardId) {
+    const entry = (await sharingMap())[boardId] || null
     if (entry && (!isRecord(entry) || !validId(entry.host) || !validId(entry.oid)
       || !['editor', 'viewer'].includes(entry.role))) {
       throw boardError('Board sharing address is incomplete.', 'invalid-sharing-entry', { discardable: false })
@@ -54,20 +58,27 @@ export function createBoardRepository({ storage, request = globalThis.fetch }) {
       : await storage.getWithVersion(boardPath(boardId)).then(({ value, version }) => ({ doc: value, version }))
     const doc = normalizeBoard(state.doc)
     if (!doc) throw new Error('Board not found or unavailable.')
-    return { doc, version: state.version, authority: entry ? 'shared' : 'private' }
+    return { doc, version: state.version, authority: entry ? 'shared' : 'private',
+      ...(entry ? { host: entry.host, oid: entry.oid } : {}) }
   }
 
   async function list() {
-    const entries = await storage.list('boards/')
-    return Promise.all(entries.filter(item => item.name.endsWith('.json')).map(async item => {
-      const id = item.name.slice(0, -5)
-      const state = await read(id)
-      return { id, title: state.doc.title, authority: state.authority,
-        columns: state.doc.columns.map(({ id, name }) => ({ id, name })) }
+    const [entries, shared] = await Promise.all([storage.list('boards/'), sharingMap()])
+    const ids = new Set([...entries.filter(item => item.name.endsWith('.json')).map(item => item.name.slice(0, -5)), ...Object.keys(shared)])
+    return Promise.all([...ids].map(async id => {
+      try {
+        const state = await read(id)
+        return { id, title: state.doc.title, authority: state.authority,
+          columns: state.doc.columns.map(({ id, name }) => ({ id, name })) }
+      } catch (error) {
+        // Discovery is partial, but authority is not: retain the failed board
+        // explicitly without inventing columns or reading its stale cache.
+        return { id, status: 'unavailable', error: String(error?.message || error) }
+      }
     }))
   }
 
-  async function mutate(boardId, op) {
+  async function mutate(boardId, op, { sharedState = null } = {}) {
     const entry = await authority(boardId)
     if (entry && entry.role !== 'editor') throw boardError('This shared board is read-only.', 'read-only')
     const apply = doc => {
@@ -88,7 +99,7 @@ export function createBoardRepository({ storage, request = globalThis.fetch }) {
     let error
     const onError = cause => { error = cause }
     const landed = entry
-      ? await pushSharedOp(entry, apply, onError, request)
+      ? await pushSharedOp(entry, apply, onError, request, sharedState)
       : await casMutate(boardId, apply, onError, storage).then(doc => doc && ({ doc }))
     if (!landed && entry && error?.status === 403) {
       throw boardError('This shared board is read-only.', 'read-only')
@@ -100,7 +111,8 @@ export function createBoardRepository({ storage, request = globalThis.fetch }) {
     // Only a confirmed shared write may refresh the offline copy. Cache failure
     // cannot turn a committed operation into a failed operation.
     if (entry) await storage.set(boardPath(boardId), landed.doc).catch(() => {})
-    return { ...landed, authority: entry ? 'shared' : 'private' }
+    return { ...landed, authority: entry ? 'shared' : 'private',
+      ...(entry ? { host: entry.host, oid: entry.oid } : {}) }
   }
   return { list, read, mutate }
 }

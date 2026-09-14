@@ -120,11 +120,11 @@ test('accepting an invitation durably saves both the board and membership', asyn
 
   const result = await acceptInvitation({ id: 'remote-id', host: 'peer.example', label: 'Shared' })
   assert.equal(result.boardId, 'remote-id')
-  assert.equal(writes[0].path, 'boards/remote-id.json')
-  assert.equal(writes[0].value.future, true)
-  assert.deepEqual(writes[1], {
+  assert.equal(writes[1].path, 'boards/remote-id.json')
+  assert.equal(writes[1].value.future, true)
+  assert.deepEqual(writes[0], {
     path: 'shared.json',
-    value: { byBoard: { 'remote-id': { oid: 'remote-id', host: 'peer.example', role: 'viewer', version: 0 } } },
+    value: { byBoard: { 'remote-id': { oid: 'remote-id', host: 'peer.example', role: 'viewer', version: 0, label: 'Shared' } } },
     options: { ifNoneMatch: true },
   })
 })
@@ -152,9 +152,9 @@ test('joining with an invite sends the capability string and sets up the local b
 
   const result = await joinWithInvite('  remote-id@peer.example#secret  ')
   assert.equal(result.boardId, 'remote-id')
-  assert.equal(writes[0].path, 'boards/remote-id.json')
-  assert.deepEqual(writes[1].value.byBoard['remote-id'], {
-    oid: 'remote-id', host: 'peer.example', role: 'editor', version: 0,
+  assert.equal(writes[1].path, 'boards/remote-id.json')
+  assert.deepEqual(writes[0].value.byBoard['remote-id'], {
+    oid: 'remote-id', host: 'peer.example', role: 'editor', version: 0, label: 'Joined',
   })
 })
 
@@ -164,7 +164,6 @@ test('shared CAS retries against the newest document and preserves concurrent fi
   const replies = [
     { status: 'ok', version: 1, doc: { v: 1, title: 'old', columns: [], cards: {} } },
     { status: 'conflict', version: 2, doc: { v: 1, title: 'other', columns: [], cards: {}, future: 'kept' } },
-    { status: 'ok', version: 2, doc: { v: 1, title: 'other', columns: [], cards: {}, future: 'kept' } },
     { status: 'ok', version: 3 },
   ]
   globalThis.fetch = async (_url, options = {}) => {

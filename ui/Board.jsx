@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
-import { pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite, sharedBoardPollDelay } from '../sync.js'
+import { pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
 import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
@@ -685,6 +685,8 @@ export default function Board({
   const [drag, setDrag] = useState(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [syncNote, setSyncNote] = useState('')
+  const [loadFailure, setLoadFailure] = useState(false)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [filterText, setFilterText] = useState('')
   const [filterLabels, setFilterLabels] = useState([])
@@ -701,7 +703,7 @@ export default function Board({
   const writeChain = useRef(Promise.resolve())
   const dragRef = useRef(null)
   const rectsRef = useRef(null)
-  const versionRef = useRef(-1)
+  const confirmedSharedRef = useRef(null)
   const shareRef = useRef(share)
   const onlineRef = useRef(online)
   const filtersRef = useRef({ text: filterText, labels: filterLabels })
@@ -764,6 +766,7 @@ export default function Board({
   useEffect(() => {
     let unsub = null
     let alive = true
+    setLoadFailure(false)
     Promise.all([getBoard(boardId), readPendingBoardOps(boardId)]).then(([doc, pendingEntries]) => {
       if (!alive) return
       pendingEntriesRef.current = pendingEntries
@@ -771,6 +774,8 @@ export default function Board({
         const initial = applyPendingBoardOps(doc, pendingEntries)
         boardRef.current = initial
         setBoard(initial)
+      } else if (!shareRef.current) {
+        setLoadFailure(true)
       }
       setQueuedCount(pendingEntries.length)
       unsub = subscribeBoard(boardId, async v => {
@@ -787,10 +792,12 @@ export default function Board({
         setBoard(next)
       })
     }).catch(err => {
+      if (!alive) return
+      setLoadFailure(true)
       window.mobius?.signal?.('error', { message: String(err?.message || err), source: 'board-load' })
     })
     return () => { alive = false; unsub?.() }
-  }, [boardId])
+  }, [boardId, loadAttempt])
 
   // Shared boards: poll the shared object and fold newer documents in.
   useEffect(() => {
@@ -798,7 +805,7 @@ export default function Board({
     let alive = true
     let pulling = false
     let timer = null
-    versionRef.current = -1
+    confirmedSharedRef.current = null
     lastInteractionAtRef.current = Date.now()
     const schedule = () => {
       if (!alive) return
@@ -814,18 +821,22 @@ export default function Board({
       }
       pulling = true
       try {
-        const state = await pullShared(share, versionRef.current)
+        const state = await pullShared(share, confirmedSharedRef.current?.version ?? -1)
         if (!alive) return
-        if (state.version < versionRef.current) return
-        versionRef.current = state.version
-        if (state.doc) {
-          const normalized = normalizeBoard(state.doc)
-          window.mobius?.storage?.set(boardPath(boardId), normalized).catch(() => {})
-          if (pendingRef.current === 0 && !dragRef.current) {
-            const rendered = applyPendingBoardOps(normalized, pendingEntriesRef.current)
-            boardRef.current = rendered
-            setBoard(rendered)
-          }
+        const previous = confirmedSharedRef.current
+        if (state.version < (previous?.version ?? -1)) return
+        const confirmed = rememberSharedState(previous, share, state)
+        confirmedSharedRef.current = confirmed
+        if (confirmed && confirmed !== previous) {
+          window.mobius?.storage?.set(boardPath(boardId), confirmed.doc).catch(() => {})
+        }
+        // Even an unchanged poll can now reveal a document received while a
+        // drag/write temporarily suppressed rendering. The version never
+        // advances independently of the document we must eventually show.
+        if (confirmed && pendingRef.current === 0 && !replayingRef.current && !dragRef.current) {
+          const rendered = applyPendingBoardOps(confirmed.doc, pendingEntriesRef.current)
+          boardRef.current = rendered
+          setBoard(rendered)
         }
         if (state.object) {
           const nextMembers = memberRecords(state.object)
@@ -833,6 +844,8 @@ export default function Board({
         }
         if (pendingEntriesRef.current.length === 0) setSyncNote('')
       } catch (e) {
+        if (!alive) return
+        setLoadFailure(true)
         setSyncNote('Reconnecting — showing your last copy')
       } finally {
         pulling = false
@@ -848,7 +861,7 @@ export default function Board({
     }
     document.addEventListener('visibilitychange', onVis)
     return () => { alive = false; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis) }
-  }, [share, boardId])
+  }, [share, boardId, loadAttempt])
 
   const mutate = useCallback((operation, onCommit) => {
     const entry = shareRef.current
@@ -894,14 +907,14 @@ export default function Board({
     let settled = null
     writeChain.current = writeChain.current.catch(() => {}).then(async () => {
       try {
-        const landed = await createBoardRepository({ storage: window.mobius.storage }).mutate(boardId, operation)
-        if (landed.authority === 'shared') versionRef.current = sharedCursorAfterWrite(landed)
+        const landed = await createBoardRepository({ storage: window.mobius.storage }).mutate(boardId, operation, { sharedState: confirmedSharedRef.current })
+        if (landed.authority === 'shared') confirmedSharedRef.current = rememberSharedState(confirmedSharedRef.current, shareRef.current, landed)
         settled = landed.doc
         onCommit?.()
         return
       } catch (error) {
         const retryable = isRetryableBoardError(error)
-        if (entry) versionRef.current = -1
+        if (entry) confirmedSharedRef.current = null
         if (!retryable) {
           window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'save' })
           settled = before
@@ -928,8 +941,10 @@ export default function Board({
       if (pendingRef.current === 0) {
         if (entry) {
           if (settled && !dragRef.current) {
-            boardRef.current = settled
-            setBoard(settled)
+            const base = confirmedSharedRef.current?.doc || settled
+            const rendered = applyPendingBoardOps(base, pendingEntriesRef.current)
+            boardRef.current = rendered
+            setBoard(rendered)
           }
         } else {
           getBoard(boardId).then(v => {
@@ -959,8 +974,8 @@ export default function Board({
           boardId,
           async op => {
             try {
-              const landed = await createBoardRepository({ storage: window.mobius.storage }).mutate(boardId, op)
-              if (landed.authority === 'shared') versionRef.current = sharedCursorAfterWrite(landed)
+              const landed = await createBoardRepository({ storage: window.mobius.storage }).mutate(boardId, op, { sharedState: confirmedSharedRef.current })
+              if (landed.authority === 'shared') confirmedSharedRef.current = rememberSharedState(confirmedSharedRef.current, shareRef.current, landed)
               return { status: 'landed', doc: landed.doc }
             } catch (error) {
               window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-replay' })
@@ -973,7 +988,7 @@ export default function Board({
               if (!alive || dragRef.current) return
               const rendered = remaining.reduce(
                 (doc, entry) => applyBoardOp(doc, entry.op) || doc,
-                structuredClone(landed),
+                structuredClone(confirmedSharedRef.current?.doc || landed),
               )
               boardRef.current = rendered
               setBoard(rendered)
@@ -989,12 +1004,13 @@ export default function Board({
         if (result.discarded) {
           try {
             const fresh = await createBoardRepository({ storage: window.mobius.storage }).read(boardId)
-            const rendered = applyPendingBoardOps(fresh.doc, result.entries)
+            if (fresh.authority === 'shared') confirmedSharedRef.current = rememberSharedState(confirmedSharedRef.current, shareRef.current, fresh)
+            const rendered = applyPendingBoardOps(confirmedSharedRef.current?.doc || fresh.doc, result.entries)
             boardRef.current = rendered
             setBoard(rendered)
             setSyncNote(`${result.discarded} outdated change${result.discarded === 1 ? '' : 's'} skipped`)
           } catch (error) {
-            versionRef.current = -1
+            confirmedSharedRef.current = null
             setSyncNote('An outdated change was skipped — refreshing the board')
             window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-refresh' })
           }
@@ -1307,7 +1323,17 @@ export default function Board({
   }, [drag])
   const openCard = id => { if (!suppressClick.current) setOpenCardId(id) }
 
-  if (!board) return <div className="kb-board" />
+  if (!board) return <>
+    <div className="kb-header">
+      <button className="kb-btn" onClick={onAllBoards}><ChevronLeft /> All boards</button>
+    </div>
+    <div className="kb-board kb-board-empty"><div className="kb-empty-board-state" role={loadFailure ? 'alert' : 'status'}>
+      {loadFailure ? <>
+        <p>This board couldn’t be loaded. Your saved data is unchanged.</p>
+        <button className="kb-btn kb-btn-primary" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Try again</button>
+      </> : 'Loading board…'}
+    </div></div>
+  </>
 
   const openCard_ = openCardId ? board.cards[openCardId] : null
   const openCardColumn = openCard_ ? board.columns.find(column => column.cardIds.includes(openCard_.id)) : null

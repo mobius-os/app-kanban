@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { CSS } from './theme.js'
-import { listBoards, createBoard, deleteBoard, loadUi, migrateLegacy, saveLastBoardId, seedFirstBoard } from './storage.js'
+import { listBoards, includeSharedBoards, createBoard, deleteBoard, loadUi, migrateLegacy, saveLastBoardId, seedFirstBoard } from './storage.js'
 import { configureSync, loadShareMap, listInvitations, acceptInvitation, joinWithInvite, declineInvitation, leaveBoard, deleteSharedObject, removeShareEntry } from './sync.js'
 import Home from './ui/Home.jsx'
 import Board from './ui/Board.jsx'
@@ -34,7 +34,8 @@ export default function App({ appId, token }) {
 
   const refresh = useCallback(async () => {
     try {
-      const [b, map] = await Promise.all([listBoards(), loadShareMap()])
+      const [cached, map] = await Promise.all([listBoards(), loadShareMap()])
+      const b = includeSharedBoards(cached, map)
       setBoards(b)
       setLoadError(false)
       setShareMap(map)
@@ -56,6 +57,7 @@ export default function App({ appId, token }) {
       try {
         await migrateLegacy()
         let [b, map, ui] = await Promise.all([listBoards(), loadShareMap(), loadUi()])
+        b = includeSharedBoards(b, map)
         // First run: seed one board so the app is immediately useful.
         if (b.length === 0) {
           await seedFirstBoard()

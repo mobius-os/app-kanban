@@ -10,7 +10,7 @@ import {
   replayPendingBoardOps,
 } from '../pendingOps.js'
 import { casMutate } from '../storage.js'
-import { cacheSubscriptionIsAuthoritative, sharedCursorAfterWrite } from '../sync.js'
+import { cacheSubscriptionIsAuthoritative, rememberSharedState } from '../sync.js'
 import { createBoardRepository, replayOutcomeForBoardError } from '../boardRepository.js'
 
 function memoryStorage() {
@@ -159,7 +159,7 @@ test('shared poll/write/subscription race keeps the versioned poll as sole autho
 
   // The shared write fails. The cursor must force a full re-pull, and an older
   // unversioned cache notification is not allowed to replace either authority.
-  cursor = sharedCursorAfterWrite(null)
+  cursor = rememberSharedState(null, share, null)?.version ?? -1
   rendered = before
   assert.equal(cursor, -1)
   if (cacheSubscriptionIsAuthoritative(share)) rendered = { title: 'Old cache' }

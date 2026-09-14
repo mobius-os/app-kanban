@@ -17,3 +17,12 @@ test('load failure preserves last loaded boards and offers an explicit retry', (
   assert.match(source, /Boards couldn’t be loaded/)
   assert.match(source, /setLoadAttempt\(attempt => attempt \+ 1\)/)
 })
+
+
+test('an unavailable board exposes retry and the owning all-boards callback', () => {
+  const source = readFileSync(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
+  const fallback = source.slice(source.indexOf('  if (!board) return'), source.indexOf('  if (!board) return') + 700)
+  assert.match(fallback, /onClick=\{onAllBoards\}/)
+  assert.match(fallback, /setLoadAttempt\(attempt => attempt \+ 1\)/)
+  assert.doesNotMatch(fallback, /onClick=\{onClose\}/)
+})
