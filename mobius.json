@@ -1,7 +1,7 @@
 {
   "id": "kanban",
   "name": "Kanban",
-  "version": "0.5.5",
+  "version": "0.6.0",
   "description": "Kanban boards that open where you left off: drag-and-drop lists, due dates and assignees, and live collaboration with people on their own Möbius.",
   "author": "mobius-os",
   "license": "MIT",
@@ -43,11 +43,12 @@
     "scripts/kanban.mjs",
     "kanban-agent.md",
     "service.py",
+    "collaboration/__init__.py",
     "collaboration/net_utils.py",
     "collaboration/service.py",
-    "collaboration/__init__.py",
+    "collaboration/store.py",
     "collaboration/transport.py",
-    "collaboration/store.py"
+    "publication.js"
   ],
   "store": {
     "tagline": "Boards that open where you left off — and that your friends can join.",

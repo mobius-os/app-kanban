@@ -1,9 +1,10 @@
+import { configureSync as configureFixture } from '../sync.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { rememberSharedState, pushSharedOp, listInvitations } from '../sync.js'
 import { createBoardRepository } from '../boardRepository.js'
 
-const entry = { host: 'peer.example', oid: 'object', role: 'editor' }
+const entry = { transport: 'kanban/1', host: 'peer.example', oid: 'object', role: 'editor' }
 const doc = (title = 'Board') => ({ v: 1, title, columns: [], cards: {} })
 const confirmed = () => rememberSharedState(null, entry, { version: 3, doc: doc() })
 
@@ -37,7 +38,7 @@ test('conflicts rebase on the returned authority without a redundant read', asyn
 })
 
 test('optimistic or another host snapshot cannot bypass an authoritative read', async () => {
-  for (const seed of [{ doc: doc(), version: 3 }, { ...confirmed(), host: 'other.example' }]) {
+  for (const seed of [{ doc: doc(), version: 3 }, { ...confirmed(), transport: 'kanban/1', host: 'other.example' }]) {
     const calls = []
     await pushSharedOp(entry, value => value, null, async (url, options = {}) => {
       calls.push(options.method || 'GET')
@@ -101,8 +102,10 @@ test('overlapping invitation refreshes share one request and failures are retrya
 
 
 test('a completed write from the previous host is never relabelled as the new authority', () => {
-  const nextEntry = { ...entry, host: 'migrated.example' }
+  const nextEntry = { ...entry, transport: 'kanban/1', host: 'migrated.example' }
   const current = rememberSharedState(null, nextEntry, { version: 1, doc: doc('Migrated') })
   assert.equal(rememberSharedState(current, nextEntry, confirmed()), current)
   assert.equal(rememberSharedState(confirmed(), null, { version: 4, doc: doc() }), null)
 })
+
+test.beforeEach(() => configureFixture('fixture', 1))

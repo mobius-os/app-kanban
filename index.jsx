@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { CSS } from './theme.js'
 import { listBoards, includeSharedBoards, createBoard, deleteBoard, loadUi, migrateLegacy, saveLastBoardId, seedFirstBoard } from './storage.js'
-import { configureSync, loadShareMap, listInvitations, acceptInvitation, joinWithInvite, declineInvitation, leaveBoard, deleteSharedObject, removeShareEntry } from './sync.js'
+import { configureSync, recoverMemberships, loadShareMap, listInvitations, acceptInvitation, joinWithInvite, declineInvitation, leaveBoard, deleteSharedObject, removeShareEntry } from './sync.js'
+import { sharingFromBoards } from './publication.js'
 import Home from './ui/Home.jsx'
 import Board from './ui/Board.jsx'
 
@@ -18,7 +19,7 @@ export default function App({ appId, token }) {
   const openBoardIdRef = useRef(null)
   const readySignalled = useRef(false)
 
-  configureSync(token)
+  configureSync(token, appId)
 
   const refreshInvitations = useCallback(async () => {
     try {
@@ -34,7 +35,8 @@ export default function App({ appId, token }) {
 
   const refresh = useCallback(async () => {
     try {
-      const [cached, map] = await Promise.all([listBoards(), loadShareMap()])
+      const [cached, loadedMap] = await Promise.all([listBoards(), loadShareMap()])
+      const map = sharingFromBoards(cached, loadedMap)
       const b = includeSharedBoards(cached, map)
       setBoards(b)
       setLoadError(false)
@@ -56,7 +58,11 @@ export default function App({ appId, token }) {
     ;(async () => {
       try {
         await migrateLegacy()
+        try { await recoverMemberships() } catch(error) {
+          window.mobius?.signal?.('error', {source:'membership-recovery',message:String(error?.message || error)})
+        }
         let [b, map, ui] = await Promise.all([listBoards(), loadShareMap(), loadUi()])
+        map = sharingFromBoards(b, map)
         b = includeSharedBoards(b, map)
         // First run: seed one board so the app is immediately useful.
         if (b.length === 0) {
@@ -194,7 +200,7 @@ export default function App({ appId, token }) {
 
   const onDelete = useCallback(async id => {
     try {
-      const entry = (await loadShareMap()).byBoard[id]
+      const entry = sharingFromBoards(await listBoards(), await loadShareMap()).byBoard[id]
       if (entry?.hosted) {
         await deleteSharedObject(entry.oid)
         await removeShareEntry(id)

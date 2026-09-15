@@ -2,6 +2,7 @@
 // The storage adapter differs between browser and CLI; board semantics do not.
 import { boardPath, normalizeBoard, casMutate } from './storage.js'
 import { pullShared, pushSharedOp } from './sync.js'
+import { PUBLICATION, publicationPending } from './publication.js'
 import { applyBoardOp } from './operations.js'
 
 const RESERVED_IDS = new Set(['__proto__', 'prototype', 'constructor'])
@@ -43,7 +44,8 @@ export function createBoardRepository({ storage, request = globalThis.fetch }) {
   }
 
   async function authority(boardId) {
-    const entry = (await sharingMap())[boardId] || null
+    const entry = (await sharingMap())[boardId]
+      || (await storage.getWithVersion(boardPath(boardId))).value?.[PUBLICATION] || null
     if (entry && (!isRecord(entry) || !validId(entry.host) || !validId(entry.oid)
       || !['editor', 'viewer'].includes(entry.role))) {
       throw boardError('Board sharing address is incomplete.', 'invalid-sharing-entry', { discardable: false })
@@ -82,6 +84,7 @@ export function createBoardRepository({ storage, request = globalThis.fetch }) {
     const entry = await authority(boardId)
     if (entry && entry.role !== 'editor') throw boardError('This shared board is read-only.', 'read-only')
     const apply = doc => {
+      if (!entry && doc[PUBLICATION]) throw publicationPending()
       if (op.type === 'add-card' && !validId(op.card?.id)) throw boardError('Card id is invalid.', 'invalid-operation')
       if (op.cardId && !validId(op.cardId)) throw boardError('Card id is invalid.', 'invalid-operation')
       if (op.type === 'add-card' && Object.hasOwn(doc.cards, op.card.id)) return doc
@@ -101,10 +104,10 @@ export function createBoardRepository({ storage, request = globalThis.fetch }) {
     const landed = entry
       ? await pushSharedOp(entry, apply, onError, request, sharedState)
       : await casMutate(boardId, apply, onError, storage).then(doc => doc && ({ doc }))
-    if (!landed && entry && error?.status === 403) {
+    if (!landed && entry && ['read-only', 'membership-revoked'].includes(error?.code)) {
       throw boardError('This shared board is read-only.', 'read-only')
     }
-    if (!landed && entry && error?.status === 404) {
+    if (!landed && entry && error?.code === 'board-missing') {
       throw boardError('Board no longer exists.', 'missing-board')
     }
     if (!landed) throw error || boardError('Board no longer exists.', 'missing-board')

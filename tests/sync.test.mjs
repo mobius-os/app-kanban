@@ -1,3 +1,4 @@
+import { configureSync as configureFixture } from '../sync.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -24,7 +25,7 @@ test('an actively viewed shared board polls quickly and relaxes when idle', () =
 })
 
 test('shared image operations stay scoped to the board host and object', async () => {
-  configureSync('test-token')
+  configureSync('test-token', 1)
   const calls = []
   const request = async (url, options = {}) => {
     calls.push({ url, options })
@@ -33,16 +34,16 @@ test('shared image operations stay scoped to the board host and object', async (
       : { status: options.method === 'DELETE' ? 'deleted' : 'ok' }
     return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
   }
-  const entry = { host: 'peer.example', oid: 'board-object' }
+  const entry = { transport: 'kanban/1', host: 'peer.example', oid: 'board-object' }
   await putSharedAsset(entry, 'image', 'image/webp', 'abc', request)
   assert.deepEqual(await getSharedAsset(entry, 'image', request), {
     id: 'image', mime: 'image/webp', data: 'abc',
   })
   await deleteSharedAsset(entry, 'image', request)
   assert.deepEqual(calls.map(call => [call.url, call.options.method || 'GET']), [
-    ['/api/services/social/objects/peer.example/board-object/assets/image', 'PUT'],
-    ['/api/services/social/objects/peer.example/board-object/assets/image', 'GET'],
-    ['/api/services/social/objects/peer.example/board-object/assets/image', 'DELETE'],
+    ['/api/apps/1/service/boards/peer.example/board-object/assets/image', 'PUT'],
+    ['/api/apps/1/service/boards/peer.example/board-object/assets/image', 'GET'],
+    ['/api/apps/1/service/boards/peer.example/board-object/assets/image', 'DELETE'],
   ])
   assert.equal(calls[0].options.headers.Authorization, 'Bearer test-token')
   assert.deepEqual(JSON.parse(calls[0].options.body), { mime: 'image/webp', data: 'abc' })
@@ -59,7 +60,7 @@ test('malformed sharing metadata becomes an empty map', async () => {
 })
 
 test('creating a shareable invite omits the address from the request', async () => {
-  configureSync('test-token')
+  configureSync('test-token', 1)
   let request = null
   globalThis.fetch = async (url, options) => {
     request = { url, options, body: JSON.parse(options.body) }
@@ -71,7 +72,7 @@ test('creating a shareable invite omits the address from the request', async () 
   }
 
   const result = await createInvite('object', 'viewer')
-  assert.equal(request.url, '/api/services/social/objects/object/invites')
+  assert.equal(request.url, '/api/apps/1/service/boards/object/invites')
   assert.equal(request.options.method, 'POST')
   assert.deepEqual(request.body, { role: 'viewer' })
   assert.equal(result.invite, 'object@host.example#secret')
@@ -101,7 +102,7 @@ test('share-map updates retry conflicts without dropping a concurrent board', as
 })
 
 test('accepting an invitation durably saves both the board and membership', async () => {
-  configureSync('test-token')
+  configureSync('test-token', 1)
   const writes = []
   globalThis.window = { mobius: { storage: {
     async durableWrite(path, value, options = {}) {
@@ -110,27 +111,28 @@ test('accepting an invitation durably saves both the board and membership', asyn
     async getWithVersion() { return { value: null, version: null } },
   } } }
   globalThis.fetch = async (url, options) => {
-    assert.equal(url, '/api/services/social/objects/join')
+    assert.equal(url, '/api/apps/1/service/boards/join')
     assert.equal(options.headers.Authorization, 'Bearer test-token')
     return new Response(JSON.stringify({
-      membership: { id: 'remote-id', host: 'peer.example', role: 'viewer', label: 'Shared' },
+      version: 1,
+      membership: { id: 'remote-id', member_id: 'fixture-member', transport: 'kanban/1', host: 'peer.example', role: 'viewer', label: 'Shared' },
       doc: { v: 1, title: 'Shared', columns: [], cards: {}, future: true },
     }), { status: 200, headers: { 'content-type': 'application/json' } })
   }
 
-  const result = await acceptInvitation({ id: 'remote-id', host: 'peer.example', label: 'Shared' })
+  const result = await acceptInvitation({ id: 'remote-id', transport: 'kanban/1', host: 'peer.example', label: 'Shared' })
   assert.equal(result.boardId, 'remote-id')
   assert.equal(writes[1].path, 'boards/remote-id.json')
   assert.equal(writes[1].value.future, true)
   assert.deepEqual(writes[0], {
     path: 'shared.json',
-    value: { byBoard: { 'remote-id': { oid: 'remote-id', host: 'peer.example', role: 'viewer', version: 0, label: 'Shared' } } },
+    value: { byBoard: { 'remote-id': { oid: 'remote-id', member_id: 'fixture-member', transport: 'kanban/1', host: 'peer.example', role: 'viewer', version: 1, label: 'Shared' } } },
     options: { ifNoneMatch: true },
   })
 })
 
 test('joining with an invite sends the capability string and sets up the local board', async () => {
-  configureSync('test-token')
+  configureSync('test-token', 1)
   const writes = []
   globalThis.window = { mobius: { storage: {
     async durableWrite(path, value, options = {}) {
@@ -139,13 +141,14 @@ test('joining with an invite sends the capability string and sets up the local b
     async getWithVersion() { return { value: null, version: null } },
   } } }
   globalThis.fetch = async (url, options) => {
-    assert.equal(url, '/api/services/social/objects/join')
+    assert.equal(url, '/api/apps/1/service/boards/join')
     assert.deepEqual(JSON.parse(options.body), {
       app: 'kanban',
       invite: 'remote-id@peer.example#secret',
     })
     return new Response(JSON.stringify({
-      membership: { id: 'remote-id', host: 'peer.example', role: 'editor', label: 'Joined' },
+      version: 1,
+      membership: { id: 'remote-id', member_id: 'fixture-member', transport: 'kanban/1', host: 'peer.example', role: 'editor', label: 'Joined' },
       doc: { v: 1, title: 'Joined', columns: [], cards: {} },
     }), { status: 200, headers: { 'content-type': 'application/json' } })
   }
@@ -154,12 +157,12 @@ test('joining with an invite sends the capability string and sets up the local b
   assert.equal(result.boardId, 'remote-id')
   assert.equal(writes[1].path, 'boards/remote-id.json')
   assert.deepEqual(writes[0].value.byBoard['remote-id'], {
-    oid: 'remote-id', host: 'peer.example', role: 'editor', version: 0, label: 'Joined',
+    oid: 'remote-id', member_id: 'fixture-member', transport: 'kanban/1', host: 'peer.example', role: 'editor', version: 1, label: 'Joined',
   })
 })
 
 test('shared CAS retries against the newest document and preserves concurrent fields', async () => {
-  configureSync('test-token')
+  configureSync('test-token', 1)
   const puts = []
   const replies = [
     { status: 'ok', version: 1, doc: { v: 1, title: 'old', columns: [], cards: {} } },
@@ -173,7 +176,7 @@ test('shared CAS retries against the newest document and preserves concurrent fi
   }
 
   const landed = await pushSharedOp(
-    { host: 'peer.example', oid: 'object' },
+    { transport: 'kanban/1', host: 'peer.example', oid: 'object' },
     board => { board.title = 'mine'; return board },
   )
   assert.equal(puts.length, 2)
@@ -184,31 +187,30 @@ test('shared CAS retries against the newest document and preserves concurrent fi
   assert.equal(landed.doc.future, 'kept')
 })
 
-test('enabling sharing publishes a fresh storage read instead of a rendered snapshot', async () => {
-  configureSync('test-token')
+test('enabling sharing publishes a CAS-fenced fresh snapshot, never the private marker', async () => {
+  configureSync('test-token', 1)
   let published = null
-  globalThis.window = { mobius: { storage: {
-    async get(path) {
-      assert.equal(path, 'boards/local.json')
-      return { v: 1, id: 'local', title: 'Fresh', columns: [], cards: {}, fresh: true }
-    },
-    async getWithVersion() { return { value: null, version: null } },
-    async durableWrite() {},
-  } } }
-  globalThis.fetch = async (_url, options) => {
-    published = JSON.parse(options.body)
-    return new Response(JSON.stringify({ id: 'shared', host: 'me.example', version: 1 }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    })
+  const files = {'boards/local.json':{v:1,id:'local',title:'Fresh',columns:[],cards:{},fresh:true}}
+  globalThis.window = {mobius:{storage:{
+    async get(path) { return structuredClone(files[path] || null) },
+    async getWithVersion(path) { return {value:structuredClone(files[path] || null),version:files[path]?'v1':null} },
+    async durableWrite(path,value) { files[path]=structuredClone(value) },
+  }}}
+  globalThis.fetch = async (url, options) => {
+    if(url.endsWith('/health')) return Response.json({protocol:'kanban/1',host:'me.example'})
+    published=JSON.parse(options.body)
+    assert.ok(files['boards/local.json']._kanbanPublication)
+    assert.ok(files['shared.json'].byBoard.local.publishing)
+    return Response.json({id:published.id,host:'me.example',version:1})
   }
   await shareBoard('local')
-  assert.equal(published.doc.title, 'Fresh')
-  assert.equal(published.doc.fresh, true)
+  assert.equal(published.doc.title,'Fresh')
+  assert.equal(published.doc.fresh,true)
+  assert.equal(published.doc._kanbanPublication,undefined)
 })
 
 test('shared deletion and leave retries treat an already-absent object as success', async () => {
-  configureSync('test-token')
+  configureSync('test-token', 1)
   const writes = []
   globalThis.window = { mobius: { storage: {
     async getWithVersion() {
@@ -219,12 +221,12 @@ test('shared deletion and leave retries treat an already-absent object as succes
     },
   } } }
   globalThis.fetch = async () => new Response(
-    JSON.stringify({ detail: 'No such object.' }),
+    JSON.stringify({ protocol: 'kanban/1', code: 'board-missing', detail: 'No such object.' }),
     { status: 404, headers: { 'content-type': 'application/json' } },
   )
 
   assert.deepEqual(await deleteSharedObject('object'), { status: 'deleted' })
-  await leaveBoard('board', { host: 'peer.example', oid: 'object' })
+  await leaveBoard('board', { transport: 'kanban/1', host: 'peer.example', oid: 'object' })
   assert.deepEqual(writes.at(-1), {
     path: 'shared.json',
     value: { byBoard: {} },
@@ -235,9 +237,9 @@ test('shared deletion and leave retries treat an already-absent object as succes
 test('verified collaborators appear once without merging lookalike handles', async () => {
   const { groupCollaborators } = await import('../sync.js')
   const result = groupCollaborators([
-    { host: 'one.example', handle: 'ana', collaborator_id: 'verified-group', pending: true, active: false },
-    { host: 'two.example', handle: 'ana', collaborator_id: 'verified-group', pending: false, active: true },
-    { host: 'other.example', handle: 'ana', pending: true },
+    { member_id: 'one.example', transport: 'kanban/1', host: 'one.example', handle: 'ana', collaborator_id: 'verified-group', pending: true, active: false },
+    { transport: 'kanban/1', host: 'two.example', handle: 'ana', collaborator_id: 'verified-group', pending: false, active: true },
+    { transport: 'kanban/1', host: 'other.example', handle: 'ana', pending: true },
   ])
   assert.equal(result.length, 2)
   assert.deepEqual(result[0].hosts, ['one.example', 'two.example'])
@@ -260,27 +262,27 @@ test('delivery feedback distinguishes partial success and never promises an auto
 
 test('remove collaborator explicitly revokes all grouped deployments, but legacy members stay scoped', async () => {
   const { revokeCollaborator } = await import('../sync.js')
-  configureSync('test-token')
+  configureSync('test-token', 1)
   const urls = []
   globalThis.fetch = async (url, options) => {
     urls.push(url)
     assert.equal(options.method, 'DELETE')
     return new Response(JSON.stringify({ status: 'revoked' }), { status: 200 })
   }
-  await revokeCollaborator('oid', { host: 'one.example', collaborator_id: 'group' })
-  await revokeCollaborator('oid', { host: 'legacy.example' })
+  await revokeCollaborator('oid', { member_id: 'one.example', transport: 'kanban/1', host: 'one.example', collaborator_id: 'group' })
+  await revokeCollaborator('oid', { member_id: 'legacy.example', transport: 'kanban/1', host: 'legacy.example' })
   assert.deepEqual(urls, [
-    '/api/services/social/objects/oid/members/one.example?all_deployments=true',
-    '/api/services/social/objects/oid/members/legacy.example',
+    '/api/apps/1/service/boards/oid/members/one.example?all_deployments=true',
+    '/api/apps/1/service/boards/oid/members/legacy.example',
   ])
 })
 
 test('assignees on any verified deployment retain their collaborator selection without changing the card', async () => {
   const { groupCollaborators, collaboratorForHost } = await import('../sync.js')
   const members = groupCollaborators([
-    { host: 'one.example', collaborator_id: 'group', pending: false },
-    { host: 'two.example', collaborator_id: 'group', pending: false },
-    { host: 'other.example', pending: false },
+    { member_id: 'one.example', transport: 'kanban/1', host: 'one.example', collaborator_id: 'group', pending: false },
+    { transport: 'kanban/1', host: 'two.example', collaborator_id: 'group', pending: false },
+    { transport: 'kanban/1', host: 'other.example', pending: false },
   ])
   const card = { assignee: 'Test member', assigneeHost: 'two.example' }
   assert.equal(collaboratorForHost(members, card.assigneeHost).host, 'one.example')
@@ -288,3 +290,5 @@ test('assignees on any verified deployment retain their collaborator selection w
   assert.equal(collaboratorForHost(members, 'other.example').host, 'other.example')
   assert.equal(collaboratorForHost(members, 'unknown.example'), undefined)
 })
+
+test.beforeEach(() => configureFixture('fixture', 1))

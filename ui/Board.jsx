@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
-import { pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
+import { pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
 import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
@@ -138,11 +138,13 @@ function memberRecords(metadata) {
     }
     const value = member && typeof member === 'object' ? member : {}
     return {
+      member_id: value.member_id || key,
       host: String(value.host || value.host_key || value.member_host || (fromArray ? '' : key) || '').trim(),
       handle: String(value.handle || '').trim(),
       name: String(value.name || value.displayName || value.display_name || '').trim(),
       role: String(value.role || '').trim(),
       collaborator_id: value.collaborator_id || null,
+      host_owner: value.host_owner === true,
       pending: value.pending === true,
       active: value.active === true,
     }
@@ -272,12 +274,7 @@ function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
     : joined.find(member => memberLabel(member) === card.assignee)
   const selectedLabel = selectedMember ? memberLabel(selectedMember) : String(card.assignee || '').trim()
   const selectedAvatar = selectedLabel ? assigneeAvatar(selectedLabel) : null
-  const localCandidates = share && !share.hosted
-    ? joined.filter(member => member.host !== share.host && member.active)
-    : []
-  const selfMember = share?.hosted
-    ? collaboratorForHost(joined, share.host)
-    : localCandidates.length === 1 ? localCandidates[0] : null
+  const selfMember = selfCollaborator(joined, share)
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const visibleMembers = joined.filter(member => {
     if (!normalizedQuery) return true
@@ -487,6 +484,7 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
       const entry = await shareBoard(boardId)
       onShared({ ...entry, hosted: true })
     } catch (e) {
+      if (e.publication) onShared(e.publication)
       setNotice({ kind: 'error', text: String(e?.message || e) })
     }
     setBusyAction(null)
@@ -528,8 +526,8 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
 
   const copyInviteLink = async () => {
     try {
-      if (!navigator.clipboard?.writeText) return
-      await navigator.clipboard.writeText(inviteLink)
+      const copied = await window.mobius?.clipboard?.writeText(inviteLink)
+      if (!copied) { setNotice({kind:'warn',text:'Select the invite link below to copy it.'}); return }
       setNotice({ kind: 'ok', text: 'Invite link copied.' })
     } catch { /* the read-only field remains selectable for manual copy */ }
   }
@@ -539,7 +537,7 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
       <div className="kb-scrim" onClick={onClose} />
       <div ref={sheetRef} tabIndex={-1} className="kb-sheet" role="dialog" aria-modal="true" aria-label="Share board">
         <div className="kb-sheet-grab" />
-        {!share && (
+        {(!share || share.publishing) && (
           <>
             <h3>Share this board</h3>
             <div className="kb-empty kb-empty-left">
@@ -547,11 +545,11 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
               edit it live from their own Möbius.
             </div>
             <button className="kb-btn kb-btn-primary" disabled={busy} onClick={start}>
-              {busyAction === 'sharing' ? 'Turning on sharing…' : 'Turn on sharing'}
+              {busyAction === 'sharing' ? 'Turning on sharing…' : share?.publishing ? 'Finish sharing' : 'Turn on sharing'}
             </button>
           </>
         )}
-        {share && hosted && (
+        {share && hosted && !share.publishing && (
           <>
             <div>
               <h3>Invite someone</h3>
@@ -598,14 +596,14 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
                     <span className="kb-person-copy">
                       <span className="kb-person-name">{memberLabel(m)}</span>
                       <span className="kb-person-meta">
-                        {m.host === share.host ? 'You' : m.pending ? 'Invite pending' : m.active ? 'Active now' : 'Not active'}
+                        {m.host_owner ? 'You' : m.pending ? 'Invite pending' : m.active ? 'Active now' : 'Not active'}
                         <span aria-hidden="true"> · </span>{m.role === 'viewer' ? 'Can view' : 'Can edit'}
                         {m.hosts?.length > 1 && <> · {m.hosts.length} deployments</>}
                       </span>
                     </span>
-                    {m.host !== share.host && (
+                    {!m.host_owner && (
                       <button className="kb-btn kb-btn-quiet kb-danger" title={m.collaborator_id ? 'Remove access from all invited deployments' : 'Remove access'} onClick={async () => {
-                        try { await revokeCollaborator(share.oid, m); onMembersChange(ms => (ms || []).filter(member => member.host !== m.host)) } catch (e) { setNotice({ kind: 'error', text: String(e?.message || e) }) }
+                        try { await revokeCollaborator(share.oid, m); onMembersChange(ms => (ms || []).filter(member => member.member_id !== m.member_id)) } catch (e) { setNotice({ kind: 'error', text: String(e?.message || e) }) }
                       }}>{m.hosts?.length > 1 ? (m.pending ? 'Cancel all' : 'Remove from all') : (m.pending ? 'Cancel invite' : 'Remove')}</button>
                     )}
                   </div>

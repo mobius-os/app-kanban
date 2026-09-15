@@ -1,3 +1,4 @@
+import { configureSync as configureFixture } from '../sync.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -143,7 +144,7 @@ test('malformed authority metadata retains durable queued intent for repair', as
 })
 
 test('shared poll/write/subscription race keeps the versioned poll as sole authority', () => {
-  const share = { oid: 'shared', host: 'peer.example', role: 'editor' }
+  const share = { oid: 'shared', transport: 'kanban/1', host: 'peer.example', role: 'editor' }
   const before = { title: 'Before' }
   const optimistic = { title: 'Optimistic' }
   const newest = { title: 'Authoritative v10' }
@@ -238,3 +239,5 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(themeSource, /\.kb-swatches \{ flex-wrap: nowrap; gap: 4px; overflow-x: auto;/)
   assert.match(themeSource, /\.kb-sheet \{[^}]*top: max\(8px, env\(safe-area-inset-top\)\)/s)
 })
+
+test.beforeEach(() => configureFixture('fixture', 1))

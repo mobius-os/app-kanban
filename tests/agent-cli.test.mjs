@@ -8,7 +8,7 @@ test('CLI writes private and shared boards through their authority using JSON an
     { id: 'todo', name: 'To do', cardIds: [] }, { id: 'done', name: 'Done', cardIds: [] },
   ], cards: {} })
   let local = makeBoard(), remote = makeBoard(), version = 1, shared = true
-  let cacheWrites = 0, sharedWrites = 0
+  let cacheWrites = 0, sharedWrites = 0, serviceUnavailable = false
   const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json')
     if (req.headers.authorization !== 'Bearer fixture') { res.writeHead(401); res.end('{}'); return }
@@ -18,17 +18,22 @@ test('CLI writes private and shared boards through their authority using JSON an
     if (req.method === 'PUT' && req.headers['content-type'] !== 'application/json') {
       res.writeHead(415); send({ detail: 'JSON required' }); return
     }
+    if (serviceUnavailable && req.url.startsWith('/api/apps/1/service/')) {
+      res.writeHead(503); return send({detail:'Service unavailable'})
+    }
+    if (req.url === '/api/apps/1/service/boards/resume-joins') return send({results:[]})
+    if (req.url === '/api/apps/1/service/boards') return send({hosted:[],joined:[]})
     if (req.url === '/api/apps/') return send([{ id: 1, slug: 'kanban' }])
     if (req.url === '/api/storage/apps/1/shared.json') {
       res.setHeader('ETag', '"map"')
-      return send({ byBoard: shared ? { b: { oid: 'obj', host: 'peer.example', role: 'editor' } } : {} })
+      return send({ byBoard: shared ? { b: { oid: 'obj', transport: 'kanban/1', host: 'peer.example', role: 'editor' } } : {} })
     }
     if (req.url === '/api/storage/apps/1/boards/b.json') {
       if (req.method === 'PUT') { cacheWrites++; local = JSON.parse(body); res.writeHead(204); res.end(); return }
       res.setHeader('ETag', '"local"')
       return send(local)
     }
-    if (req.url.startsWith('/api/services/social/objects/peer.example/obj/state')) {
+    if (req.url.startsWith('/api/apps/1/service/boards/peer.example/obj/state')) {
       if (req.method === 'PUT') {
         const data = JSON.parse(body)
         if (data.expected_version !== version) return send({ status: 'conflict' })
@@ -43,7 +48,7 @@ test('CLI writes private and shared boards through their authority using JSON an
   const run = (command, input, boardId = 'b') => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['scripts/kanban.mjs', command, boardId], {
       cwd: new URL('../', import.meta.url),
-      env: { ...process.env, API_BASE_URL: `http://127.0.0.1:${server.address().port}`, AGENT_TOKEN: 'fixture' },
+      env: { PATH: process.env.PATH, API_BASE_URL: `http://127.0.0.1:${server.address().port}`, AGENT_TOKEN: 'fixture' },
     })
     let stdout = '', stderr = ''
     child.stdout.on('data', data => { stdout += data })
@@ -68,6 +73,10 @@ test('CLI writes private and shared boards through their authority using JSON an
     await assert.rejects(run('add-card', { id: '__proto__', columnId: 'todo', title: 'Unsafe' }), /safe non-empty string/)
     await assert.rejects(run('read', undefined, '../../2/boards/private'), /Usage/)
     assert.equal(sharedWrites, 4)
+    const priorCacheWrites = cacheWrites
+    serviceUnavailable = true
+    await assert.rejects(run('update-card', {cardId:'stable', patch:{notes:'Unconfirmed'}}), /Service unavailable/)
+    assert.equal(cacheWrites, priorCacheWrites)
     shared = false; local = makeBoard(); cacheWrites = 0
     assert.equal((await run('add-card', input)).authority, 'private')
     assert.equal(cacheWrites, 1)

@@ -136,6 +136,7 @@ export async function listBoards() {
       boards.push({
         id: e.name.replace(/\.json$/, ''),
         title: doc.title,
+        ...(doc._kanbanPublication ? { publication: doc._kanbanPublication } : {}),
         cardCount: Object.keys(doc.cards).length,
         columnCount: doc.columns.length,
         columnPreview: doc.columns.slice(0, 5).map(column => ({

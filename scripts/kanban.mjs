@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Thin command-line transport for the same repository the board screen uses.
 import { createBoardRepository } from '../boardRepository.js'
+import { configureSync, recoverMemberships } from '../sync.js'
 import { uid } from '../storage.js'
 import { isIsoDate } from '../domain.js'
 
@@ -23,6 +24,7 @@ const apps = await (await checked(await request('/api/apps/'))).json()
 const matches = apps.filter(app => app.slug === 'kanban')
 if (matches.length !== 1) throw new Error('Expected exactly one installed Kanban app.')
 const appId = matches[0].id
+configureSync(token, appId)
 const root = `/api/storage/apps/${appId}/`
 const storage = {
   async getWithVersion(path) {
@@ -51,6 +53,13 @@ const storage = {
     } while (cursor)
     return entries
   },
+}
+try {
+  await recoverMemberships(storage, request)
+} catch {
+  // Discovery is repairable; it must not make private boards depend on peers.
+  // The repository still requires authority confirmation for every shared write.
+  console.error('Membership discovery unavailable; using recorded board authorities.')
 }
 const repository = createBoardRepository({ storage, request })
 const [command, boardId] = process.argv.slice(2)
