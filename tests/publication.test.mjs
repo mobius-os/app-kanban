@@ -93,13 +93,12 @@ test('self identity uses the admitted member id, never a claimed host or active-
   assert.equal(selfCollaborator(groups,{host:'host.example'}),null)
 })
 
-test('verified administrative handoff adopts only matching legacy pointers and preserves local queue identity',async()=>{
+test('authenticated membership discovery adopts matching legacy pointers without a handoff token',async()=>{
   const f=fixture()
   f.files['shared.json']={byBoard:{localAlias:{oid:'remote',host:'peer.example',role:'editor'},other:{oid:'remote',host:'different.example'}}}
   f.files['pending-ops.json']={sentinel:'untouched'}
   const request=async url=>Response.json(url.endsWith('/resume-joins')?{results:[]}:{hosted:[],joined:[{
     id:'remote',host:'peer.example',role:'viewer',member_id:'mine',transport:'kanban/1',
-    handoff:{from:'common/0',transition:'a'.repeat(32),digest:'b'.repeat(64)},
   }]})
   await recoverMemberships(f.storage,request)
   assert.equal(f.files['shared.json'].byBoard.localAlias.member_id,'mine')

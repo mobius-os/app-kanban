@@ -4,7 +4,7 @@ import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, P
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
 import { pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
-import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, replayPendingBoardOps } from '../pendingOps.js'
+import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
 import {
   deleteCardAttachment,
@@ -692,6 +692,7 @@ export default function Board({
   const [members, setMembers] = useState(null)
   const [animateColumns, setAnimateColumns] = useState(true)
   const [queuedCount, setQueuedCount] = useState(0)
+  const [recoveredCount, setRecoveredCount] = useState(0)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [attachmentError, setAttachmentError] = useState('')
 
@@ -717,6 +718,31 @@ export default function Board({
   filtersRef.current = { text: filterText, labels: filterLabels }
 
   useEffect(() => { setAttachmentError('') }, [openCardId])
+
+  useEffect(() => {
+    let active = true
+    setRecoveredCount(0)
+    readRecoveredBoardOps(boardId).then(entries => {
+      if (active) setRecoveredCount(entries.length)
+    }).catch(() => { if (active) setSyncNote('Saved edits could not be checked — your data is unchanged.') })
+    return () => { active = false }
+  }, [boardId, queuedCount])
+
+  const downloadUnsyncedEdits = async () => {
+    try {
+      const recovery = await exportUnsyncedBoardOps(boardId)
+      const link = document.createElement('a')
+      link.href = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(recovery, null, 2))}`
+      link.download = 'kanban-unsynced-edits.json'
+      link.click()
+    } catch {
+      setSyncNote('Your saved edits could not be downloaded. They have not been removed.')
+    }
+  }
+  const recoveryButton = (recoveredCount > 0 || queuedCount > 0 || loadFailure) && <button
+    className="kb-btn" onClick={downloadUnsyncedEdits}
+    title="Download pending and rejected edits as a recovery file. Saved copies are kept here."
+  >Save unsynced edits</button>
 
   const refreshMembers = useCallback(async () => {
     if (!share?.hosted) return []
@@ -992,7 +1018,8 @@ export default function Board({
               setBoard(rendered)
             },
             onDiscarded: error => {
-              setSyncNote(String(error?.message || 'An outdated change could not be applied'))
+              setRecoveredCount(count => count + 1)
+              setSyncNote(`${String(error?.message || 'A change could not be applied')} — saved for recovery.`)
             },
           },
         )
@@ -1006,14 +1033,14 @@ export default function Board({
             const rendered = applyPendingBoardOps(confirmedSharedRef.current?.doc || fresh.doc, result.entries)
             boardRef.current = rendered
             setBoard(rendered)
-            setSyncNote(`${result.discarded} outdated change${result.discarded === 1 ? '' : 's'} skipped`)
+            setSyncNote(`${result.discarded} rejected change${result.discarded === 1 ? '' : 's'} saved for recovery`)
           } catch (error) {
             confirmedSharedRef.current = null
-            setSyncNote('An outdated change was skipped — refreshing the board')
+            setSyncNote('Rejected edits saved for recovery — refreshing the board')
             window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-refresh' })
           }
         } else {
-          setSyncNote(result.ok ? '' : `${result.pending} change${result.pending === 1 ? '' : 's'} could not sync — retrying`)
+          setSyncNote(result.error || (result.ok ? '' : `${result.pending} change${result.pending === 1 ? '' : 's'} could not sync — retrying`))
         }
       }).finally(() => { replayingRef.current = false })
     }
@@ -1324,6 +1351,7 @@ export default function Board({
   if (!board) return <>
     <div className="kb-header">
       <button className="kb-btn" onClick={onAllBoards}><ChevronLeft /> All boards</button>
+      {recoveryButton}
     </div>
     <div className="kb-board kb-board-empty"><div className="kb-empty-board-state" role={loadFailure ? 'alert' : 'status'}>
       {loadFailure ? <>
@@ -1376,6 +1404,9 @@ export default function Board({
         </button>
       </div>
       <div className="kb-divider" />
+      {recoveryButton && <div className="kb-recovery" role="status">
+        <span>Unsynced edits are kept on this instance.</span>{recoveryButton}
+      </div>}
       {board.columns.length > 1 && <nav className="kb-list-nav" aria-label="Jump to list">
         {board.columns.map(column => <button
           key={column.id}

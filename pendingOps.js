@@ -5,6 +5,7 @@ let sequence = 0
 const defaultStorage = () => globalThis.window?.mobius?.storage || null
 const safeBoardId = boardId => encodeURIComponent(String(boardId || ''))
 const prefixFor = boardId => `pending-board-ops/${safeBoardId(boardId)}/`
+const recoveryPrefixFor = boardId => `recovered-board-ops/${safeBoardId(boardId)}/`
 const legacyKeyFor = boardId => `kanban:pending-board-ops:v1:${safeBoardId(boardId)}`
 
 async function migrateLegacyQueue(boardId, storage) {
@@ -44,6 +45,22 @@ export async function readPendingBoardOps(boardId, storage = defaultStorage()) {
     .sort((left, right) => left.id.localeCompare(right.id))
 }
 
+// Rejected intent stays local and is never replayed with elevated permissions.
+// Its stable queue ID makes archive-before-dequeue safe across crashes/retries.
+export async function readRecoveredBoardOps(boardId, storage = defaultStorage()) {
+  if (!storage?.list) return []
+  const items = await storage.list(recoveryPrefixFor(boardId), { includeContent: true })
+  return (Array.isArray(items) ? items : []).map(entryFromListItem).filter(Boolean)
+    .sort((left, right) => left.id.localeCompare(right.id))
+}
+
+export async function exportUnsyncedBoardOps(boardId, storage = defaultStorage()) {
+  const [recovered, pending] = await Promise.all([
+    readRecoveredBoardOps(boardId, storage), readPendingBoardOps(boardId, storage),
+  ])
+  return { format: 'kanban-unsynced-edits/1', boardId, recovered, pending }
+}
+
 export async function enqueuePendingBoardOp(boardId, op, storage = defaultStorage()) {
   if (!storage?.set) throw new Error('App storage is unavailable; the change was not saved.')
   const entry = {
@@ -69,7 +86,7 @@ export function applyPendingBoardOps(board, entries) {
 
 // Replay exactly in queue order. Each intent has its own app-storage file, so
 // frames cannot overwrite one another's offline changes. An entry disappears
-// only after its board write is confirmed.
+// only after its board write is confirmed or its rejected intent is durably archived.
 export async function replayPendingBoardOps(boardId, mutate, {
   storage = defaultStorage(),
   onLanded,
@@ -89,9 +106,19 @@ export async function replayPendingBoardOps(boardId, mutate, {
       throw new Error('Pending operation returned an invalid replay outcome.')
     }
     try {
+      if (outcome.status === 'discarded') {
+        if (!storage?.durableWrite) throw new Error('Recovery storage is unavailable.')
+        const saved = await storage.durableWrite(`${recoveryPrefixFor(boardId)}${entry.id}.json`, {
+          ...entry,
+          reason: String(outcome.error?.message || 'The change could not be applied.'),
+          code: String(outcome.error?.code || 'rejected'),
+        })
+        if (saved === 'queued' || saved?.queued || saved?.status === 'queued') throw new Error('Recovery copy is not yet confirmed.')
+      }
       await removePendingBoardOp(boardId, entry.id, storage)
-    } catch {
-      return { ok: false, doc: outcome.doc || lastDoc, pending: entries.length, entries, discarded }
+    } catch (error) {
+      return { ok: false, doc: outcome.doc || lastDoc, pending: entries.length, entries, discarded,
+        error: `Your edit is still queued: ${error.message}` }
     }
     const remaining = await readPendingBoardOps(boardId, storage)
     if (outcome.status === 'discarded') {

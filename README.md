@@ -30,7 +30,6 @@ private storage from shared-object storage themselves.
 
 Run `npm test` and `python3 -m unittest discover -s tests -p 'test_*.py' -q`.
 Python tests use explicit temporary app roots, never a live platform database.
-The optional encrypted-handoff tests also require `age` and `age-keygen`.
 
 ## License
 
@@ -81,3 +80,13 @@ Old clients cannot continue writing the retired authority. No Social proxy or
 automatic membership takeover is added. Actual old-worker drain and real two-host
 performance still need deployment verification; never restore a stale snapshot
 over later edits.
+
+### Recovering edits that cannot sync
+
+If your role changed or a card was deleted while you were offline, rejected
+edits are saved locally before leaving the active queue. **Save unsynced edits**
+on the board downloads both pending and rejected operations as JSON, including
+why each rejected edit could not apply. The download does not delete the saved
+copies or grant permission to write. An editor can use that file to recover the
+intended work deliberately; it is not automatically replayed onto another board.
+If the recovery copy cannot be confirmed, the original intent stays queued.

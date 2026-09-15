@@ -8,6 +8,7 @@ import { applyBoardOp, cardMoveAnchor } from '../operations.js'
 import {
   enqueuePendingBoardOp,
   readPendingBoardOps,
+  readRecoveredBoardOps,
   replayPendingBoardOps,
 } from '../pendingOps.js'
 import { casMutate } from '../storage.js'
@@ -23,6 +24,7 @@ function memoryStorage() {
         .map(([path, content]) => ({ path, name: path.split('/').at(-1), content: structuredClone(content) }))
     },
     async set(path, value) { values.set(path, structuredClone(value)) },
+    async durableWrite(path, value) { values.set(path, structuredClone(value)) },
     async remove(path) { values.delete(path) },
   }
 }
@@ -106,7 +108,7 @@ test('offline reconnect conflict rebases every queued operation or retains an ex
   assert.deepEqual(server.columns[0].cardIds, ['concurrent', 'a', 'b'])
 })
 
-test('terminal queued operations are discarded without blocking later changes', async () => {
+test('terminal queued operations are archived without blocking later changes', async () => {
   const uiStorage = memoryStorage()
   await enqueuePendingBoardOp('board', { type: 'update-card', cardId: 'gone', patch: { title: 'Gone' } }, uiStorage)
   await enqueuePendingBoardOp('board', { type: 'update-card', cardId: 'a', patch: { title: 'Landed' } }, uiStorage)
@@ -119,6 +121,7 @@ test('terminal queued operations are discarded without blocking later changes', 
   }, { storage: uiStorage, onDiscarded: error => discarded.push(error.message) })
   assert.equal(result.ok, true)
   assert.equal(result.discarded, 1)
+  assert.equal((await readRecoveredBoardOps('board', uiStorage))[0].op.patch.title, 'Gone')
   assert.deepEqual(discarded, ['Card no longer exists.'])
   assert.equal(result.doc.cards.a.title, 'Landed')
   assert.deepEqual(await readPendingBoardOps('board', uiStorage), [])
