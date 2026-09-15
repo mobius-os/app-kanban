@@ -26,7 +26,8 @@ test('same-app numeric service identity replaces a dependency on another app nam
     assert.equal(url,`/api/apps/7/service/boards/peer.example/${entry.oid}/state?since_version=-1`)
     return Response.json({protocol:'kanban/1',version:1,doc})
   })
-  assert.throws(()=>configureSync('fixture','7'),/identity/)
+  assert.doesNotThrow(()=>configureSync('fixture','7'))
+  assert.throws(()=>configureSync('fixture','kanban'),/identity/)
 })
 
 for(const status of [403,404]) test(`gateway ${status} retains pending operations and sharing pointers`,async()=>{

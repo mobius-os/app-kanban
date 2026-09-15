@@ -292,3 +292,18 @@ test('assignees on any verified deployment retain their collaborator selection w
 })
 
 test.beforeEach(() => configureFixture('fixture', 1))
+
+test('shell string app identity uses the same numeric service route', async () => {
+  for (const id of [118, '118']) {
+    configureSync('test-token', id)
+    let path
+    await getSharedAsset({transport:'kanban/1',host:'main.example',oid:'board'}, 'asset', async url => {
+      path = url
+      return Response.json({asset:{id:'asset'}})
+    })
+    assert.equal(path, '/api/apps/118/service/boards/main.example/board/assets/asset')
+  }
+  for (const id of [null, undefined, true, {}, '', ' ', '0', 0, -1, '118/other', '1e2', '1.5', Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => configureSync('test-token', id), /identity is required/)
+  }
+})
