@@ -47,3 +47,19 @@ handle again after a new deployment is added, using the existing role. Delivery
 failures are reported per deployment; **Send invite** retries pending delivery,
 not an automatic background job. Invitations do not move the board's hosting
 location or synchronize unrelated Social messages.
+
+## Independent-service foundation
+
+This release adds a Kanban-owned service without switching existing browser
+or agent collaboration routes. Existing boards continue using their current
+authority. No board or membership migration runs on installation.
+
+The service owns transactional board versions, per-member credentials, roles,
+attachments and cross-process presence. It uses the stable public service ID
+`kanban` and optional account-handle lookup; Social is not imported by it.
+Installing this foundation requires explicit service-identity support and the
+identity lookup capability in the platform. Peer credentials stay server-side.
+
+The coordinated browser switch and legacy-board handoff are separate changes.
+Do not manually retag existing sharing pointers. Run `npm test` and
+`python3 -m unittest discover -s tests -p 'test_*.py' -q` for isolated checks.
