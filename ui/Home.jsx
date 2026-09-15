@@ -98,7 +98,7 @@ export default function Home({ boards, shareMap = {}, invitations = [], online, 
                   ))}
                 </div>
                 <div className="kb-tile-meta">
-                  {b.cardCount === 1 ? '1 card' : `${b.cardCount} cards`} · {b.columnCount === 1 ? '1 list' : `${b.columnCount} lists`}
+                  {b.unavailable ? 'Preview unavailable — open to retry' : `${b.cardCount === 1 ? '1 card' : `${b.cardCount} cards`} · ${b.columnCount === 1 ? '1 list' : `${b.columnCount} lists`}`}
                   {shareMap[b.id] ? ' · shared' : ''}
                 </div>
               </button>

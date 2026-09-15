@@ -71,6 +71,24 @@ test('shared failure never falls back to writing the cache', async () => {
   assert.equal(f.local().cards.new, undefined)
   assert.equal(f.writes(), 0)
 })
+test('one unavailable board does not hide healthy boards from discovery', async () => {
+  const f = fixture(true)
+  f.storage.list = async () => [{ name: 'b.json' }, { name: 'private.json' }]
+  f.request = async () => { throw new Error('Shared host unavailable') }
+  const rows = await createBoardRepository(f).list()
+  assert.deepEqual(rows[0], {
+    id: 'b', status: 'unavailable', error: 'Shared host unavailable',
+  })
+  assert.equal(rows[1].id, 'private')
+  assert.equal(rows[1].title, 'Board')
+  assert.equal(rows[1].authority, 'private')
+  assert.equal(f.writes(), 0)
+})
+test('an unavailable board directory still fails instead of reporting no boards', async () => {
+  const f = fixture()
+  f.storage.list = async () => { throw new Error('Directory unavailable') }
+  await assert.rejects(createBoardRepository(f).list(), /Directory unavailable/)
+})
 test('authoritative revocation overrides a stale local editor role', async () => {
   const f = fixture(true)
   f.request = async () => Response.json({ detail: 'Forbidden' }, { status: 403 })

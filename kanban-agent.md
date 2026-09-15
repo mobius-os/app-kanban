@@ -14,6 +14,10 @@ uses the current turn's credentials internally; never print them.
 ## Normal path
 
 1. `list` returns boards with stable IDs, titles, and column IDs/names.
+   A failed board remains in the list as `{id, status: "unavailable", error}`;
+   healthy boards remain usable. Do not treat that entry as a missing/private
+   board or invent its columns. Retry `read BOARD_ID` when its authority is
+   reachable. Failure to list the board directory still fails the command.
 2. `read BOARD_ID` returns the authoritative board, including its cards.
 3. Choose the intended board/column from those results, not guessed filenames.
    If several boards genuinely match, ask rather than silently picking the first.
