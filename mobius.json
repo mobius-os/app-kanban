@@ -1,5 +1,6 @@
 {
   "id": "kanban",
+  "package_id": "urn:uuid:5130825e-905c-4527-8ad0-4bdd2a7357c0",
   "name": "Kanban",
   "version": "0.6.0",
   "description": "Kanban boards that open where you left off: drag-and-drop lists, due dates and assignees, and live collaboration with people on their own Möbius.",
