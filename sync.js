@@ -22,8 +22,10 @@ const store = () => window.mobius?.storage
 
 let _auth = null
 export function configureSync(token, appId) {
-  if (!Number.isSafeInteger(appId) || appId < 1) throw new Error('Kanban app identity is required.')
-  API = `/api/apps/${appId}/service/boards`
+  // The frame supplies a decimal string; tests and direct callers may use a number.
+  const id = typeof appId === 'string' && /^[1-9]\d*$/.test(appId) ? Number(appId) : appId
+  if (!Number.isSafeInteger(id) || id < 1) throw new Error('Kanban app identity is required.')
+  API = `/api/apps/${id}/service/boards`
   _auth = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 }
 
