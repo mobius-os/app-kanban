@@ -68,13 +68,16 @@ names and claimed addresses are not authorization proofs.
 ## Existing shared boards
 
 This release does not silently migrate boards hosted by Social. Old pointers
-stay visible and pending edits remain intact, but require a coordinated handoff
-before independent Kanban can write them. Upgrade all participants together;
-do not deploy this release as a piecemeal repair for existing shared boards.
+stay visible and pending edits remain intact. The host takes a verified backup,
+freezes the old authority and imports the board and attachments once. Collaborators
+can update independently and rejoin using fresh invitations. Successful joins
+reuse matching local board identities so queued edits are not orphaned.
 
-The offline `migration_tools` implement frozen snapshots, staged imports,
-per-deployment grant installation and all-member activation receipts. They are
-not public routes and are not part of the accepted app runtime. Actual rollout,
-old-worker drain, authenticated grant transfer and two-host performance still
-require deployment-specific verification. After activation, fix forward rather
-than restoring a stale snapshot over newer edits.
+The offline `migration_tools` are host-only: frozen backup, staged import and
+activation after rechecking the exact frozen bytes. They do not copy collaborator
+credentials or require every deployment to be reachable. Former members and
+pending invitations remain in the immutable backup, not as active new grants.
+Old clients cannot continue writing the retired authority. No Social proxy or
+automatic membership takeover is added. Actual old-worker drain and real two-host
+performance still need deployment verification; never restore a stale snapshot
+over later edits.

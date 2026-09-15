@@ -15,7 +15,7 @@ const PROTOCOL = 'kanban/1'
 
 function independent(entry) {
   if (entry?.transport !== PROTOCOL) {
-    throw Object.assign(new Error('This shared board needs a verified migration to independent Kanban. Your last copy and pending edits are retained.'), { code: 'migration-required', retryable: false, discardable: false })
+    throw Object.assign(new Error('This board needs a new invitation from its host after the Kanban upgrade. Your last copy and pending edits are retained.'), { code: 'migration-required', retryable: false, discardable: false })
   }
 }
 const store = () => window.mobius?.storage
@@ -118,34 +118,28 @@ export async function shareBoard(boardId) {
   }
 }
 
-// Completed service membership is the recovery source when a browser's
-// replaceable discovery pointer was not saved. Never overwrite an existing
-// pointer to another authority, and never replace a legacy pointer silently.
+// Only the authenticated local service can establish a membership. Reuse
+// matching aliases so re-invitations keep the original pending-operation queue.
+function attachMembership(map, id, entry) {
+  independent(entry)
+  const aliases = Object.keys(map.byBoard).filter(key => {
+    const prior = map.byBoard[key]
+    return prior.host === entry.host && prior.oid === entry.oid
+  })
+  if (!aliases.length && map.byBoard[id]) return null
+  const keys = aliases.length ? aliases : [id]
+  for (const key of keys) map.byBoard[key] = entry
+  return keys[0]
+}
+
 export async function recoverMemberships(storage = store(), request = fetch) {
   await _json(await request(`${API}/resume-joins`, { method: 'POST', headers: _auth }))
   const listing = await _json(await request(API, { headers: _auth }))
-  const additions = [...(listing.joined || []).map(m => ({ id:m.id, entry:{oid:m.id,host:m.host,role:m.role,member_id:m.member_id,transport:m.transport,label:m.label,handoff:m.handoff} })),
-    ...(listing.hosted || []).filter(m=>m.local_id).map(m=>({id:m.local_id,entry:{oid:m.id,host:m.host,role:'editor',hosted:true,transport:m.transport,version:m.version,label:m.label,handoff:m.handoff}}))]
+  const additions = [...(listing.joined || []).map(m => ({ id:m.id, entry:{oid:m.id,host:m.host,role:m.role,member_id:m.member_id,transport:m.transport,label:m.label} })),
+    ...(listing.hosted || []).filter(m=>m.local_id).map(m=>({id:m.local_id,entry:{oid:m.id,host:m.host,role:'editor',hosted:true,transport:m.transport,version:m.version,label:m.label}}))]
   if (!additions.length) return
   await mutateShareMap(map => {
-    for (const {id,entry} of additions) {
-      independent(entry)
-      // Only a service-owned administrative handoff can adopt a legacy
-      // pointer. Preserve its existing local ID so queued operations and
-      // attachment references stay attached to the same board.
-      const migrated=entry.handoff?.from==='common/0'
-        && /^[a-f0-9]{32}$/.test(entry.handoff.transition)
-        && /^[a-f0-9]{64}$/.test(entry.handoff.digest)
-      const aliases=migrated ? Object.keys(map.byBoard).filter(key => {
-        const prior=map.byBoard[key]
-        return prior.host===entry.host && prior.oid===entry.oid
-      }) : []
-      for (const key of aliases.length ? aliases : [id]) {
-        const prior=map.byBoard[key]
-        if (!prior || ((prior.transport===PROTOCOL || migrated)
-          && prior.host===entry.host && prior.oid===entry.oid)) map.byBoard[key]=entry
-      }
-    }
+    for (const {id,entry} of additions) attachMembership(map, id, entry)
   }, storage)
 }
 
@@ -179,10 +173,13 @@ export function listInvitations() {
 async function saveJoinedBoard(res) {
   const m = res.membership
   const doc = normalizeBoard(res.doc) || { v: 1, title: m.label || 'Shared board', columns: [], cards: {} }
-  const boardId = m.id
+  let boardId
   // Publish the authority before a replaceable cache. A cache-only success
   // must never make a joined shared board look privately writable.
-  await saveShareEntry(boardId, { oid: m.id, host: m.host, role: m.role, member_id: m.member_id, version: res.version, label: doc.title, transport: m.transport })
+  await mutateShareMap(map => {
+    boardId = attachMembership(map, m.id, { oid: m.id, host: m.host, role: m.role, member_id: m.member_id, version: res.version, label: doc.title, transport: m.transport })
+    if (!boardId) throw new Error('A different board already uses this local identity; your saved board was not replaced.')
+  })
   try {
     await store().durableWrite(boardPath(boardId), doc)
   } catch (error) {

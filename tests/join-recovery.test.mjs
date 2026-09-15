@@ -66,3 +66,26 @@ test('shared discovery keeps cached previews and never duplicates an existing bo
 })
 
 test.beforeEach(() => configureFixture('fixture', 1))
+
+
+test('a fresh invitation reuses the legacy alias and leaves its queued edits intact', async () => {
+  const f = fixture()
+  f.values.set('shared.json', {byBoard:{original:{oid:'joined',host:'peer.example',role:'editor'}}})
+  const queueKey = 'pending-board-ops/original/fixture.json'
+  const pending = {id:'fixture',op:{type:'rename-board',title:'Offline work'}}
+  f.values.set(queueKey,pending)
+  const result = await acceptInvitation({host:'peer.example',id:'joined'})
+  assert.equal(result.boardId,'original')
+  assert.equal((await loadShareMap()).byBoard.original.transport,'kanban/1')
+  assert.equal((await loadShareMap()).byBoard.joined,undefined)
+  assert.deepEqual(f.values.get(queueKey),pending)
+})
+
+test('a successful join never replaces a different host using the same local ID', async () => {
+  const f = fixture()
+  const prior={oid:'joined',host:'other.example',role:'editor'}
+  f.values.set('shared.json',{byBoard:{joined:prior}})
+  await assert.rejects(acceptInvitation({host:'peer.example',id:'joined'}),/different board/)
+  assert.deepEqual((await loadShareMap()).byBoard.joined,prior)
+  assert.equal(f.values.has('boards/joined.json'),false)
+})
