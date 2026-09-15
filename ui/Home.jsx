@@ -120,7 +120,7 @@ export default function Home({ boards, shareMap = {}, invitations = [], online, 
               {invError?.key === key
                 ? <div className="kb-notice kb-error">{invError.message}</div>
                 : <div className="kb-tile-meta">
-                    {inv.from_name || inv.host} invited you · {inv.role === 'viewer' ? 'view only' : 'can edit'}
+                    {inv.verified === false ? `Invitation claiming ${inv.host} — verified when accepted` : `${inv.from_name || inv.host} invited you`} · {inv.role === 'viewer' ? 'view only' : 'can edit'}
                   </div>}
               <div className="kb-composer-row">
                 <button

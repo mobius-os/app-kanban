@@ -1,4 +1,7 @@
 export const CSS = `
+.kb-recovery { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; color: var(--muted); font-size: 12px; }
+.kb-recovery .kb-btn { min-height: 44px; }
+
   * { box-sizing: border-box; }
   ::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); color: var(--text); }
   .kb-root {

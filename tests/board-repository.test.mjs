@@ -1,3 +1,4 @@
+import { configureSync as configureFixture } from '../sync.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createBoardRepository, isDiscardableBoardError, isRetryableBoardError } from '../boardRepository.js'
@@ -9,7 +10,7 @@ function fixture(shared = false) {
   let remote = board()
   let version = 1
   let writes = 0
-  const entry = { host: 'peer.example', oid: 'object', role: 'editor' }
+  const entry = { transport: 'kanban/1', host: 'peer.example', oid: 'object', role: 'editor' }
   const storage = {
     async getWithVersion(path) {
       return path === 'shared.json'
@@ -91,7 +92,7 @@ test('an unavailable board directory still fails instead of reporting no boards'
 })
 test('authoritative revocation overrides a stale local editor role', async () => {
   const f = fixture(true)
-  f.request = async () => Response.json({ detail: 'Forbidden' }, { status: 403 })
+  f.request = async () => Response.json({ protocol: 'kanban/1', code: 'read-only', detail: 'Forbidden' }, { status: 403 })
   const error = await createBoardRepository(f).mutate('b', op).catch(value => value)
   assert.match(error.message, /read-only/)
   assert.equal(isRetryableBoardError(error), false)
@@ -152,3 +153,5 @@ test('replayed adds and deletes stay idempotent after the original column disapp
   await repo.mutate('b', { type: 'delete-card', cardId: 'new' })
   assert.equal(f.remote().cards.new, undefined)
 })
+
+test.beforeEach(() => configureFixture('fixture', 1))

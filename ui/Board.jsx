@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
-import { pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
+import { pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
-import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, replayPendingBoardOps } from '../pendingOps.js'
+import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
 import {
   deleteCardAttachment,
@@ -138,11 +138,13 @@ function memberRecords(metadata) {
     }
     const value = member && typeof member === 'object' ? member : {}
     return {
+      member_id: value.member_id || key,
       host: String(value.host || value.host_key || value.member_host || (fromArray ? '' : key) || '').trim(),
       handle: String(value.handle || '').trim(),
       name: String(value.name || value.displayName || value.display_name || '').trim(),
       role: String(value.role || '').trim(),
       collaborator_id: value.collaborator_id || null,
+      host_owner: value.host_owner === true,
       pending: value.pending === true,
       active: value.active === true,
     }
@@ -272,12 +274,7 @@ function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
     : joined.find(member => memberLabel(member) === card.assignee)
   const selectedLabel = selectedMember ? memberLabel(selectedMember) : String(card.assignee || '').trim()
   const selectedAvatar = selectedLabel ? assigneeAvatar(selectedLabel) : null
-  const localCandidates = share && !share.hosted
-    ? joined.filter(member => member.host !== share.host && member.active)
-    : []
-  const selfMember = share?.hosted
-    ? collaboratorForHost(joined, share.host)
-    : localCandidates.length === 1 ? localCandidates[0] : null
+  const selfMember = selfCollaborator(joined, share)
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const visibleMembers = joined.filter(member => {
     if (!normalizedQuery) return true
@@ -487,6 +484,7 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
       const entry = await shareBoard(boardId)
       onShared({ ...entry, hosted: true })
     } catch (e) {
+      if (e.publication) onShared(e.publication)
       setNotice({ kind: 'error', text: String(e?.message || e) })
     }
     setBusyAction(null)
@@ -528,8 +526,8 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
 
   const copyInviteLink = async () => {
     try {
-      if (!navigator.clipboard?.writeText) return
-      await navigator.clipboard.writeText(inviteLink)
+      const copied = await window.mobius?.clipboard?.writeText(inviteLink)
+      if (!copied) { setNotice({kind:'warn',text:'Select the invite link below to copy it.'}); return }
       setNotice({ kind: 'ok', text: 'Invite link copied.' })
     } catch { /* the read-only field remains selectable for manual copy */ }
   }
@@ -539,7 +537,7 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
       <div className="kb-scrim" onClick={onClose} />
       <div ref={sheetRef} tabIndex={-1} className="kb-sheet" role="dialog" aria-modal="true" aria-label="Share board">
         <div className="kb-sheet-grab" />
-        {!share && (
+        {(!share || share.publishing) && (
           <>
             <h3>Share this board</h3>
             <div className="kb-empty kb-empty-left">
@@ -547,11 +545,11 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
               edit it live from their own Möbius.
             </div>
             <button className="kb-btn kb-btn-primary" disabled={busy} onClick={start}>
-              {busyAction === 'sharing' ? 'Turning on sharing…' : 'Turn on sharing'}
+              {busyAction === 'sharing' ? 'Turning on sharing…' : share?.publishing ? 'Finish sharing' : 'Turn on sharing'}
             </button>
           </>
         )}
-        {share && hosted && (
+        {share && hosted && !share.publishing && (
           <>
             <div>
               <h3>Invite someone</h3>
@@ -598,14 +596,14 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
                     <span className="kb-person-copy">
                       <span className="kb-person-name">{memberLabel(m)}</span>
                       <span className="kb-person-meta">
-                        {m.host === share.host ? 'You' : m.pending ? 'Invite pending' : m.active ? 'Active now' : 'Not active'}
+                        {m.host_owner ? 'You' : m.pending ? 'Invite pending' : m.active ? 'Active now' : 'Not active'}
                         <span aria-hidden="true"> · </span>{m.role === 'viewer' ? 'Can view' : 'Can edit'}
                         {m.hosts?.length > 1 && <> · {m.hosts.length} deployments</>}
                       </span>
                     </span>
-                    {m.host !== share.host && (
+                    {!m.host_owner && (
                       <button className="kb-btn kb-btn-quiet kb-danger" title={m.collaborator_id ? 'Remove access from all invited deployments' : 'Remove access'} onClick={async () => {
-                        try { await revokeCollaborator(share.oid, m); onMembersChange(ms => (ms || []).filter(member => member.host !== m.host)) } catch (e) { setNotice({ kind: 'error', text: String(e?.message || e) }) }
+                        try { await revokeCollaborator(share.oid, m); onMembersChange(ms => (ms || []).filter(member => member.member_id !== m.member_id)) } catch (e) { setNotice({ kind: 'error', text: String(e?.message || e) }) }
                       }}>{m.hosts?.length > 1 ? (m.pending ? 'Cancel all' : 'Remove from all') : (m.pending ? 'Cancel invite' : 'Remove')}</button>
                     )}
                   </div>
@@ -694,6 +692,7 @@ export default function Board({
   const [members, setMembers] = useState(null)
   const [animateColumns, setAnimateColumns] = useState(true)
   const [queuedCount, setQueuedCount] = useState(0)
+  const [recoveredCount, setRecoveredCount] = useState(0)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [attachmentError, setAttachmentError] = useState('')
 
@@ -719,6 +718,31 @@ export default function Board({
   filtersRef.current = { text: filterText, labels: filterLabels }
 
   useEffect(() => { setAttachmentError('') }, [openCardId])
+
+  useEffect(() => {
+    let active = true
+    setRecoveredCount(0)
+    readRecoveredBoardOps(boardId).then(entries => {
+      if (active) setRecoveredCount(entries.length)
+    }).catch(() => { if (active) setSyncNote('Saved edits could not be checked — your data is unchanged.') })
+    return () => { active = false }
+  }, [boardId, queuedCount])
+
+  const downloadUnsyncedEdits = async () => {
+    try {
+      const recovery = await exportUnsyncedBoardOps(boardId)
+      const link = document.createElement('a')
+      link.href = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(recovery, null, 2))}`
+      link.download = 'kanban-unsynced-edits.json'
+      link.click()
+    } catch {
+      setSyncNote('Your saved edits could not be downloaded. They have not been removed.')
+    }
+  }
+  const recoveryButton = (recoveredCount > 0 || queuedCount > 0 || loadFailure) && <button
+    className="kb-btn" onClick={downloadUnsyncedEdits}
+    title="Download pending and rejected edits as a recovery file. Saved copies are kept here."
+  >Save unsynced edits</button>
 
   const refreshMembers = useCallback(async () => {
     if (!share?.hosted) return []
@@ -994,7 +1018,8 @@ export default function Board({
               setBoard(rendered)
             },
             onDiscarded: error => {
-              setSyncNote(String(error?.message || 'An outdated change could not be applied'))
+              setRecoveredCount(count => count + 1)
+              setSyncNote(`${String(error?.message || 'A change could not be applied')} — saved for recovery.`)
             },
           },
         )
@@ -1008,14 +1033,14 @@ export default function Board({
             const rendered = applyPendingBoardOps(confirmedSharedRef.current?.doc || fresh.doc, result.entries)
             boardRef.current = rendered
             setBoard(rendered)
-            setSyncNote(`${result.discarded} outdated change${result.discarded === 1 ? '' : 's'} skipped`)
+            setSyncNote(`${result.discarded} rejected change${result.discarded === 1 ? '' : 's'} saved for recovery`)
           } catch (error) {
             confirmedSharedRef.current = null
-            setSyncNote('An outdated change was skipped — refreshing the board')
+            setSyncNote('Rejected edits saved for recovery — refreshing the board')
             window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'offline-refresh' })
           }
         } else {
-          setSyncNote(result.ok ? '' : `${result.pending} change${result.pending === 1 ? '' : 's'} could not sync — retrying`)
+          setSyncNote(result.error || (result.ok ? '' : `${result.pending} change${result.pending === 1 ? '' : 's'} could not sync — retrying`))
         }
       }).finally(() => { replayingRef.current = false })
     }
@@ -1326,6 +1351,7 @@ export default function Board({
   if (!board) return <>
     <div className="kb-header">
       <button className="kb-btn" onClick={onAllBoards}><ChevronLeft /> All boards</button>
+      {recoveryButton}
     </div>
     <div className="kb-board kb-board-empty"><div className="kb-empty-board-state" role={loadFailure ? 'alert' : 'status'}>
       {loadFailure ? <>
@@ -1378,6 +1404,9 @@ export default function Board({
         </button>
       </div>
       <div className="kb-divider" />
+      {recoveryButton && <div className="kb-recovery" role="status">
+        <span>Unsynced edits are kept on this instance.</span>{recoveryButton}
+      </div>}
       {board.columns.length > 1 && <nav className="kb-list-nav" aria-label="Jump to list">
         {board.columns.map(column => <button
           key={column.id}
