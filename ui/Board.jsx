@@ -420,8 +420,10 @@ function AutoGrowTextarea({ valueKey, onCommit, expandOnFocus = false, ...props 
   />
 }
 
-function ChecklistEditor({ checklist, canWrite, onAdd, onToggle, onDelete }) {
+function ChecklistEditor({ checklist, canWrite, onAdd, onToggle, onDelete, onEdit }) {
   const [text, setText] = useState('')
+  const [editingId, setEditingId] = useState(null)
+  const [editingText, setEditingText] = useState('')
   const submit = () => {
     const value = text.trim()
     if (!value || !canWrite) return
@@ -432,15 +434,15 @@ function ChecklistEditor({ checklist, canWrite, onAdd, onToggle, onDelete }) {
     <div className="kb-checklist">
       {checklist.map(item => (
         <div className="kb-check-item" key={item.id}>
-          <label className="kb-check-toggle">
+          <div className="kb-check-toggle">
             <input
               type="checkbox"
               checked={item.done}
               disabled={!canWrite}
               onChange={() => onToggle(item.id)}
             />
-            <span className={item.done ? 'kb-check-done' : ''}>{item.text}</span>
-          </label>
+            {editingId === item.id ? <input className="kb-input kb-check-edit" value={editingText} aria-label={`Edit checklist item ${item.text}`} autoFocus onChange={event => setEditingText(event.target.value)} onBlur={() => { const value = editingText.trim(); if (value && value !== item.text) onEdit(item.id, value); setEditingId(null) }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } if (event.key === 'Escape') setEditingId(null) }} /> : <button type="button" className={`kb-check-text ${item.done ? 'kb-check-done' : ''}`} onClick={() => { if (canWrite) { setEditingId(item.id); setEditingText(item.text) } }}>{item.text}</button>}
+          </div>
           {canWrite && <button
             className="kb-iconbtn"
             aria-label={`Delete checklist item ${item.text}`}
@@ -677,8 +679,8 @@ export default function Board({
   onShared,
 }) {
   const [board, setBoard] = useState(null)
-  const [composerCol, setComposerCol] = useState(null)
   const [openCardId, setOpenCardId] = useState(null)
+  const [previewAttachment, setPreviewAttachment] = useState(null)
   const [confirmDeleteCol, setConfirmDeleteCol] = useState(null)
   const [drag, setDrag] = useState(null)
   const [shareOpen, setShareOpen] = useState(false)
@@ -1056,7 +1058,7 @@ export default function Board({
       type: 'add-card',
       columnId: colId,
       card: { id, title, notes: '', label: 'none', due: '', checklist: [], attachments: [], assignee: '', assigneeHost: '', createdAt },
-    }, () => window.mobius?.signal?.('item_created', { type: 'card' }))
+    }, () => { setOpenCardId(id); window.mobius?.signal?.('item_created', { type: 'card' }) })
   }
 
   const updateCard = (cardId, patch) => {
@@ -1066,6 +1068,10 @@ export default function Board({
   const addCheckItem = (cardId, text) => {
     const item = { id: uid(), text, done: false }
     mutate({ type: 'add-checklist-item', cardId, item })
+  }
+
+  const editCheckItem = (cardId, itemId, text) => {
+    mutate({ type: 'update-checklist-item', cardId, itemId, text })
   }
 
   const toggleCheckItem = (cardId, itemId) => {
@@ -1553,17 +1559,13 @@ export default function Board({
               )}
               <div className="kb-cards">
                 {cardNodes}
-                {cards.length === 0 && !showGap && composerCol !== col.id && (
+                {cards.length === 0 && !showGap && (
                   <div className="kb-empty">{hasFilters && allCards.length ? 'No matching cards' : 'Nothing here yet'}</div>
                 )}
               </div>
-              {access.canWrite && (composerCol === col.id ? (
-                <Composer onAdd={t => addCard(col.id, t)} onClose={() => setComposerCol(null)} />
-              ) : (
-                <button className="kb-addcard" onClick={() => setComposerCol(col.id)}>
-                  <Plus /> Add card
-                </button>
-              ))}
+              {access.canWrite && <button className="kb-addcard" onClick={() => addCard(col.id, 'New card')}>
+                <Plus /> Add card
+              </button>}
             </section>
           )
         })}
@@ -1622,6 +1624,11 @@ export default function Board({
               onCommit={value => { if (value !== openCard_.notes) updateCard(openCard_.id, { notes: value }) }}
             />
 
+            <div>
+              <div className="kb-section-heading"><h3>Checklist</h3>{Array.isArray(openCard_.checklist) && openCard_.checklist.length > 0 && <span>{openCard_.checklist.filter(item => item.done).length}/{openCard_.checklist.length}</span>}</div>
+              <ChecklistEditor checklist={Array.isArray(openCard_.checklist) ? openCard_.checklist : []} canWrite={access.canWrite} onAdd={text => addCheckItem(openCard_.id, text)} onToggle={itemId => toggleCheckItem(openCard_.id, itemId)} onDelete={itemId => removeCheckItem(openCard_.id, itemId)} onEdit={(itemId, text) => editCheckItem(openCard_.id, itemId, text)} />
+            </div>
+
             <section className="kb-attachments" aria-labelledby="kb-attachments-title">
               <div className="kb-section-heading">
                 <h3 id="kb-attachments-title">Attachments</h3>
@@ -1629,13 +1636,7 @@ export default function Board({
               </div>
               {!!openCard_.attachments?.some(isPreviewImage) && <div className="kb-image-grid">
                 {openCard_.attachments.filter(isPreviewImage).map(attachment => <figure className="kb-image" key={attachment.id}>
-                  <AttachmentImage
-                    boardId={boardId}
-                    share={share}
-                    attachment={attachment}
-                    className="kb-image-preview"
-                    alt={attachment.name || 'Card image'}
-                  />
+                  <button type="button" className="kb-image-button" aria-label={`Preview ${attachment.name || 'image'}`} onClick={() => setPreviewAttachment(attachment)}><AttachmentImage boardId={boardId} share={share} attachment={attachment} className="kb-image-preview" alt={attachment.name || 'Card image'} /></button>
                   <figcaption title={attachment.name}>{attachment.name || 'Image'}</figcaption>
                   {access.canWrite && <button
                     className="kb-iconbtn kb-image-remove"
@@ -1689,22 +1690,6 @@ export default function Board({
               {attachmentError && <p className="kb-attachment-error" role="alert">{attachmentError}</p>}
               {!openCard_.attachments?.length && !access.canWrite && <div className="kb-empty">No attachments</div>}
             </section>
-
-            <div>
-              <div className="kb-section-heading">
-                <h3>Checklist</h3>
-                {Array.isArray(openCard_.checklist) && openCard_.checklist.length > 0 && <span>
-                  {openCard_.checklist.filter(item => item.done).length}/{openCard_.checklist.length}
-                </span>}
-              </div>
-              <ChecklistEditor
-                checklist={Array.isArray(openCard_.checklist) ? openCard_.checklist : []}
-                canWrite={access.canWrite}
-                onAdd={text => addCheckItem(openCard_.id, text)}
-                onToggle={itemId => toggleCheckItem(openCard_.id, itemId)}
-                onDelete={itemId => removeCheckItem(openCard_.id, itemId)}
-              />
-            </div>
 
             <div className="kb-property-list kb-mobile-only">
               <div className="kb-property-row">
@@ -1861,6 +1846,17 @@ export default function Board({
               </button>}
               <button className="kb-btn kb-btn-primary" onClick={() => setOpenCardId(null)}>Done</button>
             </div>
+          </div>
+        </>
+      )}
+
+      {previewAttachment && (
+        <>
+          <div className="kb-scrim kb-lightbox-scrim" onClick={() => setPreviewAttachment(null)} />
+          <div className="kb-lightbox" role="dialog" aria-modal="true" aria-label={`Preview ${previewAttachment.name || 'image'}`}>
+            <button type="button" className="kb-btn kb-lightbox-close" onClick={() => setPreviewAttachment(null)}>Close</button>
+            <AttachmentImage boardId={boardId} share={share} attachment={previewAttachment} className="kb-lightbox-image" alt={previewAttachment.name || 'Card image'} />
+            <div className="kb-lightbox-caption">{previewAttachment.name || 'Image'}</div>
           </div>
         </>
       )}

@@ -1082,7 +1082,9 @@ export const CSS = `
       overscroll-behavior: contain;
       scroll-padding-bottom: 96px;
     }
-    .kb-card-sheet { gap: 12px; }
+  .kb-card-sheet { gap: 12px; }
+    .kb-card-sheet > * { flex: 0 0 auto; min-height: 0; }
+    .kb-card-sheet .kb-notes-input { flex: 0 0 auto; min-height: 120px; }
     .kb-mobile-only { display: block; }
     .kb-desktop-only { display: none; }
     .kb-card-toolbar { display: flex; }
@@ -1121,6 +1123,16 @@ export const CSS = `
     .kb-filter-input { flex-basis: auto; }
     .kb-filter-labels { width: 100%; gap: 6px; padding-block: 4px; }
   }
+
+  .kb-image-button { display: block; width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
+  .kb-image-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 10px; }
+  .kb-check-text { min-width: 0; padding: 4px 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; overflow-wrap: anywhere; cursor: text; }
+  .kb-check-edit { min-width: 0; min-height: 40px; flex: 1; }
+  .kb-lightbox-scrim { z-index: 70; background: rgba(0,0,0,.72); }
+  .kb-lightbox { position: fixed; inset: 6vh 6vw; z-index: 71; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+  .kb-lightbox-image { max-width: 100%; max-height: 82vh; object-fit: contain; border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+  .kb-lightbox-close { align-self: flex-end; }
+  .kb-lightbox-caption { color: white; font-size: 12px; }
 
   @media (max-width: 479px) {
     .kb-col-reorder { display: flex; }
