@@ -63,7 +63,7 @@ async def federation_request(
   original_url = str(httpx.URL(url, params=params)) if params else url
   # getaddrinfo is blocking.  Keep attacker-controlled DNS away from the
   # server's async event loop while retaining the same DNS pin through the request.
-  pinned_url, host_header, sni_host = await asyncio.to_thread(
+  pinned_urls, host_header, sni_host = await asyncio.to_thread(
     validate_url_safe, original_url
   )
   # This request object is only the safe, unpinned URL attached to the returned
@@ -76,10 +76,26 @@ async def federation_request(
     timeout=timeout_seconds,
     trust_env=False,
   ) as client:
-    request = client.build_request(method, pinned_url, json=json, headers=headers)
-    request.headers["host"] = host_header
-    request.extensions["sni_hostname"] = sni_host
-    upstream = await client.send(request, stream=True)
+    # Each pinned URL targets one validated address (IPv4 first, IPv6 fallback).
+    # A connection failure means no response arrived, so trying the next address
+    # is safe; a peer stays reachable when DNS returns an address on a family
+    # this container cannot egress.
+    upstream = None
+    connect_error: Exception | None = None
+    for pinned_url in pinned_urls:
+      request = client.build_request(method, pinned_url, json=json, headers=headers)
+      request.headers["host"] = host_header
+      request.extensions["sni_hostname"] = sni_host
+      try:
+        upstream = await client.send(request, stream=True)
+        break
+      except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        connect_error = exc
+        continue
+    if upstream is None:
+      raise connect_error if connect_error is not None else (
+        FederationTransportError("Peer resolved to no reachable address.")
+      )
     try:
       if 300 <= upstream.status_code < 400:
         raise FederationTransportError("Federation redirects are not allowed.")
