@@ -249,6 +249,8 @@ export function groupCollaborators(members) {
       if (member.member_id) existing.member_ids.push(member.member_id)
       existing.pending = existing.pending && member.pending
       existing.active = existing.active || member.active
+      if (!existing.name && member.name) existing.name = member.name
+      if (!existing.handle && member.handle) existing.handle = member.handle
     }
   }
   return [...groups.values()]

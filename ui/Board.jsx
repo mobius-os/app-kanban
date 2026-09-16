@@ -288,7 +288,8 @@ function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
     const closeOnOutsidePress = event => {
       if (!rootRef.current?.contains(event.target) && !menuRef.current?.contains(event.target)) setOpen(false)
     }
-    const closeOnResize = () => setOpen(false)
+    const prevWidth = window.innerWidth
+    const closeOnResize = () => { if (window.innerWidth !== prevWidth) setOpen(false) }
     document.addEventListener('pointerdown', closeOnOutsidePress)
     window.addEventListener('resize', closeOnResize)
     requestAnimationFrame(() => searchRef.current?.focus())
