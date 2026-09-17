@@ -220,7 +220,7 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(boardSource, />Assign to me</)
   assert.match(boardSource, /placeholder=\{share \? 'Search people…' : 'Search or enter a name…'\}/)
   assert.doesNotMatch(boardSource, /<select/)
-  assert.match(boardSource, /<BoardPresence members=\{members\}/)
+  assert.match(boardSource, /<BoardPresence members=\{displayMembers\}/)
   assert.match(boardSource, /await onRefreshMembers\?\.\(\)/)
   assert.match(boardSource, /kb-card-notes/)
   assert.match(boardSource, /Attach files/)

@@ -66,12 +66,13 @@ def document(doc):
 
 
 class Service:
-    def __init__(self, root, *, host, app_id, request=federation_request, resolve=None, now=time.time):
+    def __init__(self, root, *, host, app_id, request=federation_request, resolve=None, owner_name=None, now=time.time):
         self.store = Store(root)
         self.host = check(host, HOST, 'instance host')
         self.app_id = app_id
         self.request = request
         self.resolve = resolve
+        self.owner_name = str(owner_name or '').strip() or self.host
         self.now = now
 
     def close(self):
@@ -146,7 +147,7 @@ class Service:
         if local_id is not None and (not isinstance(local_id,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,199}',local_id)):
             fail(400,'invalid-local-id','Invalid local board identity.')
         row = {'id':oid,'local_id':local_id,'label':str(body.get('label') or doc.get('title') or 'Board')[:120], 'doc':doc,'version':1,
-               'members':{self.host:{'host':self.host,'name':'Board owner','role':'editor','host_owner':True,'seen':self.now()}}, 'invites':{}}
+               'members':{self.host:{'host':self.host,'name':self.owner_name,'role':'editor','host_owner':True,'seen':self.now()}}, 'invites':{}}
         with self.store.transaction():
             existing = self.store.get('board',oid)
             if existing:
@@ -268,7 +269,7 @@ class Service:
                 member['invite']=secret
                 self.store.put('joined',key,member)
         result = await self.remote(host,oid,{'op':'join','member_id':member['member_id'],'credential':member['credential'],
-            'invite':member.get('invite',secret),'host':self.host})
+            'invite':member.get('invite',secret),'host':self.host,'name':self.owner_name})
         meta = result.get('object',{})
         admitted = meta.get('members',{}).get(member['member_id'])
         if not admitted or admitted.get('role') not in ('editor','viewer'):
@@ -316,6 +317,8 @@ class Service:
                 if existing:
                     self.member(row,mid,credential)
                     existing['pending']=False;existing['seen']=self.now()
+                    if isinstance(body.get('name'), str) and body['name'].strip():
+                        existing['name'] = body['name'].strip()[:128]
                     self.store.put('board',oid,row)
                     return self.state(row)
                 secret = check(body.get('invite'),SECRET,'invitation')
@@ -328,7 +331,9 @@ class Service:
                 # a member into an existing principal by a claimed host/name.
                 if len(row['members'])>=500:
                     fail(429,'members-full','This board has reached its member limit.')
-                row['members'][mid] = {'host':claimed_host,'name':claimed_host,'role':inv['role'],
+                claimed_name = body.get('name') if isinstance(body.get('name'), str) else ''
+                claimed_name = claimed_name.strip()[:128] or claimed_host
+                row['members'][mid] = {'host':claimed_host,'name':claimed_name,'role':inv['role'],
                     'credential_hash':digest(credential),'seen':self.now(),
                     **({'collaborator_id':inv['group']} if inv.get('group') else {})}
                 if inv.get('target') and inv['target'] != claimed_host:
@@ -348,6 +353,8 @@ class Service:
             if op in ('write','asset-write','asset-delete') and member['role'] != 'editor':
                 fail(403,'read-only','This board member is a viewer.')
             member['seen'] = self.now()
+            if isinstance(body.get('name'), str) and body['name'].strip():
+                member['name'] = body['name'].strip()[:128]
             result = self.operation(row,op,body)
             self.store.put('board',oid,row)
             return result
@@ -396,6 +403,7 @@ class Service:
         if host == self.host:
             with self.store.transaction():
                 row = self.board(oid)
+                row['members'][self.host]['name'] = self.owner_name
                 row['members'][self.host]['seen'] = self.now()
                 result = self.operation(row,op,body)
                 self.store.put('board',oid,row)
@@ -404,7 +412,8 @@ class Service:
         if not member or member['status']!='joined':
             fail(409,'membership-unavailable','This board has not been joined or migrated to independent Kanban.')
         try:
-            return await self.remote(host,oid,{'op':op,'member_id':member['member_id'],'credential':member['credential'],**body})
+            return await self.remote(host,oid,{'op':op,'member_id':member['member_id'],'credential':member['credential'],
+                'name':self.owner_name,**body})
         except Failure as error:
             if error.code == 'membership-revoked':
                 with self.store.transaction():

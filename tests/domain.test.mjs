@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   addChecklistItem,
   assigneeAvatar,
+  cardAssigneeLabel,
   assigneeHue,
   assigneeInitials,
   boardAccess,
@@ -124,4 +125,15 @@ test('visible-to-full index mapping preserves hidden-card positions during filte
   assert.equal(visibleToFullIndex(full, visible, 1, 'moving'), 3)
   assert.equal(visibleToFullIndex(full, visible, 2, 'moving'), 4)
   assert.equal(visibleToFullIndex(full, [], 0, 'moving'), 5)
+})
+
+
+test('saved assignee handles survive stale member records without matching names', () => {
+  const host = 'peer.example'
+  const card = { assignee: '@alice', assigneeHost: host }
+  assert.equal(cardAssigneeLabel(card, [{ host, name: host }]), '@alice')
+  assert.equal(cardAssigneeLabel({ ...card, assignee: host }, [{ host, handle: 'alice' }]), '@alice')
+  assert.equal(cardAssigneeLabel(card, [{ host: 'other.example', name: host, handle: 'bob' }]), '@alice')
+  assert.equal(cardAssigneeLabel(card, [{ host: 'linked.example', hosts: [host], handle: 'alice' }]), '@alice')
+  assert.equal(cardAssigneeLabel({ assignee: 'Alex' }, [{ host: 'other.example', name: 'Alex', handle: 'bob' }]), 'Alex')
 })

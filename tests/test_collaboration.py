@@ -366,7 +366,7 @@ class TransportBoundary(unittest.IsolatedAsyncioTestCase):
         def client(**kwargs):
             self.assertFalse(kwargs['trust_env']);self.assertFalse(kwargs['follow_redirects'])
             return RealClient(**kwargs,transport=httpx.MockTransport(handler))
-        with patch('collaboration.transport.validate_url_safe',return_value=('https://8.8.8.8/peer','peer.example','peer.example')),patch('collaboration.transport.httpx.AsyncClient',side_effect=client):
+        with patch('collaboration.transport.validate_url_safe',return_value=(['https://8.8.8.8/peer'],'peer.example','peer.example')),patch('collaboration.transport.httpx.AsyncClient',side_effect=client):
             with self.assertRaises(FederationTransportError): await federation_request('POST','https://peer.example/peer',json={'op':'state'})
         self.assertEqual(len(seen),1)
         self.assertEqual(seen[0].url.host,'8.8.8.8')
@@ -379,5 +379,5 @@ class TransportBoundary(unittest.IsolatedAsyncioTestCase):
         for content,headers,limit in [(b'x'*200,{'content-type':'application/json'},100),(b'[]',{'content-type':'application/json'},100),(b'<html/>',{'content-type':'text/html'},100)]:
             async def handler(request): return httpx.Response(200,content=content,headers=headers)
             def client(**kwargs): return RealClient(**kwargs,transport=httpx.MockTransport(handler))
-            with patch('collaboration.transport.validate_url_safe',return_value=('https://8.8.8.8/peer','peer.example','peer.example')),patch('collaboration.transport.httpx.AsyncClient',side_effect=client):
+            with patch('collaboration.transport.validate_url_safe',return_value=(['https://8.8.8.8/peer'],'peer.example','peer.example')),patch('collaboration.transport.httpx.AsyncClient',side_effect=client):
                 with self.assertRaises(FederationTransportError): await federation_request('POST','https://peer.example/peer',max_response_bytes=limit)

@@ -17,6 +17,7 @@ import {
 import { useModalFocus } from './modalFocus.js'
 import {
   assigneeAvatar,
+  cardAssigneeLabel,
   boardAccess,
   cardMatchesFilters,
   checklistProgress,
@@ -52,10 +53,10 @@ function AttachmentImage({ boardId, share, attachment, className, alt = '' }) {
   return <img className={className} src={src} alt={alt} />
 }
 
-function Card({ boardId, share, card, lifted, onOpen, onDragStart, canWrite }) {
+function Card({ boardId, share, card, assigneeLabel, lifted, onOpen, onDragStart, canWrite }) {
   const dueStatus = dueDateStatus(card.due)
   const progress = checklistProgress(card.checklist)
-  const assignee = card.assignee?.trim()
+  const assignee = (assigneeLabel ?? card.assignee)?.trim()
   const avatar = assignee ? assigneeAvatar(assignee) : null
   const notePreview = String(card.notes || '').trim()
   const attachments = card.attachments || []
@@ -272,7 +273,7 @@ function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
   const selectedMember = card.assigneeHost
     ? collaboratorForHost(joined, card.assigneeHost)
     : joined.find(member => memberLabel(member) === card.assignee)
-  const selectedLabel = selectedMember ? memberLabel(selectedMember) : String(card.assignee || '').trim()
+  const selectedLabel = cardAssigneeLabel(card, joined)
   const selectedAvatar = selectedLabel ? assigneeAvatar(selectedLabel) : null
   const selfMember = selfCollaborator(joined, share)
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -288,7 +289,8 @@ function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
     const closeOnOutsidePress = event => {
       if (!rootRef.current?.contains(event.target) && !menuRef.current?.contains(event.target)) setOpen(false)
     }
-    const closeOnResize = () => setOpen(false)
+    const prevWidth = window.innerWidth
+    const closeOnResize = () => { if (window.innerWidth !== prevWidth) setOpen(false) }
     document.addEventListener('pointerdown', closeOnOutsidePress)
     window.addEventListener('resize', closeOnResize)
     requestAnimationFrame(() => searchRef.current?.focus())
@@ -665,6 +667,7 @@ function Composer({ onAdd, onClose }) {
 }
 
 export default function Board({
+  token,
   boardId,
   boards,
   shareMap,
@@ -690,6 +693,7 @@ export default function Board({
   const [filterLabels, setFilterLabels] = useState([])
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [members, setMembers] = useState(null)
+  const [identity, setIdentity] = useState(null)
   const [animateColumns, setAnimateColumns] = useState(true)
   const [queuedCount, setQueuedCount] = useState(0)
   const [recoveredCount, setRecoveredCount] = useState(0)
@@ -716,6 +720,36 @@ export default function Board({
   shareRef.current = share
   onlineRef.current = online
   filtersRef.current = { text: filterText, labels: filterLabels }
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/identity', { headers: { Authorization: `Bearer ${token}` } })
+      .then(response => response.ok ? response.json() : null)
+      .then(value => { if (active) setIdentity(value) })
+      .catch(() => { if (active) setIdentity(null) })
+    return () => { active = false }
+  }, [token])
+
+  const localDeploymentHost = (() => {
+    const deployments = Array.isArray(identity?.deployments) ? identity.deployments : []
+    const current = deployments.find(item => item?.current === true) || deployments[0]
+    try { return current?.url ? new URL(current.url).hostname : window.location.hostname } catch { return window.location.hostname }
+  })()
+  const profile = identity?.profile || {}
+  const profileHandle = String(profile.handle || '').trim().replace(/^@/u, '')
+  const profileName = String(profile.display_name || '').trim()
+  const displayMembers = (members || []).map(member => member.host === localDeploymentHost && localDeploymentHost
+    ? { ...member, handle: profileHandle || member.handle, name: profileHandle ? '' : (profileName || member.name) }
+    : member)
+
+  const assigneeLabelForCard = card => {
+    const raw = String(card?.assignee || '').trim()
+    if (!raw) return raw
+    const host = String(card?.assigneeHost || '').trim()
+    const localMatch = (host && host === localDeploymentHost) || raw === localDeploymentHost
+    if (localMatch && (profileHandle || profileName)) return profileHandle ? `@${profileHandle}` : profileName
+    return cardAssigneeLabel(card, displayMembers)
+  }
 
   useEffect(() => { setAttachmentError('') }, [openCardId])
 
@@ -1390,7 +1424,7 @@ export default function Board({
           {queuedCount > 0 ? `${queuedCount} change${queuedCount === 1 ? '' : 's'} pending` : access.status}
         </span>}
         {syncNote && <span className="kb-offline">{syncNote}</span>}
-        {share && <BoardPresence members={members} onOpen={() => setShareOpen(true)} />}
+        {share && <BoardPresence members={displayMembers} onOpen={() => setShareOpen(true)} />}
         <button
           className={`kb-iconbtn${hasFilters ? ' kb-filter-active' : ''}`}
           aria-label="Filter cards"
@@ -1477,6 +1511,7 @@ export default function Board({
               boardId={boardId}
               share={share}
               card={card}
+              assigneeLabel={assigneeLabelForCard(card)}
               lifted={drag?.cardId === card.id && drag.moved}
               onOpen={openCard}
               onDragStart={startDrag}
@@ -1723,7 +1758,7 @@ export default function Board({
                 <AssigneePicker
                   card={openCard_}
                   canWrite={access.canWrite}
-                  members={members}
+                  members={displayMembers}
                   share={share}
                   onUpdate={patch => updateCard(openCard_.id, patch)}
                 />
@@ -1789,7 +1824,7 @@ export default function Board({
                 <AssigneePicker
                   card={openCard_}
                   canWrite={access.canWrite}
-                  members={members}
+                  members={displayMembers}
                   share={share}
                   onUpdate={patch => updateCard(openCard_.id, patch)}
                 />
@@ -1869,7 +1904,7 @@ export default function Board({
         <ShareSheet
           boardId={boardId}
           share={share}
-          members={members}
+          members={displayMembers}
           onMembersChange={setMembers}
           onRefreshMembers={refreshMembers}
           onShared={onShared}

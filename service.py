@@ -10,6 +10,26 @@ import httpx
 from collaboration.service import Service, Failure
 
 async def dispatch(request):
+    owner_name = ''
+    # The app token has the reviewed identity capability. Resolve the stable
+    # profile label once per service request; collaboration still falls back to
+    # the deployment host if the identity service is temporarily unavailable.
+    path = str(request.get('path', '')).strip('/')
+    if not path.startswith('peer/'):
+        try:
+            async with httpx.AsyncClient(timeout=5, follow_redirects=False, trust_env=False) as client:
+                response = await client.get(
+                    os.environ['API_BASE_URL'].rstrip('/') + '/api/identity',
+                    headers={'Authorization': 'Bearer ' + os.environ['APP_TOKEN']},
+                )
+            if response.status_code == 200:
+                profile = response.json().get('profile') or {}
+                handle = str(profile.get('handle') or '').strip().lstrip('@')
+                display_name = str(profile.get('display_name') or '').strip()
+                owner_name = ('@' + handle) if handle else display_name
+        except Exception:
+            pass
+
     async def resolve(handle):
         async with httpx.AsyncClient(timeout=5,follow_redirects=False,trust_env=False) as client:
             response=await client.get(os.environ['API_BASE_URL'].rstrip('/')+'/api/identity/handles/'+quote(handle,safe=''),headers={'Authorization':'Bearer '+os.environ['APP_TOKEN']})
@@ -17,7 +37,7 @@ async def dispatch(request):
             raise Failure(503,'identity-unavailable','Collaborator identity could not be resolved.')
         data=response.json()
         return data.get('hosts') if data.get('linked') is True else None
-    service=Service(Path(os.environ['APP_STORAGE_DIR'])/'server',host=os.environ['INSTANCE_DOMAIN'],app_id=int(os.environ['APP_ID']),resolve=resolve)
+    service=Service(Path(os.environ['APP_STORAGE_DIR'])/'server',host=os.environ['INSTANCE_DOMAIN'],app_id=int(os.environ['APP_ID']),resolve=resolve,owner_name=owner_name)
     try: return await service.handle(request)
     finally: service.close()
 
