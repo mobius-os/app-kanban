@@ -52,10 +52,10 @@ function AttachmentImage({ boardId, share, attachment, className, alt = '' }) {
   return <img className={className} src={src} alt={alt} />
 }
 
-function Card({ boardId, share, card, lifted, onOpen, onDragStart, canWrite }) {
+function Card({ boardId, share, card, assigneeLabel, lifted, onOpen, onDragStart, canWrite }) {
   const dueStatus = dueDateStatus(card.due)
   const progress = checklistProgress(card.checklist)
-  const assignee = card.assignee?.trim()
+  const assignee = (assigneeLabel ?? card.assignee)?.trim()
   const avatar = assignee ? assigneeAvatar(assignee) : null
   const notePreview = String(card.notes || '').trim()
   const attachments = card.attachments || []
@@ -740,6 +740,16 @@ export default function Board({
   const displayMembers = (members || []).map(member => member.host === localDeploymentHost && localDeploymentHost
     ? { ...member, handle: profileHandle || member.handle, name: profileHandle ? '' : (profileName || member.name) }
     : member)
+
+  const assigneeLabelForCard = card => {
+    const raw = String(card?.assignee || '').trim()
+    if (!raw) return raw
+    const host = String(card?.assigneeHost || '').trim()
+    const localMatch = (host && host === localDeploymentHost) || raw === localDeploymentHost
+    if (localMatch && (profileHandle || profileName)) return profileHandle ? `@${profileHandle}` : profileName
+    const member = displayMembers.find(item => (host && item.host === host) || item.host === raw)
+    return member ? memberLabel(member) : raw
+  }
 
   useEffect(() => { setAttachmentError('') }, [openCardId])
 
@@ -1501,6 +1511,7 @@ export default function Board({
               boardId={boardId}
               share={share}
               card={card}
+              assigneeLabel={assigneeLabelForCard(card)}
               lifted={drag?.cardId === card.id && drag.moved}
               onOpen={openCard}
               onDragStart={startDrag}
