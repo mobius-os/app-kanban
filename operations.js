@@ -39,6 +39,11 @@ export function applyBoardOp(board, op) {
       if (item) item.done = op.done === true
       return board
     }
+    case 'update-checklist-item': {
+      const item = board.cards[op.cardId]?.checklist?.find(candidate => candidate?.id === op.itemId)
+      if (item && typeof op.text === 'string' && op.text.trim()) item.text = op.text.trim()
+      return board
+    }
     case 'delete-checklist-item': {
       const card = board.cards[op.cardId]
       if (card) card.checklist = (Array.isArray(card.checklist) ? card.checklist : []).filter(item => item?.id !== op.itemId)

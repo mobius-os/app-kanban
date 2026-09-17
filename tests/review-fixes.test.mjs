@@ -62,6 +62,13 @@ test('the former browser queue migrates into per-operation app storage without l
   assert.equal(legacyValues.has('kanban:pending-board-ops:v1:board'), false)
 })
 
+test('checklist text edits apply and trim through the shared operation', () => {
+  const doc = boardDoc()
+  doc.cards.a.checklist = [{ id: 'item', text: 'Old text', done: false }]
+  applyBoardOp(doc, { type: 'update-checklist-item', cardId: 'a', itemId: 'item', text: '  New text  ' })
+  assert.equal(doc.cards.a.checklist[0].text, 'New text')
+})
+
 test('offline reconnect conflict rebases every queued operation or retains an explicit failure', async () => {
   const uiStorage = memoryStorage()
   await enqueuePendingBoardOp('board', {
