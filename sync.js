@@ -407,3 +407,32 @@ export async function pushSharedOp(entry, op, onError, request = fetch, confirme
   onError?.(new Error('The board is changing too quickly — try again.'))
   return null
 }
+
+// Directory entries discover candidates; only the account registry confirms
+// that a handle belongs to this exact deployment. This affects labels only.
+export async function resolveMemberHandles(hosts, token, request = fetch, signal) {
+  const verified = {}
+  const pending = [...new Set(hosts)]
+  const headers = { Authorization: `Bearer ${token}` }
+  await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {
+    while (pending.length && !signal?.aborted) {
+      const host = pending.shift()
+      try {
+        const url = `https://www.mobius.you/api/app-services/social/directory?q=${encodeURIComponent(host)}`
+        const directory = await request(`/api/proxy?url=${encodeURIComponent(url)}`, { headers, signal })
+        if (!directory.ok) continue
+        const listing = await directory.json()
+        const candidate = listing.users?.find(user => user.host === host && user.handle)
+        if (!candidate) continue
+        const handle = String(candidate.handle).trim().replace(/^@/u, '')
+        const response = await request(`/api/identity/handles/${encodeURIComponent(handle)}`, { headers, signal })
+        if (!response.ok) continue
+        const identity = await response.json()
+        if (identity.linked === true && identity.hosts?.includes(host)) verified[host] = handle
+      } catch {
+        // Optional profile discovery must not interrupt board sync or presence.
+      }
+    }
+  }))
+  return verified
+}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
-import { pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
+import { resolveMemberHandles, pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
 import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
@@ -665,6 +665,7 @@ export default function Board({
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [members, setMembers] = useState(null)
   const [identity, setIdentity] = useState(null)
+  const [verifiedHandles, setVerifiedHandles] = useState({})
   const [animateColumns, setAnimateColumns] = useState(true)
   const [queuedCount, setQueuedCount] = useState(0)
   const [recoveredCount, setRecoveredCount] = useState(0)
@@ -709,9 +710,25 @@ export default function Board({
   const profile = identity?.profile || {}
   const profileHandle = String(profile.handle || '').trim().replace(/^@/u, '')
   const profileName = String(profile.display_name || '').trim()
-  const displayMembers = (members || []).map(member => member.host === localDeploymentHost && localDeploymentHost
-    ? { ...member, handle: profileHandle || member.handle, name: profileHandle ? '' : (profileName || member.name) }
-    : member)
+  const profileHostsKey = JSON.stringify([...new Set((members || [])
+    .filter(member => !member.handle && !String(member.name || '').startsWith('@'))
+    .flatMap(member => member.hosts || [member.host])
+    .filter(host => host && host !== localDeploymentHost))].sort())
+
+  useEffect(() => {
+    const controller = new AbortController()
+    resolveMemberHandles(JSON.parse(profileHostsKey), token, fetch, controller.signal)
+      .then(handles => { if (!controller.signal.aborted) setVerifiedHandles(handles) })
+    return () => controller.abort()
+  }, [profileHostsKey, token])
+
+  const displayMembers = (members || []).map(member => {
+    if (member.host === localDeploymentHost && localDeploymentHost) {
+      return { ...member, handle: profileHandle || member.handle, name: profileHandle ? '' : (profileName || member.name) }
+    }
+    const handle = (member.hosts || [member.host]).map(host => verifiedHandles[host]).find(Boolean)
+    return handle ? { ...member, handle, name: member.name === member.host ? '' : member.name } : member
+  })
 
   const assigneeLabelForCard = card => {
     const raw = String(card?.assignee || '').trim()
