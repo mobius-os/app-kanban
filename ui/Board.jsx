@@ -732,7 +732,7 @@ export default function Board({
   const localDeploymentHost = (() => {
     const deployments = Array.isArray(identity?.deployments) ? identity.deployments : []
     const current = deployments.find(item => item?.current === true) || deployments[0]
-    try { return current?.url ? new URL(current.url).hostname : '' } catch { return '' }
+    try { return current?.url ? new URL(current.url).hostname : window.location.hostname } catch { return window.location.hostname }
   })()
   const profile = identity?.profile || {}
   const profileHandle = String(profile.handle || '').trim().replace(/^@/u, '')
