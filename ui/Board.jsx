@@ -17,6 +17,7 @@ import {
 import { useModalFocus } from './modalFocus.js'
 import {
   assigneeAvatar,
+  cardAssigneeLabel,
   boardAccess,
   cardMatchesFilters,
   checklistProgress,
@@ -272,7 +273,7 @@ function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
   const selectedMember = card.assigneeHost
     ? collaboratorForHost(joined, card.assigneeHost)
     : joined.find(member => memberLabel(member) === card.assignee)
-  const selectedLabel = selectedMember ? memberLabel(selectedMember) : String(card.assignee || '').trim()
+  const selectedLabel = cardAssigneeLabel(card, joined)
   const selectedAvatar = selectedLabel ? assigneeAvatar(selectedLabel) : null
   const selfMember = selfCollaborator(joined, share)
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -747,13 +748,7 @@ export default function Board({
     const host = String(card?.assigneeHost || '').trim()
     const localMatch = (host && host === localDeploymentHost) || raw === localDeploymentHost
     if (localMatch && (profileHandle || profileName)) return profileHandle ? `@${profileHandle}` : profileName
-    const member = displayMembers.find(item => (
-      (host && item.host === host)
-      || item.host === raw
-      || String(item.name || '').trim() === raw
-      || String(item.handle || '').trim().replace(/^@/u, '') === raw.replace(/^@/u, '')
-    ))
-    return member ? memberLabel(member) : raw
+    return cardAssigneeLabel(card, displayMembers)
   }
 
   useEffect(() => { setAttachmentError('') }, [openCardId])

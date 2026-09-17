@@ -177,3 +177,17 @@ export function swapColumns(columns, columnId, offset) {
   ;[next[from], next[to]] = [next[to], next[from]]
   return next
 }
+
+// Assignment identity comes from a host, never a shared display name.
+// A stale hostname-only member must not erase a handle saved on the card.
+export function cardAssigneeLabel(card, members = []) {
+  const saved = String(card?.assignee || '').trim()
+  const host = String(card?.assigneeHost || '').trim() || saved
+  const member = members.find(item => item.host === host || item.hosts?.includes(host))
+  const handle = String(member?.handle || '').trim().replace(/^@/u, '')
+  if (handle) return `@${handle}`
+  const name = String(member?.name || '').trim()
+  if (name.startsWith('@')) return name
+  if (saved.startsWith('@')) return saved
+  return name || saved
+}
