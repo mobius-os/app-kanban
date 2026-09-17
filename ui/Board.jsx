@@ -747,7 +747,12 @@ export default function Board({
     const host = String(card?.assigneeHost || '').trim()
     const localMatch = (host && host === localDeploymentHost) || raw === localDeploymentHost
     if (localMatch && (profileHandle || profileName)) return profileHandle ? `@${profileHandle}` : profileName
-    const member = displayMembers.find(item => (host && item.host === host) || item.host === raw)
+    const member = displayMembers.find(item => (
+      (host && item.host === host)
+      || item.host === raw
+      || String(item.name || '').trim() === raw
+      || String(item.handle || '').trim().replace(/^@/u, '') === raw.replace(/^@/u, '')
+    ))
     return member ? memberLabel(member) : raw
   }
 
