@@ -15,6 +15,7 @@ import {
   deleteSharedAsset,
   pushSharedOp,
   removeShareEntry,
+  resolveMemberHandles,
   shareBoard,
   sharedBoardPollDelay,
 } from '../sync.js'
@@ -306,4 +307,27 @@ test('shell string app identity uses the same numeric service route', async () =
   for (const id of [null, undefined, true, {}, '', ' ', '0', 0, -1, '118/other', '1e2', '1.5', Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(() => configureSync('test-token', id), /identity is required/)
   }
+})
+
+test('member handle discovery only keeps handles verified for the exact host', async () => {
+  const calls = []
+  const request = async url => {
+    calls.push(url)
+    if (url.startsWith('/api/proxy?')) {
+      return Response.json({ users: [
+        { host: 'rocky.example', handle: '@rocky' },
+        { host: 'other.example', handle: '@other' },
+      ] })
+    }
+    if (url.endsWith('/rocky')) {
+      return Response.json({ linked: true, hosts: ['rocky.example'] })
+    }
+    return Response.json({ linked: true, hosts: ['different.example'] })
+  }
+
+  assert.deepEqual(
+    await resolveMemberHandles(['rocky.example', 'other.example'], 'fixture', request),
+    { 'rocky.example': 'rocky' },
+  )
+  assert.equal(calls.length, 4)
 })
