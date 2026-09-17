@@ -421,7 +421,6 @@ export const CSS = `
   }
   .kb-addcard > svg, .kb-addcol > svg, .kb-btn > svg, .kb-newtile > svg { width: 18px; height: 18px; flex: 0 0 auto; }
   .kb-addcard:focus-visible { outline: 2px solid var(--accent); }
-  .kb-composer { margin: 4px 10px 10px; display: flex; flex-direction: column; gap: 8px; }
   .kb-input {
     width: 100%;
     border: 1px solid var(--border);

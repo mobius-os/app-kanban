@@ -23,6 +23,9 @@ export function useModalFocus(open, onClose) {
     const onKeyDown = event => {
       if (!isTopmost()) return
       if (event.key === 'Escape') {
+        // Inline editors own Escape so it cancels editing instead of closing
+        // the containing card sheet.
+        if (event.target?.closest?.('.kb-check-edit')) return
         event.preventDefault()
         event.stopPropagation()
         closeRef.current?.()

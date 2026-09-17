@@ -438,10 +438,11 @@ function ChecklistEditor({ checklist, canWrite, onAdd, onToggle, onDelete, onEdi
             <input
               type="checkbox"
               checked={item.done}
+              aria-label={item.text}
               disabled={!canWrite}
               onChange={() => onToggle(item.id)}
             />
-            {editingId === item.id ? <input className="kb-input kb-check-edit" value={editingText} aria-label={`Edit checklist item ${item.text}`} autoFocus onChange={event => setEditingText(event.target.value)} onBlur={() => { const value = editingText.trim(); if (value && value !== item.text) onEdit(item.id, value); setEditingId(null) }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } if (event.key === 'Escape') setEditingId(null) }} /> : <button type="button" className={`kb-check-text ${item.done ? 'kb-check-done' : ''}`} onClick={() => { if (canWrite) { setEditingId(item.id); setEditingText(item.text) } }}>{item.text}</button>}
+            {editingId === item.id ? <input className="kb-input kb-check-edit" value={editingText} aria-label={`Edit checklist item ${item.text}`} autoFocus onChange={event => setEditingText(event.target.value)} onBlur={() => { const value = editingText.trim(); if (value && value !== item.text) onEdit(item.id, value); setEditingId(null) }} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditingId(null); return } if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }} /> : <button type="button" className={`kb-check-text ${item.done ? 'kb-check-done' : ''}`} onClick={() => { if (canWrite) { setEditingId(item.id); setEditingText(item.text) } }}>{item.text}</button>}
           </div>
           {canWrite && <button
             className="kb-iconbtn"
@@ -631,38 +632,6 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
         <button className="kb-btn kb-btn-primary" onClick={onClose}>Done</button>
       </div>
     </>
-  )
-}
-
-function Composer({ onAdd, onClose }) {
-  const [text, setText] = useState('')
-  const ref = useRef(null)
-  useEffect(() => { ref.current?.focus() }, [])
-  const submit = () => {
-    const t = text.trim()
-    if (t) onAdd(t)
-    setText('')
-    if (!t) onClose()
-  }
-  return (
-    <div className="kb-composer">
-      <textarea
-        ref={ref}
-        className="kb-input"
-        rows={2}
-        placeholder="Card title…"
-        value={text}
-        onChange={e => setText(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
-          if (e.key === 'Escape') onClose()
-        }}
-      />
-      <div className="kb-composer-row">
-        <button className="kb-btn kb-btn-primary" onClick={submit}>Add card</button>
-        <button className="kb-btn kb-btn-quiet" onClick={onClose}>Cancel</button>
-      </div>
-    </div>
   )
 }
 
@@ -1058,7 +1027,9 @@ export default function Board({
       type: 'add-card',
       columnId: colId,
       card: { id, title, notes: '', label: 'none', due: '', checklist: [], attachments: [], assignee: '', assigneeHost: '', createdAt },
-    }, () => { setOpenCardId(id); window.mobius?.signal?.('item_created', { type: 'card' }) })
+    })
+    setOpenCardId(id)
+    window.mobius?.signal?.('item_created', { type: 'card' })
   }
 
   const updateCard = (cardId, patch) => {
