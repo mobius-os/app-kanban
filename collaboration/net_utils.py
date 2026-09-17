@@ -34,8 +34,8 @@ _BLOCKED_NETS = [
 ]
 
 
-def validate_url_safe(url: str) -> tuple[str, str, str]:
-  """Return (pinned URL, original Host header, TLS server name).
+def validate_url_safe(url: str) -> tuple[list[str], str, str]:
+  """Return (pinned URLs IPv4-first, original Host header, TLS server name).
 
   Validate every DNS answer, then connect to exactly one validated address.
   Re-resolving at connect time would reintroduce DNS rebinding.
@@ -60,7 +60,7 @@ def validate_url_safe(url: str) -> tuple[str, str, str]:
     infos = socket.getaddrinfo(host, None)
   except socket.gaierror as exc:
     raise UnsafePeerAddress(f"Cannot resolve host {host!r}: {exc}") from exc
-  pinned_ip = None
+  validated_ips: list[str] = []
   for info in infos:
     ip_str = info[4][0]
     try:
@@ -94,16 +94,26 @@ def validate_url_safe(url: str) -> tuple[str, str, str]:
             f"(network {net}).",
           )
     # Every resolved address is validated (we raise on the first blocked one),
-    # so pinning to the first is safe — the fetched IP can't be an unvalidated
-    # one.
-    if pinned_ip is None:
-      pinned_ip = ip_str
-  if pinned_ip is None:
+    # so returning them all is safe — no fetched IP can be an unvalidated one.
+    if ip_str not in validated_ips:
+      validated_ips.append(ip_str)
+  if not validated_ips:
     raise UnsafePeerAddress(f"Cannot resolve host {host!r} to any address.")
-  ip_host = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
-  netloc = f"{ip_host}:{parsed.port}" if parsed.port else ip_host
-  pinned_url = parsed._replace(netloc=netloc).geturl()
+  # Prefer IPv4, then IPv6. The transport pins each connection to one exact
+  # address, so an unroutable family (e.g. a container with no IPv6 egress) must
+  # be skippable rather than fatal. getaddrinfo ordering (RFC 6724) can put an
+  # unroutable IPv6 address first; returning every validated candidate IPv4-first
+  # lets the transport try each until one connects.
+  ordered = (
+    [ip for ip in validated_ips if ":" not in ip]
+    + [ip for ip in validated_ips if ":" in ip]
+  )
+  pinned_urls: list[str] = []
+  for ip_str in ordered:
+    ip_host = f"[{ip_str}]" if ":" in ip_str else ip_str
+    netloc = f"{ip_host}:{parsed.port}" if parsed.port else ip_host
+    pinned_urls.append(parsed._replace(netloc=netloc).geturl())
   # Host header carries the ORIGINAL authority (host + non-default port, IPv6
   # brackets preserved) per RFC 7230 §5.4; the SNI/cert name is the bare DNS
   # host. userinfo was rejected above, so parsed.netloc is exactly host[:port].
-  return pinned_url, parsed.netloc, host
+  return pinned_urls, parsed.netloc, host
