@@ -746,7 +746,8 @@ export default function Board({
     if (!raw) return raw
     const host = String(card?.assigneeHost || '').trim()
     const localMatch = (host && host === localDeploymentHost) || raw === localDeploymentHost
-    if (localMatch && (profileHandle || profileName)) return profileHandle ? `@${profileHandle}` : profileName
+    const legacyLocalName = /^mobius(?:\s|[-_])/iu.test(raw)
+    if ((localMatch || legacyLocalName) && (profileHandle || profileName)) return profileHandle ? `@${profileHandle}` : profileName
     const member = displayMembers.find(item => (
       (host && item.host === host)
       || item.host === raw
