@@ -249,6 +249,7 @@ export default function App({ appId, token }) {
       {!resolved ? null : openId ? (
         <Board
           key={openId}
+          token={token}
           boardId={openId}
           boards={boards || []}
           shareMap={shareMap.byBoard}
