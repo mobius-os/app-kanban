@@ -422,6 +422,88 @@ function AutoGrowTextarea({ valueKey, onCommit, expandOnFocus = false, ...props 
   />
 }
 
+function LinkifiedText({ text }) {
+  const parts = String(text || '').split(/(https?:\/\/[^\s<]+)/gu)
+  return parts.map((part, index) => {
+    if (!/^https?:\/\//u.test(part)) return part
+    const match = part.match(/^(.*?)([.,!?;:]+)?$/u)
+    const url = match?.[1] || part
+    const punctuation = match?.[2] || ''
+    try {
+      const parsed = new URL(url)
+      if (!['http:', 'https:'].includes(parsed.protocol)) return part
+      return <span key={`${url}-${index}`}><a href={parsed.href} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}>{url}</a>{punctuation}</span>
+    } catch {
+      return part
+    }
+  })
+}
+
+function CardTitleEditor({ card, canWrite, onCommit }) {
+  const [editing, setEditing] = useState(false)
+  useEffect(() => { setEditing(false) }, [card.id])
+  if (!editing || !canWrite) return <div
+    className={`kb-title-display${canWrite ? ' kb-editable-display' : ''}`}
+    onClick={() => { if (canWrite) setEditing(true) }}
+    onKeyDown={event => {
+      if (canWrite && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault()
+        setEditing(true)
+      }
+    }}
+    role={canWrite ? 'button' : undefined}
+    tabIndex={canWrite ? 0 : undefined}
+    aria-label={canWrite ? 'Edit card title' : undefined}
+  >{card.title}</div>
+  return <AutoGrowTextarea
+    className="kb-input kb-title-input"
+    rows={1}
+    autoFocus
+    defaultValue={card.title}
+    key={`st-${card.id}`}
+    valueKey={`${card.id}:${card.title}`}
+    aria-label="Card title"
+    onCommit={value => {
+      const next = value.trim()
+      if (next && next !== card.title) onCommit(next)
+      setEditing(false)
+    }}
+  />
+}
+
+function CardNotesEditor({ card, canWrite, onCommit }) {
+  const [editing, setEditing] = useState(false)
+  useEffect(() => { setEditing(false) }, [card.id])
+  if (!editing || !canWrite) return <div
+    className={`kb-notes-display${canWrite ? ' kb-editable-display' : ''}${card.notes ? '' : ' kb-notes-empty'}`}
+    onClick={() => { if (canWrite) setEditing(true) }}
+    onKeyDown={event => {
+      if (canWrite && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault()
+        setEditing(true)
+      }
+    }}
+    role={canWrite ? 'button' : undefined}
+    tabIndex={canWrite ? 0 : undefined}
+    aria-label={canWrite ? 'Edit card notes' : undefined}
+  >{card.notes ? <LinkifiedText text={card.notes} /> : 'Notes…'}</div>
+  return <AutoGrowTextarea
+    className="kb-input kb-notes-input"
+    rows={2}
+    expandOnFocus
+    autoFocus
+    placeholder="Notes…"
+    defaultValue={card.notes}
+    key={`sn-${card.id}`}
+    valueKey={`${card.id}:${card.notes}`}
+    aria-label="Card notes"
+    onCommit={value => {
+      if (value !== card.notes) onCommit(value)
+      setEditing(false)
+    }}
+  />
+}
+
 function ChecklistEditor({ checklist, canWrite, onAdd, onToggle, onDelete, onEdit }) {
   const [text, setText] = useState('')
   const [editingId, setEditingId] = useState(null)
@@ -1634,28 +1716,8 @@ export default function Board({
               <button className="kb-btn kb-btn-primary kb-card-toolbar-done" type="button" onClick={() => setOpenCardId(null)}>Done</button>
             </div>
             <div className="kb-sheet-grab kb-desktop-only" />
-            <AutoGrowTextarea
-              className="kb-input kb-title-input"
-              rows={1}
-              defaultValue={openCard_.title}
-              key={`st-${openCard_.id}`}
-              valueKey={`${openCard_.id}:${openCard_.title}`}
-              aria-label="Card title"
-              readOnly={!access.canWrite}
-              onCommit={value => { const next = value.trim(); if (next && next !== openCard_.title) updateCard(openCard_.id, { title: next }) }}
-            />
-            <AutoGrowTextarea
-              className="kb-input kb-notes-input"
-              rows={2}
-              expandOnFocus
-              placeholder="Notes…"
-              defaultValue={openCard_.notes}
-              key={`sn-${openCard_.id}`}
-              valueKey={`${openCard_.id}:${openCard_.notes}`}
-              aria-label="Card notes"
-              readOnly={!access.canWrite}
-              onCommit={value => { if (value !== openCard_.notes) updateCard(openCard_.id, { notes: value }) }}
-            />
+            <CardTitleEditor card={openCard_} canWrite={access.canWrite} onCommit={title => updateCard(openCard_.id, { title })} />
+            <CardNotesEditor card={openCard_} canWrite={access.canWrite} onCommit={notes => updateCard(openCard_.id, { notes })} />
 
             <div>
               <div className="kb-section-heading"><h3>Checklist</h3>{Array.isArray(openCard_.checklist) && openCard_.checklist.length > 0 && <span>{openCard_.checklist.filter(item => item.done).length}/{openCard_.checklist.length}</span>}</div>
