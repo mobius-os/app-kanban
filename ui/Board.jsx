@@ -57,6 +57,8 @@ const pullCardScore = (pull, card) => {
   const repositoryMatch = repository && text.toLocaleLowerCase().includes(repository)
   return { score: titleScore + (repositoryMatch ? 1 : 0), eligible: repositoryMatch || titleScore >= 0.15 }
 }
+const readyForDone = (card, pull) => Boolean(pull?.pull_request?.merged_at)
+  && (card?.checklist || []).every(item => item?.done === true)
 
 function AttachmentImage({ boardId, share, attachment, className, alt = '' }) {
   const [src, setSrc] = useState('')
@@ -1514,12 +1516,15 @@ export default function Board({
             notes: [String(current.notes || '').trim(), `✅ Done — ${pull.title}\nPR: ${pull.html_url}`].filter(Boolean).join('\n\n'),
           })
         }
-        for (const item of current.checklist || []) {
-          if (item?.done || prTitleSimilarity(pull.title, item?.text) < 0.1) continue
-          mutate({ type: 'set-checklist-item', cardId: current.id, itemId: item.id, done: true })
+        if (pull?.pull_request?.merged_at) {
+          for (const item of current.checklist || []) {
+            if (item?.done || prTitleSimilarity(pull.title, item?.text) < 0.1) continue
+            mutate({ type: 'set-checklist-item', cardId: current.id, itemId: item.id, done: true })
+          }
         }
         const done = boardRef.current?.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
-        if (done && !done.cardIds.includes(current.id)) moveCard(current.id, done.id, null)
+        const updated = boardRef.current?.cards[current.id]
+        if (done && readyForDone(updated, pull) && !done.cardIds.includes(current.id)) moveCard(current.id, done.id, null)
       }
     })().catch(() => {}).finally(() => { prSyncingRef.current = false })
     return () => { alive = false }

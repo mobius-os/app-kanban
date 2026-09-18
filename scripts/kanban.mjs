@@ -117,6 +117,9 @@ function pullCardScore(pull, card) {
   const repositoryMatch = repository && text.toLocaleLowerCase().includes(repository)
   return { score: titleScore + (repositoryMatch ? 1 : 0), eligible: repositoryMatch || titleScore >= 0.15 }
 }
+function readyForDone(card, merged) {
+  return merged === true && (card?.checklist || []).every(item => item?.done === true)
+}
 async function allCards() {
   const boards = await repository.list()
   const cards = []
@@ -152,7 +155,8 @@ async function moveToDone(boardId, cardId, doc) {
   })
   return moved.doc.cards[cardId]
 }
-async function checkCompletedItems(boardId, card, pullTitle) {
+async function checkCompletedItems(boardId, card, pullTitle, merged) {
+  if (!merged) return card
   let doc = card
   for (const item of card.checklist || []) {
     if (!item?.id || item.done || titleSimilarity(pullTitle, item.text) < 0.1) continue
@@ -167,6 +171,7 @@ async function completeMatchingCard(data) {
   const title = exactTitle(data?.title)
   const summary = typeof data?.summary === 'string' ? data.summary.trim() : ''
   const prUrl = typeof data?.prUrl === 'string' ? data.prUrl.trim() : ''
+  const merged = data?.merged === true
   if (!title || !summary || !validPrUrl(prUrl)) {
     throw new Error('title, summary, and a valid http(s) prUrl are required.')
   }
@@ -176,8 +181,10 @@ async function completeMatchingCard(data) {
   const match = matches[0]
   if (String(match.card.notes || '').includes(prUrl)) {
     const state = await repository.read(match.board.id)
-    const checked = await checkCompletedItems(match.board.id, state.doc.cards[match.card.id], summary)
-    const card = await moveToDone(match.board.id, match.card.id, { ...state.doc, cards: { ...state.doc.cards, [match.card.id]: checked } })
+    const checked = await checkCompletedItems(match.board.id, state.doc.cards[match.card.id], summary, merged)
+    const card = readyForDone(checked, merged)
+      ? await moveToDone(match.board.id, match.card.id, { ...state.doc, cards: { ...state.doc.cards, [match.card.id]: checked } })
+      : checked
     return { status: 'already-saved', boardId: match.board.id, cardId: match.card.id, card }
   }
   const completion = `✅ Done — ${summary}\nPR: ${prUrl}`
@@ -185,7 +192,9 @@ async function completeMatchingCard(data) {
   const saved = await repository.mutate(match.board.id, {
     type: 'update-card', cardId: match.card.id, patch: { notes },
   })
-  const card = await moveToDone(match.board.id, match.card.id, saved.doc)
+  const card = readyForDone(saved.doc.cards[match.card.id], merged)
+    ? await moveToDone(match.board.id, match.card.id, saved.doc)
+    : saved.doc.cards[match.card.id]
   return { status: 'saved', boardId: match.board.id, cardId: match.card.id, card }
 }
 async function syncOpenPrs({ dryRun = false } = {}) {
@@ -219,8 +228,9 @@ async function syncOpenPrs({ dryRun = false } = {}) {
     }
     if (String(best.card.notes || '').includes(prUrl)) {
       const state = await repository.read(best.board.id)
-      const checked = await checkCompletedItems(best.board.id, state.doc.cards[best.card.id], title)
-      await moveToDone(best.board.id, best.card.id, { ...state.doc, cards: { ...state.doc.cards, [best.card.id]: checked } })
+      const merged = Boolean(pull?.pull_request?.merged_at)
+      const checked = await checkCompletedItems(best.board.id, state.doc.cards[best.card.id], title, merged)
+      if (readyForDone(checked, merged)) await moveToDone(best.board.id, best.card.id, { ...state.doc, cards: { ...state.doc.cards, [best.card.id]: checked } })
       results.push({ pr: prUrl, title, status: 'already-saved', boardId: best.board.id, cardId: best.card.id, cardTitle: best.card.title, score: best.score })
       continue
     }
@@ -228,8 +238,9 @@ async function syncOpenPrs({ dryRun = false } = {}) {
     const saved = await repository.mutate(best.board.id, {
       type: 'update-card', cardId: best.card.id, patch: { notes },
     })
-    const checked = await checkCompletedItems(best.board.id, saved.doc.cards[best.card.id], title)
-    await moveToDone(best.board.id, best.card.id, { ...saved.doc, cards: { ...saved.doc.cards, [best.card.id]: checked } })
+    const merged = Boolean(pull?.pull_request?.merged_at)
+    const checked = await checkCompletedItems(best.board.id, saved.doc.cards[best.card.id], title, merged)
+    if (readyForDone(checked, merged)) await moveToDone(best.board.id, best.card.id, { ...saved.doc, cards: { ...saved.doc.cards, [best.card.id]: checked } })
     results.push({ pr: prUrl, title, status: 'saved', boardId: best.board.id, cardId: best.card.id, cardTitle: best.card.title, score: best.score })
   }
   return { status: 'saved', results }
