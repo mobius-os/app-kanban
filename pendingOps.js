@@ -6,6 +6,7 @@ const defaultStorage = () => globalThis.window?.mobius?.storage || null
 const safeBoardId = boardId => encodeURIComponent(String(boardId || ''))
 const prefixFor = boardId => `pending-board-ops/${safeBoardId(boardId)}/`
 const recoveryPrefixFor = boardId => `recovered-board-ops/${safeBoardId(boardId)}/`
+const recoveryAcknowledgementPrefixFor = boardId => `recovery-acknowledgements/${safeBoardId(boardId)}/`
 const legacyKeyFor = boardId => `kanban:pending-board-ops:v1:${safeBoardId(boardId)}`
 
 async function migrateLegacyQueue(boardId, storage) {
@@ -47,16 +48,38 @@ export async function readPendingBoardOps(boardId, storage = defaultStorage()) {
 
 // Rejected intent stays local and is never replayed with elevated permissions.
 // Its stable queue ID makes archive-before-dequeue safe across crashes/retries.
-export async function readRecoveredBoardOps(boardId, storage = defaultStorage()) {
+async function readAllRecoveredBoardOps(boardId, storage = defaultStorage()) {
   if (!storage?.list) return []
   const items = await storage.list(recoveryPrefixFor(boardId), { includeContent: true })
   return (Array.isArray(items) ? items : []).map(entryFromListItem).filter(Boolean)
     .sort((left, right) => left.id.localeCompare(right.id))
 }
 
+export async function readRecoveredBoardOps(boardId, storage = defaultStorage()) {
+  if (!storage?.list) return []
+  const [recovered, acknowledgements] = await Promise.all([
+    readAllRecoveredBoardOps(boardId, storage),
+    storage.list(recoveryAcknowledgementPrefixFor(boardId), { includeContent: true }),
+  ])
+  const acknowledgedIds = new Set((Array.isArray(acknowledgements) ? acknowledgements : [])
+    .map(item => item?.content?.id).filter(id => typeof id === 'string'))
+  return recovered.filter(entry => !acknowledgedIds.has(entry.id))
+}
+
+// Acknowledging a recovery notice never deletes the recovery copy. It only
+// prevents an already-downloaded rejected edit from reopening the same banner.
+export async function acknowledgeRecoveredBoardOps(boardId, storage = defaultStorage()) {
+  if (!storage?.durableWrite) throw new Error('Recovery acknowledgement could not be saved.')
+  const recovered = await readAllRecoveredBoardOps(boardId, storage)
+  await Promise.all(recovered.map(entry => storage.durableWrite(
+    `${recoveryAcknowledgementPrefixFor(boardId)}${encodeURIComponent(entry.id)}.json`,
+    { id: entry.id, acknowledgedAt: new Date().toISOString() },
+  )))
+}
+
 export async function exportUnsyncedBoardOps(boardId, storage = defaultStorage()) {
   const [recovered, pending] = await Promise.all([
-    readRecoveredBoardOps(boardId, storage), readPendingBoardOps(boardId, storage),
+    readAllRecoveredBoardOps(boardId, storage), readPendingBoardOps(boardId, storage),
   ])
   return { format: 'kanban-unsynced-edits/1', boardId, recovered, pending }
 }
