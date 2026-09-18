@@ -120,9 +120,19 @@ async function assignedToMe(cards) {
   const hosts = new Set((identity.deployments || []).map(deployment => {
     try { return new URL(deployment?.url || '').hostname.toLocaleLowerCase() } catch { return '' }
   }).filter(Boolean))
-  return cards.filter(({ card }) => names.has(String(card.assignee || '').trim().toLocaleLowerCase())
-    || hosts.has(String(card.assignee || '').trim().toLocaleLowerCase())
-    || hosts.has(String(card.assigneeHost || '').trim().toLocaleLowerCase()))
+  const deployment = (identity.deployments || []).find(item => item?.current === true) || identity.deployments?.[0]
+  let assigneeHost = ''
+  try { assigneeHost = new URL(deployment?.url || '').hostname } catch {}
+  const assignee = profile.handle ? `@${String(profile.handle).trim().replace(/^@/u, '')}` : String(profile.display_name || '').trim()
+  return {
+    cards: cards.filter(({ card }) => {
+      const unassigned = !String(card.assignee || '').trim() && !String(card.assigneeHost || '').trim()
+      return unassigned || names.has(String(card.assignee || '').trim().toLocaleLowerCase())
+        || hosts.has(String(card.assignee || '').trim().toLocaleLowerCase())
+        || hosts.has(String(card.assigneeHost || '').trim().toLocaleLowerCase())
+    }),
+    assignment: { assignee, assigneeHost },
+  }
 }
 async function moveToDone(boardId, cardId, doc) {
   const doneColumn = doc.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
@@ -179,7 +189,8 @@ async function syncOpenPrs({ dryRun = false } = {}) {
     const search = new URLSearchParams({ q, per_page: '100' })
     return (await checked(await request(`/api/github/api/search/issues?${search}`))).json()
   }))
-  const cards = await assignedToMe(await allCards())
+  const owner = await assignedToMe(await allCards())
+  const cards = owner.cards
   const results = []
   const pulls = [...new Map(payloads.flatMap(payload => Array.isArray(payload.items) ? payload.items : [])
     .filter(pull => typeof pull?.html_url === 'string').map(pull => [pull.html_url, pull])).values()]
@@ -200,20 +211,23 @@ async function syncOpenPrs({ dryRun = false } = {}) {
       continue
     }
     if (dryRun) {
-      results.push({ pr: prUrl, title, status: 'would-save', boardId: best.board.id, cardId: best.card.id, cardTitle: best.card.title, score: best.score })
+      results.push({ pr: prUrl, title, status: 'would-save', boardId: best.board.id, cardId: best.card.id, cardTitle: best.card.title, score: best.score, claimsCard: !String(best.card.assignee || '').trim() && !String(best.card.assigneeHost || '').trim() })
       continue
     }
-    if (String(best.card.notes || '').includes(prUrl)) {
-      const state = await repository.read(best.board.id)
+    const state = await repository.read(best.board.id)
+    const current = state.doc.cards[best.card.id]
+    const claim = !String(current.assignee || '').trim() && !String(current.assigneeHost || '').trim()
+    if (String(current.notes || '').includes(prUrl)) {
+      const claimed = claim ? await repository.mutate(best.board.id, { type: 'update-card', cardId: current.id, patch: owner.assignment }) : state
       const merged = Boolean(pull?.pull_request?.merged_at)
-      const checked = await checkCompletedItems(best.board.id, state.doc.cards[best.card.id], title, merged)
-      if (readyForDone(checked, merged)) await moveToDone(best.board.id, best.card.id, { ...state.doc, cards: { ...state.doc.cards, [best.card.id]: checked } })
-      results.push({ pr: prUrl, title, status: 'already-saved', boardId: best.board.id, cardId: best.card.id, cardTitle: best.card.title, score: best.score })
+      const checked = await checkCompletedItems(best.board.id, claimed.doc.cards[best.card.id], title, merged)
+      if (readyForDone(checked, merged)) await moveToDone(best.board.id, best.card.id, { ...claimed.doc, cards: { ...claimed.doc.cards, [best.card.id]: checked } })
+      results.push({ pr: prUrl, title, status: claim ? 'claimed' : 'already-saved', boardId: best.board.id, cardId: best.card.id, cardTitle: best.card.title, score: best.score })
       continue
     }
-    const notes = [String(best.card.notes || '').trim(), `✅ Done — ${title}\nPR: ${prUrl}`].filter(Boolean).join('\n\n')
+    const notes = [String(current.notes || '').trim(), `✅ Done — ${title}\nPR: ${prUrl}`].filter(Boolean).join('\n\n')
     const saved = await repository.mutate(best.board.id, {
-      type: 'update-card', cardId: best.card.id, patch: { notes },
+      type: 'update-card', cardId: best.card.id, patch: { notes, ...(claim ? owner.assignment : {}) },
     })
     const merged = Boolean(pull?.pull_request?.merged_at)
     const checked = await checkCompletedItems(best.board.id, saved.doc.cards[best.card.id], title, merged)

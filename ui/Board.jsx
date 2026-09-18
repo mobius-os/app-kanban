@@ -1502,11 +1502,14 @@ export default function Board({
       const hosts = new Set((identity?.deployments || []).map(deployment => {
         try { return new URL(deployment?.url || '').hostname.toLocaleLowerCase() } catch { return '' }
       }).filter(Boolean))
-      const assigned = Object.values(boardRef.current?.cards || {}).filter(card =>
-        String(card.assignee || '').trim().toLocaleLowerCase() === `@${handle}`.toLocaleLowerCase()
-        || hosts.has(String(card.assignee || '').trim().toLocaleLowerCase())
-        || hosts.has(String(card.assigneeHost || '').trim().toLocaleLowerCase()),
-      )
+      const myAssignment = { assignee: `@${handle}`, assigneeHost: localDeploymentHost }
+      const assigned = Object.values(boardRef.current?.cards || {}).filter(card => {
+        const unassigned = !String(card.assignee || '').trim() && !String(card.assigneeHost || '').trim()
+        return unassigned
+          || String(card.assignee || '').trim().toLocaleLowerCase() === `@${handle}`.toLocaleLowerCase()
+          || hosts.has(String(card.assignee || '').trim().toLocaleLowerCase())
+          || hosts.has(String(card.assigneeHost || '').trim().toLocaleLowerCase())
+      })
       const pulls = [...new Map(payloads.flatMap(payload => Array.isArray(payload.items) ? payload.items : [])
         .filter(pull => typeof pull?.html_url === 'string').map(pull => [pull.html_url, pull])).values()]
       for (const pull of pulls) {
@@ -1518,11 +1521,10 @@ export default function Board({
         if (!match || (ranked[1] && ranked[1].score === match.score)) continue
         const current = boardRef.current?.cards[match.card.id]
         if (!current) continue
-        if (!String(current.notes || '').includes(pull.html_url)) {
-          updateCard(current.id, {
-            notes: [String(current.notes || '').trim(), `✅ Done — ${pull.title}\nPR: ${pull.html_url}`].filter(Boolean).join('\n\n'),
-          })
-        }
+        const claim = !String(current.assignee || '').trim() && !String(current.assigneeHost || '').trim()
+        const patch = claim ? { ...myAssignment } : {}
+        if (!String(current.notes || '').includes(pull.html_url)) patch.notes = [String(current.notes || '').trim(), `✅ Done — ${pull.title}\nPR: ${pull.html_url}`].filter(Boolean).join('\n\n')
+        if (Object.keys(patch).length) updateCard(current.id, patch)
         if (pull?.pull_request?.merged_at) {
           for (const item of current.checklist || []) {
             if (item?.done || prTitleSimilarity(pull.title, item?.text) < 0.1) continue
