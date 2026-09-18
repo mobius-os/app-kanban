@@ -93,6 +93,34 @@ function validPrUrl(value) {
     return false
   }
 }
+function titleWords(value) {
+  const ignored = new Set(['a', 'an', 'and', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'of', 'on', 'or', 'the', 'this', 'that', 'to', 'use', 'using', 'with'])
+  return new Set(String(value || '').toLocaleLowerCase().match(/[a-z0-9]+/g)?.filter(word => !ignored.has(word)) || [])
+}
+function titleSimilarity(left, right) {
+  const a = titleWords(left)
+  const b = titleWords(right)
+  const overlap = [...a].filter(word => b.has(word)).length
+  return overlap ? overlap / new Set([...a, ...b]).size : 0
+}
+async function allCards() {
+  const boards = await repository.list()
+  const cards = []
+  for (const board of boards) {
+    if (board.status === 'unavailable') continue
+    const state = await repository.read(board.id)
+    for (const card of Object.values(state.doc.cards)) cards.push({ board, card })
+  }
+  return cards
+}
+async function moveToDone(boardId, cardId, doc) {
+  const doneColumn = doc.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
+  if (!doneColumn || doneColumn.cardIds.includes(cardId)) return doc.cards[cardId]
+  const moved = await repository.mutate(boardId, {
+    type: 'move-card', cardId, toColumnId: doneColumn.id, beforeCardId: null,
+  })
+  return moved.doc.cards[cardId]
+}
 async function completeMatchingCard(data) {
   const title = exactTitle(data?.title)
   const summary = typeof data?.summary === 'string' ? data.summary.trim() : ''
@@ -100,35 +128,59 @@ async function completeMatchingCard(data) {
   if (!title || !summary || !validPrUrl(prUrl)) {
     throw new Error('title, summary, and a valid http(s) prUrl are required.')
   }
-  const boards = await repository.list()
-  const matches = []
-  for (const board of boards) {
-    if (board.status === 'unavailable') continue
-    const state = await repository.read(board.id)
-    for (const card of Object.values(state.doc.cards)) {
-      if (exactTitle(card?.title) === title) matches.push({ board, card })
-    }
-  }
+  const matches = (await allCards()).filter(({ card }) => exactTitle(card?.title) === title)
   if (matches.length === 0) throw new Error(`No Kanban card exactly matches “${title}”.`)
   if (matches.length > 1) throw new Error(`More than one Kanban card exactly matches “${title}”; use unique card titles before completing it automatically.`)
   const match = matches[0]
   if (String(match.card.notes || '').includes(prUrl)) {
-    return { status: 'already-saved', boardId: match.board.id, cardId: match.card.id, card: match.card }
+    const state = await repository.read(match.board.id)
+    const card = await moveToDone(match.board.id, match.card.id, state.doc)
+    return { status: 'already-saved', boardId: match.board.id, cardId: match.card.id, card }
   }
   const completion = `✅ Done — ${summary}\nPR: ${prUrl}`
   const notes = [String(match.card.notes || '').trim(), completion].filter(Boolean).join('\n\n')
   const saved = await repository.mutate(match.board.id, {
     type: 'update-card', cardId: match.card.id, patch: { notes },
   })
-  const doneColumn = saved.doc.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
-  let card = saved.doc.cards[match.card.id]
-  if (doneColumn && !doneColumn.cardIds.includes(match.card.id)) {
-    const moved = await repository.mutate(match.board.id, {
-      type: 'move-card', cardId: match.card.id, toColumnId: doneColumn.id, beforeCardId: null,
-    })
-    card = moved.doc.cards[match.card.id]
-  }
+  const card = await moveToDone(match.board.id, match.card.id, saved.doc)
   return { status: 'saved', boardId: match.board.id, cardId: match.card.id, card }
+}
+async function syncOpenPrs({ dryRun = false } = {}) {
+  const search = new URLSearchParams({ q: 'is:pr is:open author:@me', per_page: '100' })
+  const response = await checked(await request(`/api/github/api/search/issues?${search}`))
+  const payload = await response.json()
+  const cards = await allCards()
+  const results = []
+  for (const pull of Array.isArray(payload.items) ? payload.items : []) {
+    const title = exactTitle(pull?.title)
+    const prUrl = typeof pull?.html_url === 'string' ? pull.html_url : ''
+    if (!title || !validPrUrl(prUrl)) continue
+    const ranked = cards.map(match => ({ ...match, score: titleSimilarity(title, match.card.title) }))
+      .filter(match => match.score > 0)
+      .sort((left, right) => right.score - left.score)
+    const best = ranked[0]
+    if (!best || (ranked[1] && ranked[1].score === best.score)) {
+      results.push({ pr: prUrl, title, status: 'skipped-ambiguous' })
+      continue
+    }
+    if (dryRun) {
+      results.push({ pr: prUrl, title, status: 'would-save', boardId: best.board.id, cardId: best.card.id, cardTitle: best.card.title, score: best.score })
+      continue
+    }
+    if (String(best.card.notes || '').includes(prUrl)) {
+      const state = await repository.read(best.board.id)
+      await moveToDone(best.board.id, best.card.id, state.doc)
+      results.push({ pr: prUrl, title, status: 'already-saved', boardId: best.board.id, cardId: best.card.id, cardTitle: best.card.title, score: best.score })
+      continue
+    }
+    const notes = [String(best.card.notes || '').trim(), `✅ Done — ${title}\nPR: ${prUrl}`].filter(Boolean).join('\n\n')
+    const saved = await repository.mutate(best.board.id, {
+      type: 'update-card', cardId: best.card.id, patch: { notes },
+    })
+    await moveToDone(best.board.id, best.card.id, saved.doc)
+    results.push({ pr: prUrl, title, status: 'saved', boardId: best.board.id, cardId: best.card.id, cardTitle: best.card.title, score: best.score })
+  }
+  return { status: 'saved', results }
 }
 try {
   let result
@@ -164,7 +216,9 @@ try {
       version: saved.version, card: saved.doc.cards[cardId] }
   } else if (command === 'complete-matching-card') {
     result = await completeMatchingCard(await input())
-  } else throw new Error('Usage: kanban.mjs list | read BOARD_ID | add-card/update-card/move-card BOARD_ID < input.json | complete-matching-card < input.json')
+  } else if (command === 'sync-open-prs') {
+    result = await syncOpenPrs({ dryRun: process.argv.includes('--dry-run') })
+  } else throw new Error('Usage: kanban.mjs list | read BOARD_ID | add-card/update-card/move-card BOARD_ID < input.json | complete-matching-card < input.json | sync-open-prs [--dry-run]')
   console.log(JSON.stringify(result, null, 2))
 } catch (error) {
   console.error(JSON.stringify({ status: 'not-confirmed', error: error.message }))
