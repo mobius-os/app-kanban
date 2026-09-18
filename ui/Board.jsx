@@ -443,7 +443,7 @@ function CardTitleEditor({ card, canWrite, onCommit }) {
   const [editing, setEditing] = useState(false)
   useEffect(() => { setEditing(false) }, [card.id])
   if (!editing || !canWrite) return <div className="kb-detail-field kb-title-field">
-    <div className="kb-title-display">{card.title}</div>
+    <div className="kb-title-display"><LinkifiedText text={card.title} /></div>
     {canWrite && <button className="kb-edit-field" type="button" onClick={() => setEditing(true)} aria-label="Edit card title"><Pencil /></button>}
   </div>
   return <AutoGrowTextarea
