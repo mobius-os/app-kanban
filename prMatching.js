@@ -22,8 +22,14 @@ export const prTitleSimilarity = (left, right) => {
   const overlap = [...a].filter(word => b.has(word)).length
   return overlap ? overlap / new Set([...a, ...b]).size : 0
 }
+const coverage = (left, right) => {
+  const a = titleWords(left), b = titleWords(right)
+  const overlap = [...a].filter(word => b.has(word)).length
+  return { overlap, score: overlap ? overlap / Math.min(a.size, b.size) : 0 }
+}
 
 export const cardMatchText = card => [card?.title, ...(Array.isArray(card?.checklist) ? card.checklist.map(item => item?.text) : [])].filter(Boolean).join('\n')
+const cardIntentText = card => [cardMatchText(card), String(card?.notes || '').replace(/^✅ Done —.*\nPR: https?:\/\/\S+$/gmu, '')].filter(Boolean).join('\n')
 
 export const pullRepositoryName = pull => {
   try { return new URL(pull?.repository_url || pull?.html_url || '').pathname.split('/').filter(Boolean).at(-1)?.replace(/^app-/u, '').toLocaleLowerCase() || '' } catch { return '' }
@@ -32,13 +38,15 @@ export const pullRepositoryName = pull => {
 export const pullCardScore = (pull, card) => {
   const text = cardMatchText(card)
   const titleScore = prTitleSimilarity(pull?.title, text)
+  const description = coverage(pull?.body, cardIntentText(card))
   const repository = pullRepositoryName(pull)
   const repositoryMatch = repository && text.toLocaleLowerCase().includes(repository)
   const exactTitleMatch = String(pull?.title || '').trim() === String(card?.title || '').trim()
   return {
-    score: titleScore + (repositoryMatch ? 1 : 0),
+    score: Math.max(titleScore, description.score) + (repositoryMatch ? 1 : 0),
     eligible: exactTitleMatch
       || titleScore >= TITLE_SIMILARITY_MINIMUM
+      || (description.overlap >= 3 && description.score >= 0.3)
       || (repositoryMatch && titleScore >= REPOSITORY_TITLE_SIMILARITY_MINIMUM),
   }
 }
