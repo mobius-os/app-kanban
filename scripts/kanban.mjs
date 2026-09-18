@@ -121,6 +121,9 @@ function pullCardScore(pull, card) {
 function readyForDone(card, merged) {
   return merged === true && (card?.checklist || []).every(item => item?.done === true)
 }
+function readyForDone(card, merged) {
+  return merged === true && (card?.checklist || []).every(item => item?.done === true)
+}
 async function allCards() {
   const boards = await repository.list()
   const cards = []
