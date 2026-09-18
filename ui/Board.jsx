@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
+import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Pencil, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
 import { resolveMemberHandles, pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
@@ -442,19 +442,10 @@ function LinkifiedText({ text }) {
 function CardTitleEditor({ card, canWrite, onCommit }) {
   const [editing, setEditing] = useState(false)
   useEffect(() => { setEditing(false) }, [card.id])
-  if (!editing || !canWrite) return <div
-    className={`kb-title-display${canWrite ? ' kb-editable-display' : ''}`}
-    onClick={() => { if (canWrite) setEditing(true) }}
-    onKeyDown={event => {
-      if (canWrite && (event.key === 'Enter' || event.key === ' ')) {
-        event.preventDefault()
-        setEditing(true)
-      }
-    }}
-    role={canWrite ? 'button' : undefined}
-    tabIndex={canWrite ? 0 : undefined}
-    aria-label={canWrite ? 'Edit card title' : undefined}
-  >{card.title}</div>
+  if (!editing || !canWrite) return <div className="kb-detail-field kb-title-field">
+    <div className="kb-title-display">{card.title}</div>
+    {canWrite && <button className="kb-edit-field" type="button" onClick={() => setEditing(true)} aria-label="Edit card title"><Pencil /></button>}
+  </div>
   return <AutoGrowTextarea
     className="kb-input kb-title-input"
     rows={1}
@@ -474,19 +465,10 @@ function CardTitleEditor({ card, canWrite, onCommit }) {
 function CardNotesEditor({ card, canWrite, onCommit }) {
   const [editing, setEditing] = useState(false)
   useEffect(() => { setEditing(false) }, [card.id])
-  if (!editing || !canWrite) return <div
-    className={`kb-notes-display${canWrite ? ' kb-editable-display' : ''}${card.notes ? '' : ' kb-notes-empty'}`}
-    onClick={() => { if (canWrite) setEditing(true) }}
-    onKeyDown={event => {
-      if (canWrite && (event.key === 'Enter' || event.key === ' ')) {
-        event.preventDefault()
-        setEditing(true)
-      }
-    }}
-    role={canWrite ? 'button' : undefined}
-    tabIndex={canWrite ? 0 : undefined}
-    aria-label={canWrite ? 'Edit card notes' : undefined}
-  >{card.notes ? <LinkifiedText text={card.notes} /> : 'Notes…'}</div>
+  if (!editing || !canWrite) return <div className="kb-detail-field kb-notes-field">
+    <div className={`kb-notes-display${card.notes ? '' : ' kb-notes-empty'}`}>{card.notes ? <LinkifiedText text={card.notes} /> : 'Notes…'}</div>
+    {canWrite && <button className="kb-edit-field" type="button" onClick={() => setEditing(true)} aria-label="Edit card notes"><Pencil /></button>}
+  </div>
   return <AutoGrowTextarea
     className="kb-input kb-notes-input"
     rows={2}

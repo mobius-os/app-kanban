@@ -48,6 +48,12 @@ does not duplicate a pull-request link already on the card. A missing card or
 ambiguous title is a visible blocker, not permission to update a different
 card.
 
+To reconcile existing pull requests from the connected GitHub identity, run
+`sync-open-prs`. It considers **only cards assigned to the current owner**,
+then safely skips a pull request without a unique title-based match. Use
+`sync-open-prs --dry-run` to inspect the proposed matches without changing
+cards.
+
 Use a stable new card ID when retrying an add. An uncertain network response
 can mean the write landed; read before retrying, and reuse the same ID to avoid
 duplicates. Don't use a title alone as an idempotency key.

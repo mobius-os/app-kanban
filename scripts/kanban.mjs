@@ -113,6 +113,17 @@ async function allCards() {
   }
   return cards
 }
+async function assignedToMe(cards) {
+  const response = await checked(await request('/api/identity'))
+  const profile = (await response.json()).profile || {}
+  const names = new Set([
+    profile.handle && `@${String(profile.handle).trim().replace(/^@/u, '')}`,
+    profile.handle,
+    profile.display_name,
+  ].filter(Boolean).map(value => String(value).trim().toLocaleLowerCase()))
+  if (names.size === 0) throw new Error('Your profile could not be identified, so assigned cards cannot be matched safely.')
+  return cards.filter(({ card }) => names.has(String(card.assignee || '').trim().toLocaleLowerCase()))
+}
 async function moveToDone(boardId, cardId, doc) {
   const doneColumn = doc.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
   if (!doneColumn || doneColumn.cardIds.includes(cardId)) return doc.cards[cardId]
@@ -149,7 +160,7 @@ async function syncOpenPrs({ dryRun = false } = {}) {
   const search = new URLSearchParams({ q: 'is:pr is:open author:@me', per_page: '100' })
   const response = await checked(await request(`/api/github/api/search/issues?${search}`))
   const payload = await response.json()
-  const cards = await allCards()
+  const cards = await assignedToMe(await allCards())
   const results = []
   for (const pull of Array.isArray(payload.items) ? payload.items : []) {
     const title = exactTitle(pull?.title)
@@ -159,7 +170,11 @@ async function syncOpenPrs({ dryRun = false } = {}) {
       .filter(match => match.score > 0)
       .sort((left, right) => right.score - left.score)
     const best = ranked[0]
-    if (!best || (ranked[1] && ranked[1].score === best.score)) {
+    if (!best) {
+      results.push({ pr: prUrl, title, status: 'skipped-no-match' })
+      continue
+    }
+    if (ranked[1] && ranked[1].score === best.score) {
       results.push({ pr: prUrl, title, status: 'skipped-ambiguous' })
       continue
     }
