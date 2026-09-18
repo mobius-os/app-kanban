@@ -2,6 +2,8 @@ const IGNORED_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'be', 'by', 'for', 
 const TITLE_ALIASES = {
   handles: ['handle', 'name'], handle: ['name'], verified: ['name'], collaborators: ['collaborator', 'user'], collaborator: ['user'], users: ['user'], assignee: ['assign'], assign: ['assignee'], attachments: ['attachment'], previews: ['preview'], entries: ['entry'],
   model: ['models'], models: ['model'],
+  goal: ['goals'], goals: ['goal'], polish: ['fix', 'improve'],
+  robustness: ['robust', 'reliability'], robust: ['robustness'],
   error: ['errors', 'recover', 'busy', 'capacity'], errors: ['error', 'recover', 'busy', 'capacity'],
   recover: ['recovery', 'retry'], recovery: ['recover', 'retry'],
   busy: ['capacity'], capacity: ['busy'],
