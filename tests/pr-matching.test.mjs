@@ -14,6 +14,14 @@ test('a related repository pull request remains eligible when its title overlaps
   assert.equal(result.eligible, true)
 })
 
+test('a strong title match remains eligible when a card does not name the repository', () => {
+  const result = pullCardScore(
+    pull('Cap auto-compact threshold for 1M-window models under the broker body cap', 'https://api.github.com/repos/mobius-os/mobius'),
+    { title: 'Revisit compaction: auto-compact threshold vs the gateway body cap', checklist: [] },
+  )
+  assert.equal(result.eligible, true)
+})
+
 test('an exact title match remains eligible without a repository mention', () => {
   const result = pullCardScore(pull('Improve Kanban'), { title: 'Improve Kanban', checklist: [] })
   assert.equal(result.eligible, true)
