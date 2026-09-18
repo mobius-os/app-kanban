@@ -746,6 +746,7 @@ export default function Board({
   const [animateColumns, setAnimateColumns] = useState(true)
   const [queuedCount, setQueuedCount] = useState(0)
   const [recoveredCount, setRecoveredCount] = useState(0)
+  const [prSyncTick, setPrSyncTick] = useState(0)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [attachmentError, setAttachmentError] = useState('')
 
@@ -760,7 +761,7 @@ export default function Board({
   const onlineRef = useRef(online)
   const filtersRef = useRef({ text: filterText, labels: filterLabels })
   const replayingRef = useRef(false)
-  const syncedPrContextsRef = useRef(new Set())
+  const prSyncTimesRef = useRef(new Map())
   const pendingEntriesRef = useRef([])
   const lastInteractionAtRef = useRef(Date.now())
   const fileInputRef = useRef(null)
@@ -818,6 +819,20 @@ export default function Board({
   }
 
   useEffect(() => { setAttachmentError('') }, [openCardId])
+
+  useEffect(() => {
+    const refreshPulls = () => {
+      if (!document.hidden) setPrSyncTick(tick => tick + 1)
+    }
+    const timer = window.setInterval(refreshPulls, 120000)
+    window.addEventListener('focus', refreshPulls)
+    document.addEventListener('visibilitychange', refreshPulls)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refreshPulls)
+      document.removeEventListener('visibilitychange', refreshPulls)
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -1470,9 +1485,10 @@ export default function Board({
   useEffect(() => {
     const handle = String(identity?.profile?.handle || '').trim().replace(/^@/u, '')
     const contextKey = `${boardId}:${handle}`
-    if (!board || !access.canWrite || !online || !handle || syncedPrContextsRef.current.has(contextKey)) return undefined
+    const lastSync = prSyncTimesRef.current.get(contextKey) || 0
+    if (!board || !access.canWrite || !online || !handle || Date.now() - lastSync < 20000) return undefined
     let alive = true
-    syncedPrContextsRef.current.add(contextKey)
+    prSyncTimesRef.current.set(contextKey, Date.now())
     ;(async () => {
       const searches = ['is:pr is:open author:@me', 'is:pr is:merged author:@me'].map(async q => {
         const query = new URLSearchParams({ q, per_page: '100' })
@@ -1517,9 +1533,9 @@ export default function Board({
         const updated = boardRef.current?.cards[current.id]
         if (done && readyForDone(updated, pull) && !done.cardIds.includes(current.id)) moveCard(current.id, done.id, null)
       }
-    })().catch(() => { syncedPrContextsRef.current.delete(contextKey) })
+    })().catch(() => { prSyncTimesRef.current.delete(contextKey) })
     return () => { alive = false }
-  }, [!!board, boardId, identity, online, access.canWrite, token])
+  }, [!!board, boardId, identity, online, access.canWrite, token, prSyncTick])
 
   if (!board) return <>
     <div className="kb-header">
