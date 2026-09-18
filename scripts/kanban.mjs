@@ -249,6 +249,17 @@ try {
   let result
   if (command === 'list') result = await repository.list()
   else if (command === 'read' && validId(boardId)) result = await repository.read(boardId)
+  else if (command === 'set-checklist-item' && validId(boardId)) {
+    const data = await input()
+    if (!data || typeof data !== 'object' || Array.isArray(data) || !validId(data.cardId) || !validId(data.itemId) || typeof data.done !== 'boolean') {
+      throw new Error('cardId, itemId, and boolean done are required.')
+    }
+    const saved = await repository.mutate(boardId, {
+      type: 'set-checklist-item', cardId: data.cardId, itemId: data.itemId, done: data.done,
+    })
+    result = { status: 'saved', appId, boardId, cardId: data.cardId, authority: saved.authority,
+      version: saved.version, card: saved.doc.cards[data.cardId] }
+  }
   else if (['add-card', 'update-card', 'move-card'].includes(command) && validId(boardId)) {
     const data = await input()
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Input must be a JSON object.')
@@ -281,7 +292,7 @@ try {
     result = await completeMatchingCard(await input())
   } else if (command === 'sync-open-prs') {
     result = await syncOpenPrs({ dryRun: process.argv.includes('--dry-run') })
-  } else throw new Error('Usage: kanban.mjs list | read BOARD_ID | add-card/update-card/move-card BOARD_ID < input.json | complete-matching-card < input.json | sync-open-prs [--dry-run]')
+  } else throw new Error('Usage: kanban.mjs list | read BOARD_ID | add-card/update-card/move-card/set-checklist-item BOARD_ID < input.json | complete-matching-card < input.json | sync-open-prs [--dry-run]')
   console.log(JSON.stringify(result, null, 2))
 } catch (error) {
   console.error(JSON.stringify({ status: 'not-confirmed', error: error.message }))
