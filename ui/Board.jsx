@@ -1459,22 +1459,6 @@ export default function Board({
   }, [drag])
   const openCard = id => { if (!suppressClick.current) setOpenCardId(id) }
 
-  if (!board) return <>
-    <div className="kb-header">
-      <button className="kb-btn" onClick={onAllBoards}><ChevronLeft /> All boards</button>
-      {recoveryButton}
-    </div>
-    <div className="kb-board kb-board-empty"><div className="kb-empty-board-state" role={loadFailure ? 'alert' : 'status'}>
-      {loadFailure ? <>
-        <p>This board couldn’t be loaded. Your saved data is unchanged.</p>
-        <button className="kb-btn kb-btn-primary" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Try again</button>
-      </> : 'Loading board…'}
-    </div></div>
-  </>
-
-  const openCard_ = openCardId ? board.cards[openCardId] : null
-  const openCardColumn = openCard_ ? board.columns.find(column => column.cardIds.includes(openCard_.id)) : null
-  const openCardIndex = openCardColumn ? openCardColumn.cardIds.indexOf(openCard_.id) : -1
   const access = boardAccess(share, online)
   const hasFilters = !!filterText.trim() || filterLabels.length > 0
 
@@ -1512,6 +1496,22 @@ export default function Board({
     return () => { alive = false }
   }, [board, boardId, identity?.profile?.handle, online, access.canWrite, token])
 
+  if (!board) return <>
+    <div className="kb-header">
+      <button className="kb-btn" onClick={onAllBoards}><ChevronLeft /> All boards</button>
+      {recoveryButton}
+    </div>
+    <div className="kb-board kb-board-empty"><div className="kb-empty-board-state" role={loadFailure ? 'alert' : 'status'}>
+      {loadFailure ? <>
+        <p>This board couldn’t be loaded. Your saved data is unchanged.</p>
+        <button className="kb-btn kb-btn-primary" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Try again</button>
+      </> : 'Loading board…'}
+    </div></div>
+  </>
+
+  const openCard_ = openCardId ? board.cards[openCardId] : null
+  const openCardColumn = openCard_ ? board.columns.find(column => column.cardIds.includes(openCard_.id)) : null
+  const openCardIndex = openCardColumn ? openCardColumn.cardIds.indexOf(openCard_.id) : -1
   return (
     <>
       <div className="kb-header kb-board-header">
