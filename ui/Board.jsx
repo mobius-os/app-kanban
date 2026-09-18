@@ -37,6 +37,14 @@ export const LABELS = {
   pink: 'var(--kb-label-pink, #ec4899)',
 }
 
+const PR_TITLE_IGNORED_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'of', 'on', 'or', 'the', 'this', 'that', 'to', 'use', 'using', 'with'])
+const prTitleWords = value => new Set(String(value || '').toLocaleLowerCase().match(/[a-z0-9]+/g)?.filter(word => !PR_TITLE_IGNORED_WORDS.has(word)) || [])
+const prTitleSimilarity = (left, right) => {
+  const a = prTitleWords(left), b = prTitleWords(right)
+  const overlap = [...a].filter(word => b.has(word)).length
+  return overlap ? overlap / new Set([...a, ...b]).size : 0
+}
+
 function AttachmentImage({ boardId, share, attachment, className, alt = '' }) {
   const [src, setSrc] = useState('')
   const [failed, setFailed] = useState(false)
@@ -747,6 +755,7 @@ export default function Board({
   const onlineRef = useRef(online)
   const filtersRef = useRef({ text: filterText, labels: filterLabels })
   const replayingRef = useRef(false)
+  const prSyncingRef = useRef(false)
   const pendingEntriesRef = useRef([])
   const lastInteractionAtRef = useRef(Date.now())
   const fileInputRef = useRef(null)
@@ -1468,6 +1477,40 @@ export default function Board({
   const openCardIndex = openCardColumn ? openCardColumn.cardIds.indexOf(openCard_.id) : -1
   const access = boardAccess(share, online)
   const hasFilters = !!filterText.trim() || filterLabels.length > 0
+
+  useEffect(() => {
+    const handle = String(identity?.profile?.handle || '').trim().replace(/^@/u, '')
+    if (!board || !access.canWrite || !online || !handle || prSyncingRef.current) return undefined
+    let alive = true
+    prSyncingRef.current = true
+    ;(async () => {
+      const query = new URLSearchParams({ q: 'is:pr is:open author:@me', per_page: '100' })
+      const response = await fetch(`/api/github/api/search/issues?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok || !alive) return
+      const payload = await response.json()
+      const assigned = Object.values(boardRef.current?.cards || {}).filter(card =>
+        String(card.assignee || '').trim().toLocaleLowerCase() === `@${handle}`.toLocaleLowerCase(),
+      )
+      for (const pull of Array.isArray(payload.items) ? payload.items : []) {
+        if (!alive) return
+        if (typeof pull?.title !== 'string' || typeof pull?.html_url !== 'string') continue
+        const ranked = assigned.map(card => ({ card, score: prTitleSimilarity(pull.title, card.title) }))
+          .filter(match => match.score > 0).sort((left, right) => right.score - left.score)
+        const match = ranked[0]
+        if (!match || (ranked[1] && ranked[1].score === match.score)) continue
+        const current = boardRef.current?.cards[match.card.id]
+        if (!current || String(current.notes || '').includes(pull.html_url)) continue
+        updateCard(current.id, {
+          notes: [String(current.notes || '').trim(), `✅ Done — ${pull.title}\nPR: ${pull.html_url}`].filter(Boolean).join('\n\n'),
+        })
+        const done = boardRef.current?.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
+        if (done && !done.cardIds.includes(current.id)) moveCard(current.id, done.id, null)
+      }
+    })().catch(() => {}).finally(() => { prSyncingRef.current = false })
+    return () => { alive = false }
+  }, [board, boardId, identity?.profile?.handle, online, access.canWrite, token])
 
   return (
     <>
