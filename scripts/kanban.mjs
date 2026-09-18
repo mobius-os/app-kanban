@@ -103,6 +103,19 @@ function titleSimilarity(left, right) {
   const overlap = [...a].filter(word => b.has(word)).length
   return overlap ? overlap / new Set([...a, ...b]).size : 0
 }
+function cardMatchText(card) {
+  return [card?.title, ...(Array.isArray(card?.checklist) ? card.checklist.map(item => item?.text) : [])].filter(Boolean).join('\n')
+}
+function pullRepositoryName(pull) {
+  try { return new URL(pull?.repository_url || pull?.html_url || '').pathname.split('/').filter(Boolean).at(-1)?.replace(/^app-/u, '').toLocaleLowerCase() || '' } catch { return '' }
+}
+function pullCardScore(pull, card) {
+  const text = cardMatchText(card)
+  const titleScore = titleSimilarity(pull.title, text)
+  const repository = pullRepositoryName(pull)
+  const repositoryMatch = repository && text.toLocaleLowerCase().includes(repository)
+  return { score: titleScore + (repositoryMatch ? 1 : 0), eligible: repositoryMatch || titleScore >= 0.15 }
+}
 async function allCards() {
   const boards = await repository.list()
   const cards = []
@@ -115,14 +128,20 @@ async function allCards() {
 }
 async function assignedToMe(cards) {
   const response = await checked(await request('/api/identity'))
-  const profile = (await response.json()).profile || {}
+  const identity = await response.json()
+  const profile = identity.profile || {}
   const names = new Set([
     profile.handle && `@${String(profile.handle).trim().replace(/^@/u, '')}`,
     profile.handle,
     profile.display_name,
   ].filter(Boolean).map(value => String(value).trim().toLocaleLowerCase()))
   if (names.size === 0) throw new Error('Your profile could not be identified, so assigned cards cannot be matched safely.')
-  return cards.filter(({ card }) => names.has(String(card.assignee || '').trim().toLocaleLowerCase()))
+  const hosts = new Set((identity.deployments || []).map(deployment => {
+    try { return new URL(deployment?.url || '').hostname.toLocaleLowerCase() } catch { return '' }
+  }).filter(Boolean))
+  return cards.filter(({ card }) => names.has(String(card.assignee || '').trim().toLocaleLowerCase())
+    || hosts.has(String(card.assignee || '').trim().toLocaleLowerCase())
+    || hosts.has(String(card.assigneeHost || '').trim().toLocaleLowerCase()))
 }
 async function moveToDone(boardId, cardId, doc) {
   const doneColumn = doc.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
@@ -157,17 +176,20 @@ async function completeMatchingCard(data) {
   return { status: 'saved', boardId: match.board.id, cardId: match.card.id, card }
 }
 async function syncOpenPrs({ dryRun = false } = {}) {
-  const search = new URLSearchParams({ q: 'is:pr is:open author:@me', per_page: '100' })
-  const response = await checked(await request(`/api/github/api/search/issues?${search}`))
-  const payload = await response.json()
+  const payloads = await Promise.all(['is:pr is:open author:@me', 'is:pr is:merged author:@me'].map(async q => {
+    const search = new URLSearchParams({ q, per_page: '100' })
+    return (await checked(await request(`/api/github/api/search/issues?${search}`))).json()
+  }))
   const cards = await assignedToMe(await allCards())
   const results = []
-  for (const pull of Array.isArray(payload.items) ? payload.items : []) {
+  const pulls = [...new Map(payloads.flatMap(payload => Array.isArray(payload.items) ? payload.items : [])
+    .filter(pull => typeof pull?.html_url === 'string').map(pull => [pull.html_url, pull])).values()]
+  for (const pull of pulls) {
     const title = exactTitle(pull?.title)
     const prUrl = typeof pull?.html_url === 'string' ? pull.html_url : ''
     if (!title || !validPrUrl(prUrl)) continue
-    const ranked = cards.map(match => ({ ...match, score: titleSimilarity(title, match.card.title) }))
-      .filter(match => match.score > 0)
+    const ranked = cards.map(match => ({ ...match, ...pullCardScore(pull, match.card) }))
+      .filter(match => match.eligible)
       .sort((left, right) => right.score - left.score)
     const best = ranked[0]
     if (!best) {

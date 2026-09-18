@@ -44,6 +44,17 @@ const prTitleSimilarity = (left, right) => {
   const overlap = [...a].filter(word => b.has(word)).length
   return overlap ? overlap / new Set([...a, ...b]).size : 0
 }
+const cardMatchText = card => [card?.title, ...(Array.isArray(card?.checklist) ? card.checklist.map(item => item?.text) : [])].filter(Boolean).join('\n')
+const pullRepositoryName = pull => {
+  try { return new URL(pull?.repository_url || pull?.html_url || '').pathname.split('/').filter(Boolean).at(-1)?.replace(/^app-/u, '').toLocaleLowerCase() || '' } catch { return '' }
+}
+const pullCardScore = (pull, card) => {
+  const text = cardMatchText(card)
+  const titleScore = prTitleSimilarity(pull.title, text)
+  const repository = pullRepositoryName(pull)
+  const repositoryMatch = repository && text.toLocaleLowerCase().includes(repository)
+  return { score: titleScore + (repositoryMatch ? 1 : 0), eligible: repositoryMatch || titleScore >= 0.15 }
+}
 
 function AttachmentImage({ boardId, share, attachment, className, alt = '' }) {
   const [src, setSrc] = useState('')
@@ -1468,20 +1479,30 @@ export default function Board({
     let alive = true
     prSyncingRef.current = true
     ;(async () => {
-      const query = new URLSearchParams({ q: 'is:pr is:open author:@me', per_page: '100' })
-      const response = await fetch(`/api/github/api/search/issues?${query}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const searches = ['is:pr is:open author:@me', 'is:pr is:merged author:@me'].map(async q => {
+        const query = new URLSearchParams({ q, per_page: '100' })
+        const response = await fetch(`/api/github/api/search/issues?${query}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        return response.ok ? response.json() : { items: [] }
       })
-      if (!response.ok || !alive) return
-      const payload = await response.json()
+      const payloads = await Promise.all(searches)
+      if (!alive) return
+      const hosts = new Set((identity?.deployments || []).map(deployment => {
+        try { return new URL(deployment?.url || '').hostname.toLocaleLowerCase() } catch { return '' }
+      }).filter(Boolean))
       const assigned = Object.values(boardRef.current?.cards || {}).filter(card =>
-        String(card.assignee || '').trim().toLocaleLowerCase() === `@${handle}`.toLocaleLowerCase(),
+        String(card.assignee || '').trim().toLocaleLowerCase() === `@${handle}`.toLocaleLowerCase()
+        || hosts.has(String(card.assignee || '').trim().toLocaleLowerCase())
+        || hosts.has(String(card.assigneeHost || '').trim().toLocaleLowerCase()),
       )
-      for (const pull of Array.isArray(payload.items) ? payload.items : []) {
+      const pulls = [...new Map(payloads.flatMap(payload => Array.isArray(payload.items) ? payload.items : [])
+        .filter(pull => typeof pull?.html_url === 'string').map(pull => [pull.html_url, pull])).values()]
+      for (const pull of pulls) {
         if (!alive) return
         if (typeof pull?.title !== 'string' || typeof pull?.html_url !== 'string') continue
-        const ranked = assigned.map(card => ({ card, score: prTitleSimilarity(pull.title, card.title) }))
-          .filter(match => match.score > 0).sort((left, right) => right.score - left.score)
+        const ranked = assigned.map(card => ({ card, ...pullCardScore(pull, card) }))
+          .filter(match => match.eligible).sort((left, right) => right.score - left.score)
         const match = ranked[0]
         if (!match || (ranked[1] && ranked[1].score === match.score)) continue
         const current = boardRef.current?.cards[match.card.id]
@@ -1494,7 +1515,7 @@ export default function Board({
       }
     })().catch(() => {}).finally(() => { prSyncingRef.current = false })
     return () => { alive = false }
-  }, [board, boardId, identity?.profile?.handle, online, access.canWrite, token])
+  }, [board, boardId, identity, online, access.canWrite, token])
 
   if (!board) return <>
     <div className="kb-header">
