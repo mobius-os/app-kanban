@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
+import { prTitleSimilarity, pullCardScore } from '../prMatching.js'
 import { resolveMemberHandles, pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
 import { acknowledgeRecoveredBoardOps, applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps } from '../pendingOps.js'
@@ -36,30 +37,6 @@ export const LABELS = {
   purple: 'var(--kb-label-purple, #8b5cf6)',
   pink: 'var(--kb-label-pink, #ec4899)',
 }
-
-const PR_TITLE_IGNORED_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'of', 'on', 'or', 'the', 'this', 'that', 'to', 'use', 'using', 'with'])
-const PR_TITLE_ALIASES = { handles: ['handle', 'name'], handle: ['name'], verified: ['name'], collaborators: ['collaborator', 'user'], collaborator: ['user'], users: ['user'], assignee: ['assign'], assign: ['assignee'], attachments: ['attachment'], previews: ['preview'], entries: ['entry'] }
-const prTitleWords = value => new Set((String(value || '').toLocaleLowerCase().match(/[a-z0-9]+/g) || [])
-  .filter(word => !PR_TITLE_IGNORED_WORDS.has(word)).flatMap(word => [word, ...(PR_TITLE_ALIASES[word] || [])]))
-const prTitleSimilarity = (left, right) => {
-  const a = prTitleWords(left), b = prTitleWords(right)
-  const overlap = [...a].filter(word => b.has(word)).length
-  return overlap ? overlap / new Set([...a, ...b]).size : 0
-}
-const cardMatchText = card => [card?.title, ...(Array.isArray(card?.checklist) ? card.checklist.map(item => item?.text) : [])].filter(Boolean).join('\n')
-const pullRepositoryName = pull => {
-  try { return new URL(pull?.repository_url || pull?.html_url || '').pathname.split('/').filter(Boolean).at(-1)?.replace(/^app-/u, '').toLocaleLowerCase() || '' } catch { return '' }
-}
-const pullCardScore = (pull, card) => {
-  const text = cardMatchText(card)
-  const titleScore = prTitleSimilarity(pull.title, text)
-  const repository = pullRepositoryName(pull)
-  const repositoryMatch = repository && text.toLocaleLowerCase().includes(repository)
-  const exactTitleMatch = String(pull.title || '').trim() === String(card?.title || '').trim()
-  return { score: titleScore + (repositoryMatch ? 1 : 0), eligible: repositoryMatch || exactTitleMatch }
-}
-const readyForDone = (card, pull) => Boolean(pull?.pull_request?.merged_at)
-  && (card?.checklist || []).every(item => item?.done === true)
 
 function AttachmentImage({ boardId, share, attachment, className, alt = '' }) {
   const [src, setSrc] = useState('')
@@ -783,7 +760,7 @@ export default function Board({
   const onlineRef = useRef(online)
   const filtersRef = useRef({ text: filterText, labels: filterLabels })
   const replayingRef = useRef(false)
-  const prSyncingRef = useRef(false)
+  const syncedPrContextsRef = useRef(new Set())
   const pendingEntriesRef = useRef([])
   const lastInteractionAtRef = useRef(Date.now())
   const fileInputRef = useRef(null)
@@ -1492,9 +1469,10 @@ export default function Board({
 
   useEffect(() => {
     const handle = String(identity?.profile?.handle || '').trim().replace(/^@/u, '')
-    if (!board || !access.canWrite || !online || !handle || prSyncingRef.current) return undefined
+    const contextKey = `${boardId}:${handle}`
+    if (!board || !access.canWrite || !online || !handle || syncedPrContextsRef.current.has(contextKey)) return undefined
     let alive = true
-    prSyncingRef.current = true
+    syncedPrContextsRef.current.add(contextKey)
     ;(async () => {
       const searches = ['is:pr is:open author:@me', 'is:pr is:merged author:@me'].map(async q => {
         const query = new URLSearchParams({ q, per_page: '100' })
@@ -1539,9 +1517,9 @@ export default function Board({
         const updated = boardRef.current?.cards[current.id]
         if (done && readyForDone(updated, pull) && !done.cardIds.includes(current.id)) moveCard(current.id, done.id, null)
       }
-    })().catch(() => {}).finally(() => { prSyncingRef.current = false })
+    })().catch(() => { syncedPrContextsRef.current.delete(contextKey) })
     return () => { alive = false }
-  }, [board, boardId, identity, online, access.canWrite, token])
+  }, [!!board, boardId, identity, online, access.canWrite, token])
 
   if (!board) return <>
     <div className="kb-header">

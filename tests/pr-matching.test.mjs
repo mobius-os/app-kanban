@@ -1,0 +1,20 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { pullCardScore } from '../prMatching.js'
+
+const pull = (title, repository = 'https://api.github.com/repos/mobius-os/app-kanban') => ({ title, repository_url: repository })
+
+test('a repository mention alone cannot match an unrelated pull request', () => {
+  const result = pullCardScore(pull('Add a new app contribution workflow'), { title: 'Improve Kanban', checklist: [] })
+  assert.equal(result.eligible, false)
+})
+
+test('a related repository pull request remains eligible when its title overlaps the card', () => {
+  const result = pullCardScore(pull('Improve Kanban card details'), { title: 'Improve Kanban', checklist: [] })
+  assert.equal(result.eligible, true)
+})
+
+test('an exact title match remains eligible without a repository mention', () => {
+  const result = pullCardScore(pull('Improve Kanban'), { title: 'Improve Kanban', checklist: [] })
+  assert.equal(result.eligible, true)
+})
