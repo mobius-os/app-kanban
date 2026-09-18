@@ -81,6 +81,55 @@ function validatePatch(patch) {
   if (patch.label !== undefined && !labels.has(patch.label)) throw new Error('label is invalid.')
   if (patch.due !== undefined && patch.due !== '' && !isIsoDate(patch.due)) throw new Error('due must be empty or a valid YYYY-MM-DD date.')
 }
+function exactTitle(value) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+function validPrUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return false
+  try {
+    const url = new URL(value)
+    return ['http:', 'https:'].includes(url.protocol)
+  } catch {
+    return false
+  }
+}
+async function completeMatchingCard(data) {
+  const title = exactTitle(data?.title)
+  const summary = typeof data?.summary === 'string' ? data.summary.trim() : ''
+  const prUrl = typeof data?.prUrl === 'string' ? data.prUrl.trim() : ''
+  if (!title || !summary || !validPrUrl(prUrl)) {
+    throw new Error('title, summary, and a valid http(s) prUrl are required.')
+  }
+  const boards = await repository.list()
+  const matches = []
+  for (const board of boards) {
+    if (board.status === 'unavailable') continue
+    const state = await repository.read(board.id)
+    for (const card of Object.values(state.doc.cards)) {
+      if (exactTitle(card?.title) === title) matches.push({ board, card })
+    }
+  }
+  if (matches.length === 0) throw new Error(`No Kanban card exactly matches “${title}”.`)
+  if (matches.length > 1) throw new Error(`More than one Kanban card exactly matches “${title}”; use unique card titles before completing it automatically.`)
+  const match = matches[0]
+  if (String(match.card.notes || '').includes(prUrl)) {
+    return { status: 'already-saved', boardId: match.board.id, cardId: match.card.id, card: match.card }
+  }
+  const completion = `✅ Done — ${summary}\nPR: ${prUrl}`
+  const notes = [String(match.card.notes || '').trim(), completion].filter(Boolean).join('\n\n')
+  const saved = await repository.mutate(match.board.id, {
+    type: 'update-card', cardId: match.card.id, patch: { notes },
+  })
+  const doneColumn = saved.doc.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
+  let card = saved.doc.cards[match.card.id]
+  if (doneColumn && !doneColumn.cardIds.includes(match.card.id)) {
+    const moved = await repository.mutate(match.board.id, {
+      type: 'move-card', cardId: match.card.id, toColumnId: doneColumn.id, beforeCardId: null,
+    })
+    card = moved.doc.cards[match.card.id]
+  }
+  return { status: 'saved', boardId: match.board.id, cardId: match.card.id, card }
+}
 try {
   let result
   if (command === 'list') result = await repository.list()
@@ -113,7 +162,9 @@ try {
     const cardId = op.card?.id || op.cardId
     result = { status: 'saved', appId, boardId, cardId, authority: saved.authority,
       version: saved.version, card: saved.doc.cards[cardId] }
-  } else throw new Error('Usage: kanban.mjs list | read BOARD_ID | add-card/update-card/move-card BOARD_ID < input.json')
+  } else if (command === 'complete-matching-card') {
+    result = await completeMatchingCard(await input())
+  } else throw new Error('Usage: kanban.mjs list | read BOARD_ID | add-card/update-card/move-card BOARD_ID < input.json | complete-matching-card < input.json')
   console.log(JSON.stringify(result, null, 2))
 } catch (error) {
   console.error(JSON.stringify({ status: 'not-confirmed', error: error.message }))
