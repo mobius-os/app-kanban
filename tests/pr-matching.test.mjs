@@ -22,6 +22,14 @@ test('a strong title match remains eligible when a card does not name the reposi
   assert.equal(result.eligible, true)
 })
 
+test('capacity and backoff wording matches a busy-model retry pull request', () => {
+  const result = pullCardScore(
+    pull('Recover busy selected models with a delayed retry', 'https://api.github.com/repos/mobius-os/mobius'),
+    { title: 'Graciously handle errors with some backoff: selected model is at capacity', checklist: [] },
+  )
+  assert.equal(result.eligible, true)
+})
+
 test('an exact title match remains eligible without a repository mention', () => {
   const result = pullCardScore(pull('Improve Kanban'), { title: 'Improve Kanban', checklist: [] })
   assert.equal(result.eligible, true)
