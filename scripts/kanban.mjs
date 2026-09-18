@@ -115,7 +115,8 @@ function pullCardScore(pull, card) {
   const titleScore = titleSimilarity(pull.title, text)
   const repository = pullRepositoryName(pull)
   const repositoryMatch = repository && text.toLocaleLowerCase().includes(repository)
-  return { score: titleScore + (repositoryMatch ? 1 : 0), eligible: repositoryMatch || titleScore >= 0.15 }
+  const exactTitleMatch = String(pull.title || '').trim() === String(card?.title || '').trim()
+  return { score: titleScore + (repositoryMatch ? 1 : 0), eligible: repositoryMatch || exactTitleMatch }
 }
 function readyForDone(card, merged) {
   return merged === true && (card?.checklist || []).every(item => item?.done === true)
