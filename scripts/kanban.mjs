@@ -95,7 +95,8 @@ function validPrUrl(value) {
 }
 function titleWords(value) {
   const ignored = new Set(['a', 'an', 'and', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'of', 'on', 'or', 'the', 'this', 'that', 'to', 'use', 'using', 'with'])
-  return new Set(String(value || '').toLocaleLowerCase().match(/[a-z0-9]+/g)?.filter(word => !ignored.has(word)) || [])
+  const aliases = { handles: ['handle', 'name'], handle: ['name'], verified: ['name'], collaborators: ['collaborator', 'user'], collaborator: ['user'], users: ['user'], assignee: ['assign'], assign: ['assignee'], attachments: ['attachment'], previews: ['preview'], entries: ['entry'] }
+  return new Set((String(value || '').toLocaleLowerCase().match(/[a-z0-9]+/g) || []).filter(word => !ignored.has(word)).flatMap(word => [word, ...(aliases[word] || [])]))
 }
 function titleSimilarity(left, right) {
   const a = titleWords(left)
@@ -151,6 +152,17 @@ async function moveToDone(boardId, cardId, doc) {
   })
   return moved.doc.cards[cardId]
 }
+async function checkCompletedItems(boardId, card, pullTitle) {
+  let doc = card
+  for (const item of card.checklist || []) {
+    if (!item?.id || item.done || titleSimilarity(pullTitle, item.text) < 0.1) continue
+    const saved = await repository.mutate(boardId, {
+      type: 'set-checklist-item', cardId: card.id, itemId: item.id, done: true,
+    })
+    doc = saved.doc.cards[card.id]
+  }
+  return doc
+}
 async function completeMatchingCard(data) {
   const title = exactTitle(data?.title)
   const summary = typeof data?.summary === 'string' ? data.summary.trim() : ''
@@ -164,7 +176,8 @@ async function completeMatchingCard(data) {
   const match = matches[0]
   if (String(match.card.notes || '').includes(prUrl)) {
     const state = await repository.read(match.board.id)
-    const card = await moveToDone(match.board.id, match.card.id, state.doc)
+    const checked = await checkCompletedItems(match.board.id, state.doc.cards[match.card.id], summary)
+    const card = await moveToDone(match.board.id, match.card.id, { ...state.doc, cards: { ...state.doc.cards, [match.card.id]: checked } })
     return { status: 'already-saved', boardId: match.board.id, cardId: match.card.id, card }
   }
   const completion = `✅ Done — ${summary}\nPR: ${prUrl}`
@@ -206,7 +219,8 @@ async function syncOpenPrs({ dryRun = false } = {}) {
     }
     if (String(best.card.notes || '').includes(prUrl)) {
       const state = await repository.read(best.board.id)
-      await moveToDone(best.board.id, best.card.id, state.doc)
+      const checked = await checkCompletedItems(best.board.id, state.doc.cards[best.card.id], title)
+      await moveToDone(best.board.id, best.card.id, { ...state.doc, cards: { ...state.doc.cards, [best.card.id]: checked } })
       results.push({ pr: prUrl, title, status: 'already-saved', boardId: best.board.id, cardId: best.card.id, cardTitle: best.card.title, score: best.score })
       continue
     }
@@ -214,7 +228,8 @@ async function syncOpenPrs({ dryRun = false } = {}) {
     const saved = await repository.mutate(best.board.id, {
       type: 'update-card', cardId: best.card.id, patch: { notes },
     })
-    await moveToDone(best.board.id, best.card.id, saved.doc)
+    const checked = await checkCompletedItems(best.board.id, saved.doc.cards[best.card.id], title)
+    await moveToDone(best.board.id, best.card.id, { ...saved.doc, cards: { ...saved.doc.cards, [best.card.id]: checked } })
     results.push({ pr: prUrl, title, status: 'saved', boardId: best.board.id, cardId: best.card.id, cardTitle: best.card.title, score: best.score })
   }
   return { status: 'saved', results }

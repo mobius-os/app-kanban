@@ -38,7 +38,9 @@ export const LABELS = {
 }
 
 const PR_TITLE_IGNORED_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'of', 'on', 'or', 'the', 'this', 'that', 'to', 'use', 'using', 'with'])
-const prTitleWords = value => new Set(String(value || '').toLocaleLowerCase().match(/[a-z0-9]+/g)?.filter(word => !PR_TITLE_IGNORED_WORDS.has(word)) || [])
+const PR_TITLE_ALIASES = { handles: ['handle', 'name'], handle: ['name'], verified: ['name'], collaborators: ['collaborator', 'user'], collaborator: ['user'], users: ['user'], assignee: ['assign'], assign: ['assignee'], attachments: ['attachment'], previews: ['preview'], entries: ['entry'] }
+const prTitleWords = value => new Set((String(value || '').toLocaleLowerCase().match(/[a-z0-9]+/g) || [])
+  .filter(word => !PR_TITLE_IGNORED_WORDS.has(word)).flatMap(word => [word, ...(PR_TITLE_ALIASES[word] || [])]))
 const prTitleSimilarity = (left, right) => {
   const a = prTitleWords(left), b = prTitleWords(right)
   const overlap = [...a].filter(word => b.has(word)).length
@@ -1506,10 +1508,16 @@ export default function Board({
         const match = ranked[0]
         if (!match || (ranked[1] && ranked[1].score === match.score)) continue
         const current = boardRef.current?.cards[match.card.id]
-        if (!current || String(current.notes || '').includes(pull.html_url)) continue
-        updateCard(current.id, {
-          notes: [String(current.notes || '').trim(), `✅ Done — ${pull.title}\nPR: ${pull.html_url}`].filter(Boolean).join('\n\n'),
-        })
+        if (!current) continue
+        if (!String(current.notes || '').includes(pull.html_url)) {
+          updateCard(current.id, {
+            notes: [String(current.notes || '').trim(), `✅ Done — ${pull.title}\nPR: ${pull.html_url}`].filter(Boolean).join('\n\n'),
+          })
+        }
+        for (const item of current.checklist || []) {
+          if (item?.done || prTitleSimilarity(pull.title, item?.text) < 0.1) continue
+          mutate({ type: 'set-checklist-item', cardId: current.id, itemId: item.id, done: true })
+        }
         const done = boardRef.current?.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
         if (done && !done.cardIds.includes(current.id)) moveCard(current.id, done.id, null)
       }
