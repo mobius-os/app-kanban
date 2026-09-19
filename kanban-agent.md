@@ -1,6 +1,6 @@
 ---
 name: kanban-agent
-description: Find Kanban boards and cards; add, edit, or move to-dos using the app-owned helper. Use for any request to read or change Kanban data, whether private or shared.
+description: Find Kanban boards and cards; add, edit, or move to-dos using the app-owned helper. Also use when completing Möbius agent work whose exact task title matches a Kanban card, so the card can be marked done with its summary and pull-request link.
 ---
 
 # Working with Kanban
@@ -32,6 +32,27 @@ Commands and stdin shapes:
 - `update-card BOARD_ID`: `{"cardId":"...","patch":{"title":"...","notes":"..."}}`
   Other editable fields: label, due, assignee, assigneeHost.
 - `move-card BOARD_ID`: `{"cardId":"...","toColumnId":"...","beforeCardId":null}`
+
+## Completed agent work
+
+When you complete Möbius agent work and its exact task title matches one Kanban
+card, use `complete-matching-card` before finishing your turn. Send this JSON
+on stdin:
+
+`{"title":"exact task title","summary":"short completion summary","prUrl":"https://…"}`
+
+The command appends `✅ Done — <summary>` and the pull-request link to that
+card's notes, then moves it to the column named **Done** when that column
+exists. It refuses to guess when zero or multiple card titles match, and it
+does not duplicate a pull-request link already on the card. A missing card or
+ambiguous title is a visible blocker, not permission to update a different
+card.
+
+To reconcile existing pull requests from the connected GitHub identity, run
+`sync-open-prs`. It considers **only cards assigned to the current owner**,
+then safely skips a pull request without a unique title-based match. Use
+`sync-open-prs --dry-run` to inspect the proposed matches without changing
+cards.
 
 Use a stable new card ID when retrying an add. An uncertain network response
 can mean the write landed; read before retrying, and reuse the same ID to avoid

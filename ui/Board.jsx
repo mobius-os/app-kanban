@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
+import { prTitleSimilarity, pullCardScore } from '../prMatching.js'
 import { resolveMemberHandles, pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
-import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps } from '../pendingOps.js'
+import { acknowledgeRecoveredBoardOps, applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
 import {
   deleteCardAttachment,
@@ -422,6 +423,82 @@ function AutoGrowTextarea({ valueKey, onCommit, expandOnFocus = false, ...props 
   />
 }
 
+function LinkifiedText({ text }) {
+  const parts = String(text || '').split(/(https?:\/\/[^\s<]+)/gu)
+  return parts.map((part, index) => {
+    if (!/^https?:\/\//u.test(part)) return part
+    const match = part.match(/^(.*?)([.,!?;:]+)?$/u)
+    const url = match?.[1] || part
+    const punctuation = match?.[2] || ''
+    try {
+      const parsed = new URL(url)
+      if (!['http:', 'https:'].includes(parsed.protocol)) return part
+      return <span key={`${url}-${index}`}><a href={parsed.href} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}>{url}</a>{punctuation}</span>
+    } catch {
+      return part
+    }
+  })
+}
+
+function CardTitleEditor({ card, canWrite, onCommit }) {
+  const [editing, setEditing] = useState(false)
+  useEffect(() => { setEditing(false) }, [card.id])
+  if (!editing || !canWrite) return <div className="kb-detail-field kb-title-field">
+    <div
+      className={`kb-title-display${canWrite ? ' kb-editable-field' : ''}`}
+      role={canWrite ? 'button' : undefined}
+      tabIndex={canWrite ? 0 : undefined}
+      onClick={() => { if (canWrite) setEditing(true) }}
+      onKeyDown={event => { if (canWrite && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); setEditing(true) } }}
+      aria-label={canWrite ? 'Edit card title' : undefined}
+    ><LinkifiedText text={card.title} /></div>
+  </div>
+  return <AutoGrowTextarea
+    className="kb-input kb-title-input"
+    rows={1}
+    autoFocus
+    defaultValue={card.title}
+    key={`st-${card.id}`}
+    valueKey={`${card.id}:${card.title}`}
+    aria-label="Card title"
+    onCommit={value => {
+      const next = value.trim()
+      if (next && next !== card.title) onCommit(next)
+      setEditing(false)
+    }}
+  />
+}
+
+function CardNotesEditor({ card, canWrite, onCommit }) {
+  const [editing, setEditing] = useState(false)
+  useEffect(() => { setEditing(false) }, [card.id])
+  if (!editing || !canWrite) return <div className="kb-detail-field kb-notes-field">
+    <div
+      className={`kb-notes-display${card.notes ? '' : ' kb-notes-empty'}${canWrite ? ' kb-editable-field' : ''}`}
+      role={canWrite ? 'button' : undefined}
+      tabIndex={canWrite ? 0 : undefined}
+      onClick={() => { if (canWrite) setEditing(true) }}
+      onKeyDown={event => { if (canWrite && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); setEditing(true) } }}
+      aria-label={canWrite ? 'Edit card notes' : undefined}
+    >{card.notes ? <LinkifiedText text={card.notes} /> : 'Notes…'}</div>
+  </div>
+  return <AutoGrowTextarea
+    className="kb-input kb-notes-input"
+    rows={2}
+    expandOnFocus
+    autoFocus
+    placeholder="Notes…"
+    defaultValue={card.notes}
+    key={`sn-${card.id}`}
+    valueKey={`${card.id}:${card.notes}`}
+    aria-label="Card notes"
+    onCommit={value => {
+      if (value !== card.notes) onCommit(value)
+      setEditing(false)
+    }}
+  />
+}
+
 function ChecklistEditor({ checklist, canWrite, onAdd, onToggle, onDelete, onEdit }) {
   const [text, setText] = useState('')
   const [editingId, setEditingId] = useState(null)
@@ -669,6 +746,7 @@ export default function Board({
   const [animateColumns, setAnimateColumns] = useState(true)
   const [queuedCount, setQueuedCount] = useState(0)
   const [recoveredCount, setRecoveredCount] = useState(0)
+  const [prSyncTick, setPrSyncTick] = useState(0)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [attachmentError, setAttachmentError] = useState('')
 
@@ -683,6 +761,7 @@ export default function Board({
   const onlineRef = useRef(online)
   const filtersRef = useRef({ text: filterText, labels: filterLabels })
   const replayingRef = useRef(false)
+  const prSyncTimesRef = useRef(new Map())
   const pendingEntriesRef = useRef([])
   const lastInteractionAtRef = useRef(Date.now())
   const fileInputRef = useRef(null)
@@ -742,6 +821,20 @@ export default function Board({
   useEffect(() => { setAttachmentError('') }, [openCardId])
 
   useEffect(() => {
+    const refreshPulls = () => {
+      if (!document.hidden) setPrSyncTick(tick => tick + 1)
+    }
+    const timer = window.setInterval(refreshPulls, 120000)
+    window.addEventListener('focus', refreshPulls)
+    document.addEventListener('visibilitychange', refreshPulls)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refreshPulls)
+      document.removeEventListener('visibilitychange', refreshPulls)
+    }
+  }, [])
+
+  useEffect(() => {
     let active = true
     setRecoveredCount(0)
     readRecoveredBoardOps(boardId).then(entries => {
@@ -751,20 +844,30 @@ export default function Board({
   }, [boardId, queuedCount])
 
   const downloadUnsyncedEdits = async () => {
+    let recovery
     try {
-      const recovery = await exportUnsyncedBoardOps(boardId)
+      recovery = await exportUnsyncedBoardOps(boardId)
       const link = document.createElement('a')
       link.href = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(recovery, null, 2))}`
       link.download = 'kanban-unsynced-edits.json'
       link.click()
     } catch {
       setSyncNote('Your saved edits could not be downloaded. They have not been removed.')
+      return
+    }
+    if (recoveredCount > 0) {
+      try {
+        await acknowledgeRecoveredBoardOps(boardId)
+        setRecoveredCount(0)
+      } catch {
+        setSyncNote('The recovery copy downloaded, but the reminder could not be dismissed.')
+      }
     }
   }
   const recoveryButton = (recoveredCount > 0 || queuedCount > 0 || loadFailure) && <button
     className="kb-btn" onClick={downloadUnsyncedEdits}
     title="Download pending and rejected edits as a recovery file. Saved copies are kept here."
-  >Save unsynced edits</button>
+  >Download recovery copy</button>
 
   const refreshMembers = useCallback(async () => {
     if (!share?.hosted) return []
@@ -1376,6 +1479,66 @@ export default function Board({
   }, [drag])
   const openCard = id => { if (!suppressClick.current) setOpenCardId(id) }
 
+  const access = boardAccess(share, online)
+  const hasFilters = !!filterText.trim() || filterLabels.length > 0
+
+  useEffect(() => {
+    const handle = String(identity?.profile?.handle || '').trim().replace(/^@/u, '')
+    const contextKey = `${boardId}:${handle}`
+    const lastSync = prSyncTimesRef.current.get(contextKey) || 0
+    if (!board || !access.canWrite || !online || !handle || Date.now() - lastSync < 20000) return undefined
+    let alive = true
+    prSyncTimesRef.current.set(contextKey, Date.now())
+    ;(async () => {
+      const searches = ['is:pr is:open author:@me', 'is:pr is:merged author:@me'].map(async q => {
+        const query = new URLSearchParams({ q, per_page: '100' })
+        const response = await fetch(`/api/github/api/search/issues?${query}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        return response.ok ? response.json() : { items: [] }
+      })
+      const payloads = await Promise.all(searches)
+      if (!alive) return
+      const hosts = new Set((identity?.deployments || []).map(deployment => {
+        try { return new URL(deployment?.url || '').hostname.toLocaleLowerCase() } catch { return '' }
+      }).filter(Boolean))
+      const myAssignment = { assignee: `@${handle}`, assigneeHost: localDeploymentHost }
+      const assigned = Object.values(boardRef.current?.cards || {}).filter(card => {
+        const unassigned = !String(card.assignee || '').trim() && !String(card.assigneeHost || '').trim()
+        return unassigned
+          || String(card.assignee || '').trim().toLocaleLowerCase() === `@${handle}`.toLocaleLowerCase()
+          || hosts.has(String(card.assignee || '').trim().toLocaleLowerCase())
+          || hosts.has(String(card.assigneeHost || '').trim().toLocaleLowerCase())
+      })
+      const pulls = [...new Map(payloads.flatMap(payload => Array.isArray(payload.items) ? payload.items : [])
+        .filter(pull => typeof pull?.html_url === 'string').map(pull => [pull.html_url, pull])).values()]
+      for (const pull of pulls) {
+        if (!alive) return
+        if (typeof pull?.title !== 'string' || typeof pull?.html_url !== 'string') continue
+        const ranked = assigned.map(card => ({ card, ...pullCardScore(pull, card) }))
+          .filter(match => match.eligible && (!(!String(match.card.assignee || '').trim() && !String(match.card.assigneeHost || '').trim()) || match.titleEligible)).sort((left, right) => right.score - left.score)
+        const match = ranked[0]
+        if (!match || (ranked[1] && ranked[1].score === match.score)) continue
+        const current = boardRef.current?.cards[match.card.id]
+        if (!current) continue
+        const claim = !String(current.assignee || '').trim() && !String(current.assigneeHost || '').trim()
+        const patch = claim ? { ...myAssignment } : {}
+        if (!String(current.notes || '').includes(pull.html_url)) patch.notes = [String(current.notes || '').trim(), `✅ Done — ${pull.title}\nPR: ${pull.html_url}`].filter(Boolean).join('\n\n')
+        if (Object.keys(patch).length) updateCard(current.id, patch)
+        if (pull?.pull_request?.merged_at) {
+          for (const item of current.checklist || []) {
+            if (item?.done || prTitleSimilarity(pull.title, item?.text) < 0.1) continue
+            mutate({ type: 'set-checklist-item', cardId: current.id, itemId: item.id, done: true })
+          }
+        }
+        const done = boardRef.current?.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
+        const updated = boardRef.current?.cards[current.id]
+        if (done && match.titleEligible && readyForDone(updated, pull) && !done.cardIds.includes(current.id)) moveCard(current.id, done.id, null)
+      }
+    })().catch(() => { prSyncTimesRef.current.delete(contextKey) })
+    return () => { alive = false }
+  }, [!!board, boardId, identity, online, access.canWrite, token, prSyncTick])
+
   if (!board) return <>
     <div className="kb-header">
       <button className="kb-btn" onClick={onAllBoards}><ChevronLeft /> All boards</button>
@@ -1392,9 +1555,6 @@ export default function Board({
   const openCard_ = openCardId ? board.cards[openCardId] : null
   const openCardColumn = openCard_ ? board.columns.find(column => column.cardIds.includes(openCard_.id)) : null
   const openCardIndex = openCardColumn ? openCardColumn.cardIds.indexOf(openCard_.id) : -1
-  const access = boardAccess(share, online)
-  const hasFilters = !!filterText.trim() || filterLabels.length > 0
-
   return (
     <>
       <div className="kb-header kb-board-header">
@@ -1433,7 +1593,7 @@ export default function Board({
       </div>
       <div className="kb-divider" />
       {recoveryButton && <div className="kb-recovery" role="status">
-        <span>Unsynced edits are kept on this instance.</span>{recoveryButton}
+        <span>{recoveredCount > 0 ? 'A recovery copy is ready to download.' : 'Unsynced edits are kept on this instance.'}</span>{recoveryButton}
       </div>}
       {board.columns.length > 1 && <nav className="kb-list-nav" aria-label="Jump to list">
         {board.columns.map(column => <button
@@ -1624,28 +1784,8 @@ export default function Board({
               <button className="kb-btn kb-btn-primary kb-card-toolbar-done" type="button" onClick={() => setOpenCardId(null)}>Done</button>
             </div>
             <div className="kb-sheet-grab kb-desktop-only" />
-            <AutoGrowTextarea
-              className="kb-input kb-title-input"
-              rows={1}
-              defaultValue={openCard_.title}
-              key={`st-${openCard_.id}`}
-              valueKey={`${openCard_.id}:${openCard_.title}`}
-              aria-label="Card title"
-              readOnly={!access.canWrite}
-              onCommit={value => { const next = value.trim(); if (next && next !== openCard_.title) updateCard(openCard_.id, { title: next }) }}
-            />
-            <AutoGrowTextarea
-              className="kb-input kb-notes-input"
-              rows={2}
-              expandOnFocus
-              placeholder="Notes…"
-              defaultValue={openCard_.notes}
-              key={`sn-${openCard_.id}`}
-              valueKey={`${openCard_.id}:${openCard_.notes}`}
-              aria-label="Card notes"
-              readOnly={!access.canWrite}
-              onCommit={value => { if (value !== openCard_.notes) updateCard(openCard_.id, { notes: value }) }}
-            />
+            <CardTitleEditor card={openCard_} canWrite={access.canWrite} onCommit={title => updateCard(openCard_.id, { title })} />
+            <CardNotesEditor card={openCard_} canWrite={access.canWrite} onCommit={notes => updateCard(openCard_.id, { notes })} />
 
             <div>
               <div className="kb-section-heading"><h3>Checklist</h3>{Array.isArray(openCard_.checklist) && openCard_.checklist.length > 0 && <span>{openCard_.checklist.filter(item => item.done).length}/{openCard_.checklist.length}</span>}</div>

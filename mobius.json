@@ -13,7 +13,8 @@
   "permissions": {
     "cross_app_access": "none",
     "share_with_apps": "none",
-    "identity_manage": true
+    "identity_manage": true,
+    "github_access": true
   },
   "runtime": {
     "imports": [
