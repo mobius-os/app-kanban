@@ -764,8 +764,8 @@ export default function Board({
     }
     if (recoveredCount > 0) {
       try {
-        await acknowledgeRecoveredBoardOps(boardId)
-        setRecoveredCount(0)
+        await acknowledgeRecoveredBoardOps(boardId, recovery.recovered.map(entry => entry.id))
+        setRecoveredCount((await readRecoveredBoardOps(boardId)).length)
       } catch {
         setSyncNote('The recovery copy downloaded, but the reminder could not be dismissed.')
       }

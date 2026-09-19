@@ -119,10 +119,13 @@ test('acknowledging a downloaded recovery hides its notice without deleting the 
   const recovered = {id:'offline',op:{type:'rename-board',title:'Keep me'},code:'read-only'}
   f.values.set('recovered-board-ops/original/offline.json', recovered)
 
-  await acknowledgeRecoveredBoardOps('original', f.storage)
+  const downloaded = await exportUnsyncedBoardOps('original', f.storage)
+  const arrivedAfterDownload = {id:'zz-later',op:{type:'rename-board',title:'Do not hide me'},code:'read-only'}
+  f.values.set('recovered-board-ops/original/zz-later.json', arrivedAfterDownload)
+  await acknowledgeRecoveredBoardOps('original', downloaded.recovered.map(entry => entry.id), f.storage)
 
-  assert.deepEqual(await readRecoveredBoardOps('original', f.storage), [])
-  assert.deepEqual((await exportUnsyncedBoardOps('original', f.storage)).recovered, [recovered])
+  assert.deepEqual(await readRecoveredBoardOps('original', f.storage), [arrivedAfterDownload])
+  assert.deepEqual((await exportUnsyncedBoardOps('original', f.storage)).recovered, [recovered, arrivedAfterDownload])
   assert.equal(f.values.has('recovered-board-ops/original/offline.json'), true)
 })
 

@@ -68,12 +68,13 @@ export async function readRecoveredBoardOps(boardId, storage = defaultStorage())
 
 // Acknowledging a recovery notice never deletes the recovery copy. It only
 // prevents an already-downloaded rejected edit from reopening the same banner.
-export async function acknowledgeRecoveredBoardOps(boardId, storage = defaultStorage()) {
+export async function acknowledgeRecoveredBoardOps(boardId, entryIds, storage = defaultStorage()) {
   if (!storage?.durableWrite) throw new Error('Recovery acknowledgement could not be saved.')
-  const recovered = await readAllRecoveredBoardOps(boardId, storage)
-  await Promise.all(recovered.map(entry => storage.durableWrite(
-    `${recoveryAcknowledgementPrefixFor(boardId)}${encodeURIComponent(entry.id)}.json`,
-    { id: entry.id, acknowledgedAt: new Date().toISOString() },
+  const ids = [...new Set((Array.isArray(entryIds) ? entryIds : [])
+    .filter(id => typeof id === 'string' && id))]
+  await Promise.all(ids.map(id => storage.durableWrite(
+    `${recoveryAcknowledgementPrefixFor(boardId)}${encodeURIComponent(id)}.json`,
+    { id, acknowledgedAt: new Date().toISOString() },
   )))
 }
 
