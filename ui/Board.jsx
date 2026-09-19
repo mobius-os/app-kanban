@@ -1533,7 +1533,7 @@ export default function Board({
         }
         const done = boardRef.current?.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
         const updated = boardRef.current?.cards[current.id]
-        if (done && readyForDone(updated, pull) && !done.cardIds.includes(current.id)) moveCard(current.id, done.id, null)
+        if (done && match.titleEligible && readyForDone(updated, pull) && !done.cardIds.includes(current.id)) moveCard(current.id, done.id, null)
       }
     })().catch(() => { prSyncTimesRef.current.delete(contextKey) })
     return () => { alive = false }

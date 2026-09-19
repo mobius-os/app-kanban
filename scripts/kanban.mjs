@@ -94,8 +94,10 @@ function validPrUrl(value) {
     return false
   }
 }
-function readyForDone(card, merged) {
-  return merged === true && (card?.checklist || []).every(item => item?.done === true)
+function readyForDone(card, merged, titleEligible = true) {
+  return titleEligible === true
+    && merged === true
+    && (card?.checklist || []).every(item => item?.done === true)
 }
 async function allCards() {
   const boards = await repository.list()
