@@ -46,7 +46,7 @@ export const pullCardScore = (pull, card) => {
     score: Math.max(titleScore, description.score) + (repositoryMatch ? 1 : 0),
     eligible: exactTitleMatch
       || titleScore >= TITLE_SIMILARITY_MINIMUM
-      || (description.overlap >= 3 && description.score >= 0.3)
+      || (description.overlap >= 5 && description.score >= 0.5)
       || (repositoryMatch && titleScore >= REPOSITORY_TITLE_SIMILARITY_MINIMUM),
   }
 }
