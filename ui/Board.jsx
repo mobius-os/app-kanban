@@ -1516,7 +1516,7 @@ export default function Board({
         if (!alive) return
         if (typeof pull?.title !== 'string' || typeof pull?.html_url !== 'string') continue
         const ranked = assigned.map(card => ({ card, ...pullCardScore(pull, card) }))
-          .filter(match => match.eligible).sort((left, right) => right.score - left.score)
+          .filter(match => match.eligible && (!(!String(match.card.assignee || '').trim() && !String(match.card.assigneeHost || '').trim()) || match.titleEligible)).sort((left, right) => right.score - left.score)
         const match = ranked[0]
         if (!match || (ranked[1] && ranked[1].score === match.score)) continue
         const current = boardRef.current?.cards[match.card.id]

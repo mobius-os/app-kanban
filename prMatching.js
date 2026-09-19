@@ -42,11 +42,12 @@ export const pullCardScore = (pull, card) => {
   const repository = pullRepositoryName(pull)
   const repositoryMatch = repository && text.toLocaleLowerCase().includes(repository)
   const exactTitleMatch = String(pull?.title || '').trim() === String(card?.title || '').trim()
+  const titleEligible = exactTitleMatch || titleScore >= TITLE_SIMILARITY_MINIMUM || (repositoryMatch && titleScore >= REPOSITORY_TITLE_SIMILARITY_MINIMUM)
+  const descriptionEligible = description.overlap >= 5 && description.score >= 0.5
   return {
     score: Math.max(titleScore, description.score) + (repositoryMatch ? 1 : 0),
-    eligible: exactTitleMatch
-      || titleScore >= TITLE_SIMILARITY_MINIMUM
-      || (description.overlap >= 5 && description.score >= 0.5)
-      || (repositoryMatch && titleScore >= REPOSITORY_TITLE_SIMILARITY_MINIMUM),
+    titleEligible,
+    descriptionEligible,
+    eligible: titleEligible || descriptionEligible,
   }
 }

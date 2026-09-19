@@ -199,7 +199,7 @@ async function syncOpenPrs({ dryRun = false } = {}) {
     const prUrl = typeof pull?.html_url === 'string' ? pull.html_url : ''
     if (!title || !validPrUrl(prUrl)) continue
     const ranked = cards.map(match => ({ ...match, ...pullCardScore(pull, match.card) }))
-      .filter(match => match.eligible)
+      .filter(match => match.eligible && (!(!String(match.card.assignee || '').trim() && !String(match.card.assigneeHost || '').trim()) || match.titleEligible))
       .sort((left, right) => right.score - left.score)
     const best = ranked[0]
     if (!best) {
