@@ -4,6 +4,7 @@ import { createBoardRepository } from '../boardRepository.js'
 import { configureSync, recoverMemberships } from '../sync.js'
 import { uid } from '../storage.js'
 import { isIsoDate } from '../domain.js'
+import { hasCardCompletion } from '../operations.js'
 
 const base = process.env.API_BASE_URL
 const token = process.env.AGENT_TOKEN
@@ -97,8 +98,8 @@ async function completeMatchingCard(data) {
   const title = exactTitle(data?.title)
   const summary = typeof data?.summary === 'string' ? data.summary.trim() : ''
   const prUrl = typeof data?.prUrl === 'string' ? data.prUrl.trim() : ''
-  if (!title || !summary || !validPrUrl(prUrl)) {
-    throw new Error('title, summary, and a valid http(s) prUrl are required.')
+  if (!title || !summary || summary.includes('\n') || !validPrUrl(prUrl)) {
+    throw new Error('title, a one-line summary, and a valid http(s) prUrl are required.')
   }
   const boards = await repository.list()
   const matches = []
@@ -112,32 +113,12 @@ async function completeMatchingCard(data) {
   if (matches.length === 0) throw new Error(`No Kanban card exactly matches “${title}”.`)
   if (matches.length > 1) throw new Error(`More than one Kanban card exactly matches “${title}”; use unique card titles before completing it automatically.`)
   const match = matches[0]
-  if (String(match.card.notes || '').includes(prUrl)) {
-    const state = await repository.read(match.board.id)
-    const doneColumn = state.doc.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
-    let card = state.doc.cards[match.card.id]
-    if (doneColumn && !doneColumn.cardIds.includes(match.card.id)) {
-      const moved = await repository.mutate(match.board.id, {
-        type: 'move-card', cardId: match.card.id, toColumnId: doneColumn.id, beforeCardId: null,
-      })
-      card = moved.doc.cards[match.card.id]
-    }
-    return { status: 'already-saved', boardId: match.board.id, cardId: match.card.id, card }
-  }
-  const completion = `✅ Done — ${summary}\nPR: ${prUrl}`
-  const notes = [String(match.card.notes || '').trim(), completion].filter(Boolean).join('\n\n')
+  const alreadySaved = hasCardCompletion(match.card.notes, prUrl)
   const saved = await repository.mutate(match.board.id, {
-    type: 'update-card', cardId: match.card.id, patch: { notes },
+    type: 'complete-card', cardId: match.card.id, summary, prUrl,
   })
-  const doneColumn = saved.doc.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
-  let card = saved.doc.cards[match.card.id]
-  if (doneColumn && !doneColumn.cardIds.includes(match.card.id)) {
-    const moved = await repository.mutate(match.board.id, {
-      type: 'move-card', cardId: match.card.id, toColumnId: doneColumn.id, beforeCardId: null,
-    })
-    card = moved.doc.cards[match.card.id]
-  }
-  return { status: 'saved', boardId: match.board.id, cardId: match.card.id, card }
+  return { status: alreadySaved ? 'already-saved' : 'saved', boardId: match.board.id,
+    cardId: match.card.id, card: saved.doc.cards[match.card.id] }
 }
 try {
   let result
