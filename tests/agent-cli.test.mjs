@@ -24,6 +24,7 @@ test('CLI writes private and shared boards through their authority using JSON an
     if (req.url === '/api/apps/1/service/boards/resume-joins') return send({results:[]})
     if (req.url === '/api/apps/1/service/boards') return send({hosted:[],joined:[]})
     if (req.url === '/api/apps/') return send([{ id: 1, slug: 'kanban' }])
+    if (req.url.startsWith('/api/storage/apps-list/1/boards/')) return send({entries:[{name:'b.json',path:'boards/b.json'}],next_cursor:null})
     if (req.url === '/api/storage/apps/1/shared.json') {
       res.setHeader('ETag', '"map"')
       return send({ byBoard: shared ? { b: { oid: 'obj', transport: 'kanban/1', host: 'peer.example', role: 'editor' } } : {} })
@@ -81,6 +82,19 @@ test('CLI writes private and shared boards through their authority using JSON an
     assert.equal((await run('add-card', input)).authority, 'private')
     assert.equal(cacheWrites, 1)
     assert.equal(sharedWrites, 4)
+
+    const completion = { title: 'Fixture card', summary: 'Shipped the exact task', prUrl: 'https://github.com/mobius-os/app-kanban/pull/19' }
+    assert.equal((await run('complete-matching-card', completion)).status, 'saved')
+    assert.match(local.cards.stable.notes, /Shipped the exact task/)
+    assert.deepEqual(local.columns[1].cardIds, ['stable'])
+
+    // An idempotent retry still repairs the destination column without
+    // duplicating the completion note.
+    await run('move-card', { cardId: 'stable', toColumnId: 'todo' })
+    assert.equal((await run('complete-matching-card', completion)).status, 'already-saved')
+    assert.deepEqual(local.columns[1].cardIds, ['stable'])
+    assert.equal(local.cards.stable.notes.match(/pull\/19/g).length, 1)
+    await assert.rejects(run('complete-matching-card', { ...completion, title: 'Similar card' }), /No Kanban card exactly matches/)
   } finally {
     await new Promise(resolve => server.close(resolve))
   }
