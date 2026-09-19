@@ -44,9 +44,10 @@ on stdin:
 The command appends `✅ Done — <summary>` and the pull-request link to that
 card's notes, then moves it to the column named **Done** when that column
 exists. It refuses to guess when zero or multiple card titles match, and it
-does not duplicate a pull-request link already on the card. A missing card or
-ambiguous title is a visible blocker, not permission to update a different
-card.
+does not duplicate a pull-request link already on the card. An unavailable
+recorded board or a title changed before the fresh write also blocks automatic
+completion. A missing card or ambiguous title is a visible blocker, not
+permission to update a different card.
 
 Use a stable new card ID when retrying an add. An uncertain network response
 can mean the write landed; read before retrying, and reuse the same ID to avoid

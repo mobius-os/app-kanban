@@ -102,9 +102,12 @@ async function completeMatchingCard(data) {
     throw new Error('title, a one-line summary, and a valid http(s) prUrl are required.')
   }
   const boards = await repository.list()
+  const unavailable = boards.filter(board => board.status === 'unavailable')
+  if (unavailable.length) {
+    throw new Error(`Cannot safely complete a card by title while ${unavailable.length} recorded board${unavailable.length === 1 ? ' is' : 's are'} unavailable; retry when every board can be checked.`)
+  }
   const matches = []
   for (const board of boards) {
-    if (board.status === 'unavailable') continue
     const state = await repository.read(board.id)
     for (const card of Object.values(state.doc.cards)) {
       if (exactTitle(card?.title) === title) matches.push({ board, card })
@@ -115,7 +118,7 @@ async function completeMatchingCard(data) {
   const match = matches[0]
   const alreadySaved = hasCardCompletion(match.card.notes, prUrl)
   const saved = await repository.mutate(match.board.id, {
-    type: 'complete-card', cardId: match.card.id, summary, prUrl,
+    type: 'complete-card', cardId: match.card.id, expectedTitle: title, summary, prUrl,
   })
   return { status: alreadySaved ? 'already-saved' : 'saved', boardId: match.board.id,
     cardId: match.card.id, card: saved.doc.cards[match.card.id] }
