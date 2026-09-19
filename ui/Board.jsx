@@ -446,7 +446,7 @@ function CardTitleEditor({ card, canWrite, onCommit }) {
     className={`kb-title-display${canWrite ? ' kb-editable-display' : ''}`}
     onClick={() => { if (canWrite) setEditing(true) }}
     onKeyDown={event => {
-      if (canWrite && (event.key === 'Enter' || event.key === ' ')) {
+      if (event.target === event.currentTarget && canWrite && (event.key === 'Enter' || event.key === ' ')) {
         event.preventDefault()
         setEditing(true)
       }
@@ -478,7 +478,7 @@ function CardNotesEditor({ card, canWrite, onCommit }) {
     className={`kb-notes-display${canWrite ? ' kb-editable-display' : ''}${card.notes ? '' : ' kb-notes-empty'}`}
     onClick={() => { if (canWrite) setEditing(true) }}
     onKeyDown={event => {
-      if (canWrite && (event.key === 'Enter' || event.key === ' ')) {
+      if (event.target === event.currentTarget && canWrite && (event.key === 'Enter' || event.key === ' ')) {
         event.preventDefault()
         setEditing(true)
       }
