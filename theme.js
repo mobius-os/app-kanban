@@ -646,32 +646,6 @@ export const CSS = `
     font-weight: 700;
     letter-spacing: -0.02em;
   }
-  .kb-title-display {
-    min-height: 44px;
-    padding: 8px 2px;
-    color: var(--text);
-    font-size: 20px;
-    font-weight: 700;
-    line-height: 1.25;
-    letter-spacing: -0.02em;
-    overflow-wrap: anywhere;
-  }
-  .kb-notes-display {
-    min-height: 68px;
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: var(--surface-2);
-    color: var(--text);
-    line-height: 1.5;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  .kb-notes-display a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-  .kb-notes-empty { color: var(--muted); }
-  .kb-detail-field { position: relative; min-width: 0; flex: 0 0 auto; }
-  .kb-editable-field { cursor: text; border-radius: 10px; }
-  .kb-editable-field:hover { background: color-mix(in srgb, var(--surface-2) 68%, transparent); }
-  .kb-editable-field:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .kb-card-sheet {
     top: clamp(56px, 9dvh, 104px);
     bottom: auto;
