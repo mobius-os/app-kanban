@@ -83,13 +83,15 @@ test('card completion preserves fresh notes, uses an exact marker, and moves ato
     prUrl: 'https://github.com/mobius-os/app-kanban/pull/19',
   }
   applyBoardOp(doc, op)
+  doc.cards.later = { id: 'later', title: 'Later' }
+  doc.columns[1].cardIds.push('later')
   applyBoardOp(doc, op)
 
   assert.match(doc.cards.a.notes, /Collaborator note added after discovery/)
   assert.equal(doc.cards.a.notes.match(/PR: https:\/\/github\.com\/mobius-os\/app-kanban\/pull\/19$/gmu).length, 1)
   assert.equal(hasCardCompletion(doc.cards.a.notes, op.prUrl), true)
   assert.deepEqual(doc.columns[0].cardIds, [])
-  assert.deepEqual(doc.columns[1].cardIds, ['a'])
+  assert.deepEqual(doc.columns[1].cardIds, ['a', 'later'])
 })
 
 test('offline reconnect conflict rebases every queued operation or retains an explicit failure', async () => {

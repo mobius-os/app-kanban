@@ -77,7 +77,7 @@ export function applyBoardOp(board, op) {
         card.notes = [String(card.notes || '').trim(), completion].filter(Boolean).join('\n\n')
       }
       const done = board.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
-      if (done) {
+      if (done && !done.cardIds.includes(op.cardId)) {
         board.columns.forEach(column => { column.cardIds = column.cardIds.filter(id => id !== op.cardId) })
         done.cardIds.push(op.cardId)
       }
