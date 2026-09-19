@@ -218,11 +218,8 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
     'the phone checklist stays between notes and card properties',
   )
   assert.match(boardSource, /className="kb-card-danger-zone kb-mobile-only"/)
-  assert.equal(
-    boardSource.match(/event\.target === event\.currentTarget && canWrite/g)?.length,
-    2,
-    'keyboard activation belongs to the editor surface, not nested note links',
-  )
+  assert.match(boardSource, /className="kb-title-display">\{card\.title\}<\/div>[\s\S]*aria-label="Edit card title"/)
+  assert.match(boardSource, /className=\{`kb-notes-display[\s\S]*<LinkifiedText text=\{card\.notes\}[\s\S]*aria-label=\{card\.notes \? 'Edit card notes' : 'Add card notes'\}/)
   assert.match(boardSource, /className="kb-btn kb-btn-danger kb-delete-card"/)
   assert.match(boardSource, /className="kb-btn kb-btn-primary kb-card-toolbar-done"/)
   assert.doesNotMatch(boardSource, /kb-card-more-heading/)

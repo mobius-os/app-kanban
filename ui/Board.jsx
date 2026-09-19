@@ -432,7 +432,7 @@ function LinkifiedText({ text }) {
     try {
       const parsed = new URL(url)
       if (!['http:', 'https:'].includes(parsed.protocol)) return part
-      return <span key={`${url}-${index}`}><a href={parsed.href} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}>{url}</a>{punctuation}</span>
+      return <span key={`${url}-${index}`}><a href={parsed.href} target="_blank" rel="noreferrer">{url}</a>{punctuation}</span>
     } catch {
       return part
     }
@@ -442,19 +442,10 @@ function LinkifiedText({ text }) {
 function CardTitleEditor({ card, canWrite, onCommit }) {
   const [editing, setEditing] = useState(false)
   useEffect(() => { setEditing(false) }, [card.id])
-  if (!editing || !canWrite) return <div
-    className={`kb-title-display${canWrite ? ' kb-editable-display' : ''}`}
-    onClick={() => { if (canWrite) setEditing(true) }}
-    onKeyDown={event => {
-      if (event.target === event.currentTarget && canWrite && (event.key === 'Enter' || event.key === ' ')) {
-        event.preventDefault()
-        setEditing(true)
-      }
-    }}
-    role={canWrite ? 'button' : undefined}
-    tabIndex={canWrite ? 0 : undefined}
-    aria-label={canWrite ? 'Edit card title' : undefined}
-  >{card.title}</div>
+  if (!editing || !canWrite) return <div className={`kb-editor-display${canWrite ? ' kb-editor-can-edit' : ''}`}>
+    <div className="kb-title-display">{card.title}</div>
+    {canWrite && <button type="button" className="kb-btn kb-btn-quiet kb-editor-action" aria-label="Edit card title" onClick={() => setEditing(true)}>Edit</button>}
+  </div>
   return <AutoGrowTextarea
     className="kb-input kb-title-input"
     rows={1}
@@ -474,19 +465,12 @@ function CardTitleEditor({ card, canWrite, onCommit }) {
 function CardNotesEditor({ card, canWrite, onCommit }) {
   const [editing, setEditing] = useState(false)
   useEffect(() => { setEditing(false) }, [card.id])
-  if (!editing || !canWrite) return <div
-    className={`kb-notes-display${canWrite ? ' kb-editable-display' : ''}${card.notes ? '' : ' kb-notes-empty'}`}
-    onClick={() => { if (canWrite) setEditing(true) }}
-    onKeyDown={event => {
-      if (event.target === event.currentTarget && canWrite && (event.key === 'Enter' || event.key === ' ')) {
-        event.preventDefault()
-        setEditing(true)
-      }
-    }}
-    role={canWrite ? 'button' : undefined}
-    tabIndex={canWrite ? 0 : undefined}
-    aria-label={canWrite ? 'Edit card notes' : undefined}
-  >{card.notes ? <LinkifiedText text={card.notes} /> : 'Notes…'}</div>
+  if (!editing || !canWrite) return <div className={`kb-editor-display${canWrite ? ' kb-editor-can-edit' : ''}`}>
+    <div className={`kb-notes-display${card.notes ? '' : ' kb-notes-empty'}`}>
+      {card.notes ? <LinkifiedText text={card.notes} /> : 'Notes…'}
+    </div>
+    {canWrite && <button type="button" className="kb-btn kb-btn-quiet kb-editor-action kb-notes-edit" aria-label={card.notes ? 'Edit card notes' : 'Add card notes'} onClick={() => setEditing(true)}>{card.notes ? 'Edit' : 'Add'}</button>}
+  </div>
   return <AutoGrowTextarea
     className="kb-input kb-notes-input"
     rows={2}
