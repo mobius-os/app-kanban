@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
 import { boardAccess } from '../domain.js'
-import { applyBoardOp, cardMoveAnchor } from '../operations.js'
+import { applyBoardOp, cardMoveAnchor, hasCardCompletion } from '../operations.js'
 import {
   enqueuePendingBoardOp,
   readPendingBoardOps,
@@ -67,6 +67,31 @@ test('checklist text edits apply and trim through the shared operation', () => {
   doc.cards.a.checklist = [{ id: 'item', text: 'Old text', done: false }]
   applyBoardOp(doc, { type: 'update-checklist-item', cardId: 'a', itemId: 'item', text: '  New text  ' })
   assert.equal(doc.cards.a.checklist[0].text, 'New text')
+})
+
+test('card completion preserves fresh notes, uses an exact marker, and moves atomically', () => {
+  const doc = boardDoc()
+  doc.columns.push({ id: 'done', name: 'Done', color: null, cardIds: [] })
+  doc.cards.a.notes = [
+    'Collaborator note added after discovery',
+    'Reference: https://github.com/mobius-os/app-kanban/pull/19',
+    '✅ Done — A different change\nPR: https://github.com/mobius-os/app-kanban/pull/190',
+  ].join('\n\n')
+
+  const op = {
+    type: 'complete-card', cardId: 'a', summary: 'Shipped the exact task',
+    prUrl: 'https://github.com/mobius-os/app-kanban/pull/19',
+  }
+  applyBoardOp(doc, op)
+  doc.cards.later = { id: 'later', title: 'Later' }
+  doc.columns[1].cardIds.push('later')
+  applyBoardOp(doc, op)
+
+  assert.match(doc.cards.a.notes, /Collaborator note added after discovery/)
+  assert.equal(doc.cards.a.notes.match(/PR: https:\/\/github\.com\/mobius-os\/app-kanban\/pull\/19$/gmu).length, 1)
+  assert.equal(hasCardCompletion(doc.cards.a.notes, op.prUrl), true)
+  assert.deepEqual(doc.columns[0].cardIds, [])
+  assert.deepEqual(doc.columns[1].cardIds, ['a', 'later'])
 })
 
 test('offline reconnect conflict rebases every queued operation or retains an explicit failure', async () => {

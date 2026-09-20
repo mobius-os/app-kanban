@@ -9,6 +9,14 @@ function insertBefore(ids, itemId, beforeId) {
   return next
 }
 
+export function hasCardCompletion(notes, prUrl) {
+  const marker = `PR: ${prUrl}`
+  return String(notes || '').split(/\n{2,}/u).some(block => {
+    const lines = block.split('\n')
+    return lines[0]?.startsWith('✅ Done — ') && lines.includes(marker)
+  })
+}
+
 export function applyBoardOp(board, op) {
   if (!board || !op || typeof op !== 'object') return board
   switch (op.type) {
@@ -59,6 +67,20 @@ export function applyBoardOp(board, op) {
       if (!target || !board.cards[op.cardId]) return board
       board.columns.forEach(column => { column.cardIds = column.cardIds.filter(id => id !== op.cardId) })
       target.cardIds = insertBefore(target.cardIds, op.cardId, op.beforeCardId)
+      return board
+    }
+    case 'complete-card': {
+      const card = board.cards[op.cardId]
+      if (!card || typeof op.summary !== 'string' || !op.summary || typeof op.prUrl !== 'string') return board
+      if (!hasCardCompletion(card.notes, op.prUrl)) {
+        const completion = `✅ Done — ${op.summary}\nPR: ${op.prUrl}`
+        card.notes = [String(card.notes || '').trim(), completion].filter(Boolean).join('\n\n')
+      }
+      const done = board.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
+      if (done && !done.cardIds.includes(op.cardId)) {
+        board.columns.forEach(column => { column.cardIds = column.cardIds.filter(id => id !== op.cardId) })
+        done.cardIds.push(op.cardId)
+      }
       return board
     }
     case 'add-column': {

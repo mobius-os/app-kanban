@@ -94,6 +94,10 @@ export function createBoardRepository({ storage, request = globalThis.fetch }) {
       if (op.cardId && op.type !== 'delete-card' && !Object.hasOwn(doc.cards, op.cardId)) {
         throw boardError('Card no longer exists.', 'missing-card')
       }
+      if (op.type === 'complete-card'
+        && String(doc.cards[op.cardId].title || '').trim() !== op.expectedTitle) {
+        throw boardError('Card title changed before completion; no card was changed.', 'card-title-changed')
+      }
       if (op.type === 'move-card' && !doc.columns.some(c => c.id === op.toColumnId)) {
         throw boardError('Target column no longer exists.', 'missing-column')
       }

@@ -132,6 +132,17 @@ test('viewer membership and missing targets cannot yield successful card edits',
   await assert.rejects(createBoardRepository(f).mutate('b', { ...op, columnId: 'missing' }), /no longer exists/)
   assert.equal(f.remote().cards.new, undefined)
 })
+test('automatic completion refuses a card whose title changed before the fresh write', async () => {
+  const f = fixture()
+  f.local().cards.card = { id: 'card', title: 'Renamed task', notes: '' }
+  f.local().columns[0].cardIds.push('card')
+  await assert.rejects(createBoardRepository(f).mutate('b', {
+    type: 'complete-card', cardId: 'card', expectedTitle: 'Original task',
+    summary: 'Shipped', prUrl: 'https://example.com/pr/1',
+  }), /title changed before completion/)
+  assert.equal(f.writes(), 0)
+  assert.equal(f.local().cards.card.notes, '')
+})
 test('terminal board errors are classified and unsafe entity ids are rejected', async () => {
   const f = fixture(true)
   f.entry.role = 'viewer'
