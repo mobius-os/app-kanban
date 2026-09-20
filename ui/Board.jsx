@@ -397,7 +397,7 @@ function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
   )
 }
 
-function AutoGrowTextarea({ valueKey, onCommit, expandOnFocus = false, ...props }) {
+function AutoGrowTextarea({ valueKey, onCommit, onCancel, expandOnFocus = false, ...props }) {
   const textareaRef = useRef(null)
   const [focused, setFocused] = useState(false)
   const resize = useCallback(() => {
@@ -412,9 +412,16 @@ function AutoGrowTextarea({ valueKey, onCommit, expandOnFocus = false, ...props 
   useEffect(resize, [resize, valueKey])
   return <textarea
     {...props}
+    data-modal-inline-editor
     ref={textareaRef}
     onInput={resize}
     onFocus={() => setFocused(true)}
+    onKeyDown={event => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      onCancel?.()
+    }}
     onBlur={event => {
       setFocused(false)
       onCommit?.(event.target.value)
@@ -454,6 +461,7 @@ function CardTitleEditor({ card, canWrite, onCommit }) {
     key={`st-${card.id}`}
     valueKey={`${card.id}:${card.title}`}
     aria-label="Card title"
+    onCancel={() => setEditing(false)}
     onCommit={value => {
       const next = value.trim()
       if (next && next !== card.title) onCommit(next)
@@ -481,6 +489,7 @@ function CardNotesEditor({ card, canWrite, onCommit }) {
     key={`sn-${card.id}`}
     valueKey={`${card.id}:${card.notes}`}
     aria-label="Card notes"
+    onCancel={() => setEditing(false)}
     onCommit={value => {
       if (value !== card.notes) onCommit(value)
       setEditing(false)
@@ -510,7 +519,7 @@ function ChecklistEditor({ checklist, canWrite, onAdd, onToggle, onDelete, onEdi
               disabled={!canWrite}
               onChange={() => onToggle(item.id)}
             />
-            {editingId === item.id ? <input className="kb-input kb-check-edit" value={editingText} aria-label={`Edit checklist item ${item.text}`} autoFocus onChange={event => setEditingText(event.target.value)} onBlur={() => { const value = editingText.trim(); if (value && value !== item.text) onEdit(item.id, value); setEditingId(null) }} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditingId(null); return } if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }} /> : <button type="button" className={`kb-check-text ${item.done ? 'kb-check-done' : ''}`} onClick={() => { if (canWrite) { setEditingId(item.id); setEditingText(item.text) } }}>{item.text}</button>}
+            {editingId === item.id ? <input className="kb-input kb-check-edit" data-modal-inline-editor value={editingText} aria-label={`Edit checklist item ${item.text}`} autoFocus onChange={event => setEditingText(event.target.value)} onBlur={() => { const value = editingText.trim(); if (value && value !== item.text) onEdit(item.id, value); setEditingId(null) }} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditingId(null); return } if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }} /> : <button type="button" className={`kb-check-text ${item.done ? 'kb-check-done' : ''}`} onClick={() => { if (canWrite) { setEditingId(item.id); setEditingText(item.text) } }}>{item.text}</button>}
           </div>
           {canWrite && <button
             className="kb-iconbtn"
