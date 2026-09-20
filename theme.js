@@ -419,6 +419,18 @@ export const CSS = `
     text-align: left;
     min-height: 44px;
   }
+  /* A secondary action with a stable home at the base of every column. */
+  .kb-addcard {
+    width: calc(100% - 20px);
+    margin: 8px 10px 12px;
+    padding: 10px 11px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .kb-addcard:hover { border-color: color-mix(in srgb, var(--accent) 44%, var(--border)); background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--text); }
   .kb-addcard > svg, .kb-addcol > svg, .kb-btn > svg, .kb-newtile > svg { width: 18px; height: 18px; flex: 0 0 auto; }
   .kb-addcard:focus-visible { outline: 2px solid var(--accent); }
   .kb-input {
@@ -698,6 +710,42 @@ export const CSS = `
     background: var(--surface-2);
     line-height: 1.5;
   }
+  /* Strengthen hierarchy without changing status colours or mobile board navigation. */
+  .kb-root { letter-spacing: -0.005em; }
+  .kb-header { min-height: 72px; padding: 14px 20px 10px; gap: 10px; }
+  .kb-title, .kb-switcher-button { font-size: 21px; font-weight: 650; letter-spacing: -0.035em; }
+  .kb-title-static { font-size: 19px; font-weight: 650; letter-spacing: -0.03em; }
+  .kb-sub { margin-top: 2px; font-size: 14px; line-height: 1.4; }
+  .kb-divider { width: calc(100% - 40px); }
+  .kb-filterbar { padding: 10px 20px 0; gap: 7px; }
+  .kb-filter-label-btn { border-radius: 8px; font-weight: 600; }
+  .kb-board { gap: 16px; padding: 18px 20px 22px; scroll-padding-inline: 20px; }
+  .kb-col { width: 336px; border-radius: 14px; background: color-mix(in srgb, var(--surface-2) 72%, var(--bg)); }
+  .kb-col-head { gap: 6px; padding: 8px 12px 8px 15px; }
+  .kb-col-name { font-size: 14px; font-weight: 650; letter-spacing: -0.015em; }
+  .kb-count { padding: 3px 7px; font-size: 14px; font-weight: 650; background: color-mix(in srgb, var(--surface) 68%, var(--surface-2)); }
+  .kb-cards { gap: 9px; padding: 3px 10px 8px; }
+  .kb-card { border-color: color-mix(in srgb, var(--border) 82%, transparent); border-radius: 11px; padding: 14px 15px; box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent); }
+  .kb-card:hover { transform: translateY(-1px); box-shadow: 0 7px 18px color-mix(in srgb, var(--text) 10%, transparent); }
+  .kb-card-title { font-size: 14px; font-weight: 620; line-height: 1.42; letter-spacing: -0.012em; }
+  .kb-card-notes { margin-top: 6px; line-height: 1.45; }
+  .kb-card-meta { margin-top: 10px; }
+  .kb-label { width: 22px; height: 3px; margin-bottom: 8px; }
+  .kb-btn { border-radius: 8px; font-weight: 650; letter-spacing: -0.01em; }
+  .kb-iconbtn { border-radius: 8px; }
+  .kb-iconbtn:hover { background: var(--surface-2); color: var(--text); }
+  .kb-addcol { width: 230px; border-radius: 14px; border-style: solid; border-width: 1px; background: color-mix(in srgb, var(--surface-2) 45%, transparent); font-weight: 600; }
+  .kb-addcol:hover { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 7%, var(--surface-2)); }
+  @media (max-width: 640px) {
+    .kb-header { min-height: 64px; padding: 10px 16px 7px; }
+    .kb-title, .kb-switcher-button { font-size: 18px; }
+    .kb-divider { width: calc(100% - 32px); }
+    .kb-filterbar { padding-inline: 16px; }
+    .kb-board { gap: 12px; padding: 14px 16px 18px; scroll-padding-inline: 16px; }
+    .kb-col { width: min(336px, calc(100vw - 32px)); }
+    .kb-card:hover { transform: none; box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent); }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .kb-card-sheet { scroll-behavior: auto; }
   }
