@@ -243,6 +243,9 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
     'the phone checklist stays between notes and card properties',
   )
   assert.match(boardSource, /className="kb-card-danger-zone kb-mobile-only"/)
+  assert.match(boardSource, /className="kb-title-display">\{card\.title\}<\/div>[\s\S]*aria-label="Edit card title"/)
+  assert.match(boardSource, /className=\{`kb-notes-display[\s\S]*<LinkifiedText text=\{card\.notes\}[\s\S]*aria-label=\{card\.notes \? 'Edit card notes' : 'Add card notes'\}/)
+  assert.match(boardSource, /data-modal-inline-editor[\s\S]*onKeyDown=\{event => \{[\s\S]*event\.key !== 'Escape'[\s\S]*onCancel\?\.\(\)/)
   assert.match(boardSource, /className="kb-btn kb-btn-danger kb-delete-card"/)
   assert.match(boardSource, /className="kb-btn kb-btn-primary kb-card-toolbar-done"/)
   assert.doesNotMatch(boardSource, /kb-card-more-heading/)
@@ -264,6 +267,7 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(appSource, /setInterval\(check, 3000\)/)
   assert.match(appSource, /document\.addEventListener\('visibilitychange', check\)/)
   assert.match(focusSource, /event\.key === 'Escape'/)
+  assert.match(focusSource, /closest\?\.\('\[data-modal-inline-editor\]'\)/)
   assert.match(focusSource, /event\.key !== 'Tab'/)
   assert.match(focusSource, /if \(!isTopmost\(\)\) return/)
   assert.match(focusSource, /opener\.focus\(\)/)

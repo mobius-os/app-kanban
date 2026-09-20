@@ -25,7 +25,7 @@ export function useModalFocus(open, onClose) {
       if (event.key === 'Escape') {
         // Inline editors own Escape so it cancels editing instead of closing
         // the containing card sheet.
-        if (event.target?.closest?.('.kb-check-edit')) return
+        if (event.target?.closest?.('[data-modal-inline-editor]')) return
         event.preventDefault()
         event.stopPropagation()
         closeRef.current?.()
