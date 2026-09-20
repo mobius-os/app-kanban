@@ -8,5 +8,6 @@ Verify Finish sharing, Create invite link and Copy; then close the browser.
 
 recovery.fixture.jsx mounts the Board with a synthetic viewer and rejected edit.
 It replaces fetch/storage and intercepts anchor download without sending data.
-Compile in a disposable copy. Verify Save unsynced edits yields the original
-operation and the recovery file remains stored. Never apply as a real app.
+Compile in a disposable copy. Verify **Download recovery copy** includes the
+original operation and that starting the download dismisses only the exported
+rejected-edit reminder. Never apply as a real app.

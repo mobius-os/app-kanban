@@ -84,9 +84,11 @@ over later edits.
 ### Recovering edits that cannot sync
 
 If your role changed or a card was deleted while you were offline, rejected
-edits are saved locally before leaving the active queue. **Save unsynced edits**
-on the board downloads both pending and rejected operations as JSON, including
-why each rejected edit could not apply. The download does not delete the saved
-copies or grant permission to write. An editor can use that file to recover the
-intended work deliberately; it is not automatically replayed onto another board.
-If the recovery copy cannot be confirmed, the original intent stays queued.
+edits are saved locally before leaving the active queue. **Download recovery
+copy** exports pending and rejected operations as JSON, including why each
+rejected edit could not apply. Starting the download dismisses only the
+exported rejected-edit reminders; saved copies remain on this instance, newly
+arriving entries remain visible, and pending operations are not acknowledged.
+The recovery copy is not automatically replayed onto another board or treated
+as permission to write. If archival cannot be confirmed, the original intent
+stays queued.

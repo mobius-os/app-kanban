@@ -4,7 +4,7 @@ import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, P
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
 import { resolveMemberHandles, pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
-import { applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps } from '../pendingOps.js'
+import { acknowledgeRecoveredBoardOps, applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps } from '../pendingOps.js'
 import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
 import {
   deleteCardAttachment,
@@ -751,20 +751,30 @@ export default function Board({
   }, [boardId, queuedCount])
 
   const downloadUnsyncedEdits = async () => {
+    let recovery
     try {
-      const recovery = await exportUnsyncedBoardOps(boardId)
+      recovery = await exportUnsyncedBoardOps(boardId)
       const link = document.createElement('a')
       link.href = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(recovery, null, 2))}`
       link.download = 'kanban-unsynced-edits.json'
       link.click()
     } catch {
       setSyncNote('Your saved edits could not be downloaded. They have not been removed.')
+      return
+    }
+    if (recoveredCount > 0) {
+      try {
+        await acknowledgeRecoveredBoardOps(boardId, recovery.recovered.map(entry => entry.id))
+        setRecoveredCount((await readRecoveredBoardOps(boardId)).length)
+      } catch {
+        setSyncNote('The recovery copy downloaded, but the reminder could not be dismissed.')
+      }
     }
   }
   const recoveryButton = (recoveredCount > 0 || queuedCount > 0 || loadFailure) && <button
     className="kb-btn" onClick={downloadUnsyncedEdits}
     title="Download pending and rejected edits as a recovery file. Saved copies are kept here."
-  >Save unsynced edits</button>
+  >Download recovery copy</button>
 
   const refreshMembers = useCallback(async () => {
     if (!share?.hosted) return []
@@ -1433,7 +1443,7 @@ export default function Board({
       </div>
       <div className="kb-divider" />
       {recoveryButton && <div className="kb-recovery" role="status">
-        <span>Unsynced edits are kept on this instance.</span>{recoveryButton}
+        <span>{recoveredCount > 0 ? 'A recovery copy is ready to download.' : 'Unsynced edits are kept on this instance.'}</span>{recoveryButton}
       </div>}
       {board.columns.length > 1 && <nav className="kb-list-nav" aria-label="Jump to list">
         {board.columns.map(column => <button

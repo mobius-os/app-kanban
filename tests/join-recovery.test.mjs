@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { acceptInvitation, loadShareMap } from '../sync.js'
 import { listBoards, includeSharedBoards } from '../storage.js'
-import { replayPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps } from '../pendingOps.js'
+import { acknowledgeRecoveredBoardOps, replayPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps } from '../pendingOps.js'
 import { replayOutcomeForBoardError, createBoardRepository } from '../boardRepository.js'
 
 function fixture(failPath) {
@@ -112,6 +112,21 @@ test('rejoining as a viewer archives editor intent without writing to the host',
   assert.equal(recovery.recovered[0].code,'read-only')
   assert.deepEqual(recovery.pending,[])
   assert.equal(f.values.get('boards/original.json').title,'Shared')
+})
+
+test('acknowledging a downloaded recovery hides its notice without deleting the recovery copy', async () => {
+  const f = fixture()
+  const recovered = {id:'offline',op:{type:'rename-board',title:'Keep me'},code:'read-only'}
+  f.values.set('recovered-board-ops/original/offline.json', recovered)
+
+  const downloaded = await exportUnsyncedBoardOps('original', f.storage)
+  const arrivedAfterDownload = {id:'zz-later',op:{type:'rename-board',title:'Do not hide me'},code:'read-only'}
+  f.values.set('recovered-board-ops/original/zz-later.json', arrivedAfterDownload)
+  await acknowledgeRecoveredBoardOps('original', downloaded.recovered.map(entry => entry.id), f.storage)
+
+  assert.deepEqual(await readRecoveredBoardOps('original', f.storage), [arrivedAfterDownload])
+  assert.deepEqual((await exportUnsyncedBoardOps('original', f.storage)).recovered, [recovered, arrivedAfterDownload])
+  assert.equal(f.values.has('recovered-board-ops/original/offline.json'), true)
 })
 
 for (const failure of ['throw', 'queued', 'queued-string', 'queued-status', 'remove']) {
