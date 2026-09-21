@@ -5,6 +5,8 @@ import { configureSync, recoverMemberships } from '../sync.js'
 import { uid } from '../storage.js'
 import { isIsoDate } from '../domain.js'
 import { hasCardCompletion } from '../operations.js'
+import { pullCardScore } from '../prMatching.js'
+
 
 const base = process.env.API_BASE_URL
 const token = process.env.AGENT_TOKEN
@@ -76,7 +78,7 @@ const validId = value => typeof value === 'string'
   && !reservedIds.has(value)
 function validatePatch(patch) {
   if (patch.title !== undefined && (typeof patch.title !== 'string' || !patch.title.trim())) throw new Error('title must be a non-empty string.')
-  for (const field of ['notes', 'assignee', 'assigneeHost']) {
+  for (const field of ['notes', 'assignee', 'assigneeHost', 'pullRequestUrl']) {
     if (patch[field] !== undefined && typeof patch[field] !== 'string') throw new Error(`${field} must be a string.`)
   }
   if (patch.label !== undefined && !labels.has(patch.label)) throw new Error('label is invalid.')
@@ -123,10 +125,64 @@ async function completeMatchingCard(data) {
   return { status: alreadySaved ? 'already-saved' : 'saved', boardId: match.board.id,
     cardId: match.card.id, card: saved.doc.cards[match.card.id] }
 }
+async function syncOpenPrs(dryRun) {
+  const userResponse = await request('/api/github/api/user')
+  if (!userResponse.ok) throw new Error('GitHub identity unavailable; connect GitHub in Settings first.')
+  const user = await userResponse.json()
+  const ownerLogin = user.login
+  const searchResponse = await request(
+    `/api/github/api/search/issues?q=${encodeURIComponent(`is:pr is:open author:${ownerLogin}`)}&per_page=50`,
+  )
+  if (!searchResponse.ok) throw new Error('Could not fetch open pull requests from GitHub.')
+  const { items: pulls = [] } = await searchResponse.json()
+  if (!pulls.length) return { matched: [], skipped: [], dryRun }
+  const boards = await repository.list()
+  const unavailable = boards.filter(b => b.status === 'unavailable')
+  if (unavailable.length) {
+    throw new Error(`Cannot safely sync while ${unavailable.length} recorded board${unavailable.length === 1 ? ' is' : 's are'} unavailable; retry when every board can be checked.`)
+  }
+  const candidateCards = []
+  for (const board of boards) {
+    const state = await repository.read(board.id)
+    for (const card of Object.values(state.doc.cards)) {
+      if (card.assignee?.toLocaleLowerCase() === ownerLogin.toLocaleLowerCase() && !card.pullRequestUrl) {
+        candidateCards.push({ board, card })
+      }
+    }
+  }
+  const matched = []
+  const skipped = []
+  for (const pull of pulls) {
+    const scored = candidateCards
+      .map(({ board, card }) => ({ board, card, score: pullCardScore(pull, card) }))
+      .filter(({ score }) => score.eligible)
+    if (scored.length !== 1) {
+      skipped.push({ pr: pull.html_url, title: pull.title, reason: scored.length === 0 ? 'no match' : 'multiple matches' })
+      continue
+    }
+    const { board, card } = scored[0]
+    if (!dryRun) {
+      await repository.mutate(board.id, { type: 'update-card', cardId: card.id, patch: { pullRequestUrl: pull.html_url } })
+    }
+    matched.push({ pr: pull.html_url, prTitle: pull.title, card: card.title, boardId: board.id, cardId: card.id })
+  }
+  return { matched, skipped, dryRun }
+}
 try {
   let result
   if (command === 'list') result = await repository.list()
   else if (command === 'read' && validId(boardId)) result = await repository.read(boardId)
+  else if (command === 'set-checklist-item' && validId(boardId)) {
+    const data = await input()
+    if (!data || typeof data !== 'object' || Array.isArray(data) || !validId(data.cardId) || !validId(data.itemId) || typeof data.done !== 'boolean') {
+      throw new Error('cardId, itemId, and boolean done are required.')
+    }
+    const saved = await repository.mutate(boardId, {
+      type: 'set-checklist-item', cardId: data.cardId, itemId: data.itemId, done: data.done,
+    })
+    result = { status: 'saved', appId, boardId, cardId: data.cardId, authority: saved.authority,
+      version: saved.version, card: saved.doc.cards[data.cardId] }
+  }
   else if (['add-card', 'update-card', 'move-card'].includes(command) && validId(boardId)) {
     const data = await input()
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Input must be a JSON object.')
@@ -142,7 +198,7 @@ try {
       } }
     } else if (command === 'update-card') {
       if (!validId(data.cardId) || !data.patch || typeof data.patch !== 'object' || Array.isArray(data.patch)) throw new Error('cardId and patch are required.')
-      const fields = ['title', 'notes', 'label', 'due', 'assignee', 'assigneeHost']
+      const fields = ['title', 'notes', 'label', 'due', 'assignee', 'assigneeHost', 'pullRequestUrl']
       if (Object.keys(data.patch).some(key => !fields.includes(key))) throw new Error('Patch must contain editable card fields only.')
       validatePatch(data.patch)
       op = { type: command, cardId: data.cardId, patch: data.patch }
@@ -157,7 +213,9 @@ try {
       version: saved.version, card: saved.doc.cards[cardId] }
   } else if (command === 'complete-matching-card') {
     result = await completeMatchingCard(await input())
-  } else throw new Error('Usage: kanban.mjs list | read BOARD_ID | add-card/update-card/move-card BOARD_ID < input.json | complete-matching-card < input.json')
+  } else if (command === 'sync-open-prs') {
+    result = await syncOpenPrs(process.argv.includes('--dry-run'))
+  } else throw new Error('Usage: kanban.mjs list | read BOARD_ID | add-card/update-card/move-card/set-checklist-item BOARD_ID < input.json | complete-matching-card < input.json | sync-open-prs [--dry-run]')
   console.log(JSON.stringify(result, null, 2))
 } catch (error) {
   console.error(JSON.stringify({ status: 'not-confirmed', error: error.message }))
