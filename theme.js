@@ -649,18 +649,10 @@ export const CSS = `
   .kb-card-field { min-width: 0; }
   .kb-title-input,
   .kb-notes-input { min-height: 68px; overflow-y: hidden; }
-  .kb-editor-display { position: relative; }
-  .kb-editor-can-edit .kb-title-display,
-  .kb-editor-can-edit .kb-notes-display { padding-right: 72px; }
-  .kb-editor-action {
-    position: absolute;
-    top: 0;
-    right: 0;
-    min-width: 64px;
-    min-height: 44px;
-    padding-inline: 12px;
-  }
-  .kb-notes-edit { top: 4px; right: 4px; }
+  .kb-detail-field { position: relative; min-width: 0; flex: 0 0 auto; }
+  .kb-editable-field { cursor: text; border-radius: 10px; }
+  .kb-editable-field:hover { background: color-mix(in srgb, var(--surface-2) 68%, transparent); }
+  .kb-editable-field:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .kb-title-input {
     min-height: 44px;
     padding-inline: 2px;

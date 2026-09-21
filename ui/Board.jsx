@@ -397,7 +397,7 @@ function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
   )
 }
 
-function AutoGrowTextarea({ valueKey, onCommit, onCancel, expandOnFocus = false, ...props }) {
+function AutoGrowTextarea({ valueKey, onCommit, expandOnFocus = false, ...props }) {
   const textareaRef = useRef(null)
   const [focused, setFocused] = useState(false)
   const resize = useCallback(() => {
@@ -412,16 +412,9 @@ function AutoGrowTextarea({ valueKey, onCommit, onCancel, expandOnFocus = false,
   useEffect(resize, [resize, valueKey])
   return <textarea
     {...props}
-    data-modal-inline-editor
     ref={textareaRef}
     onInput={resize}
     onFocus={() => setFocused(true)}
-    onKeyDown={event => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      event.stopPropagation()
-      onCancel?.()
-    }}
     onBlur={event => {
       setFocused(false)
       onCommit?.(event.target.value)
@@ -439,19 +432,33 @@ function LinkifiedText({ text }) {
     try {
       const parsed = new URL(url)
       if (!['http:', 'https:'].includes(parsed.protocol)) return part
-      return <span key={`${url}-${index}`}><a href={parsed.href} target="_blank" rel="noreferrer">{url}</a>{punctuation}</span>
+      return <span key={`${url}-${index}`}><a href={parsed.href} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}>{url}</a>{punctuation}</span>
     } catch {
       return part
     }
   })
 }
 
+function githubPullPath(value) {
+  try {
+    const url = new URL(String(value || ''))
+    const match = url.hostname === 'github.com' && url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/u)
+    return match ? `repos/${match[1]}/${match[2]}/pulls/${match[3]}` : ''
+  } catch { return '' }
+}
+
 function CardTitleEditor({ card, canWrite, onCommit }) {
   const [editing, setEditing] = useState(false)
   useEffect(() => { setEditing(false) }, [card.id])
-  if (!editing || !canWrite) return <div className={`kb-editor-display${canWrite ? ' kb-editor-can-edit' : ''}`}>
-    <div className="kb-title-display">{card.title}</div>
-    {canWrite && <button type="button" className="kb-btn kb-btn-quiet kb-editor-action" aria-label="Edit card title" onClick={() => setEditing(true)}>Edit</button>}
+  if (!editing || !canWrite) return <div className="kb-detail-field kb-title-field">
+    <div
+      className={`kb-title-display${canWrite ? ' kb-editable-field' : ''}`}
+      role={canWrite ? 'button' : undefined}
+      tabIndex={canWrite ? 0 : undefined}
+      onClick={() => { if (canWrite) setEditing(true) }}
+      onKeyDown={event => { if (canWrite && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); setEditing(true) } }}
+      aria-label={canWrite ? 'Edit card title' : undefined}
+    ><LinkifiedText text={card.title} /></div>
   </div>
   return <AutoGrowTextarea
     className="kb-input kb-title-input"
@@ -461,7 +468,6 @@ function CardTitleEditor({ card, canWrite, onCommit }) {
     key={`st-${card.id}`}
     valueKey={`${card.id}:${card.title}`}
     aria-label="Card title"
-    onCancel={() => setEditing(false)}
     onCommit={value => {
       const next = value.trim()
       if (next && next !== card.title) onCommit(next)
@@ -473,11 +479,15 @@ function CardTitleEditor({ card, canWrite, onCommit }) {
 function CardNotesEditor({ card, canWrite, onCommit }) {
   const [editing, setEditing] = useState(false)
   useEffect(() => { setEditing(false) }, [card.id])
-  if (!editing || !canWrite) return <div className={`kb-editor-display${canWrite ? ' kb-editor-can-edit' : ''}`}>
-    <div className={`kb-notes-display${card.notes ? '' : ' kb-notes-empty'}`}>
-      {card.notes ? <LinkifiedText text={card.notes} /> : 'Notes…'}
-    </div>
-    {canWrite && <button type="button" className="kb-btn kb-btn-quiet kb-editor-action kb-notes-edit" aria-label={card.notes ? 'Edit card notes' : 'Add card notes'} onClick={() => setEditing(true)}>{card.notes ? 'Edit' : 'Add'}</button>}
+  if (!editing || !canWrite) return <div className="kb-detail-field kb-notes-field">
+    <div
+      className={`kb-notes-display${card.notes ? '' : ' kb-notes-empty'}${canWrite ? ' kb-editable-field' : ''}`}
+      role={canWrite ? 'button' : undefined}
+      tabIndex={canWrite ? 0 : undefined}
+      onClick={() => { if (canWrite) setEditing(true) }}
+      onKeyDown={event => { if (canWrite && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); setEditing(true) } }}
+      aria-label={canWrite ? 'Edit card notes' : undefined}
+    >{card.notes ? <LinkifiedText text={card.notes} /> : 'Notes…'}</div>
   </div>
   return <AutoGrowTextarea
     className="kb-input kb-notes-input"
@@ -489,7 +499,6 @@ function CardNotesEditor({ card, canWrite, onCommit }) {
     key={`sn-${card.id}`}
     valueKey={`${card.id}:${card.notes}`}
     aria-label="Card notes"
-    onCancel={() => setEditing(false)}
     onCommit={value => {
       if (value !== card.notes) onCommit(value)
       setEditing(false)
@@ -816,6 +825,7 @@ export default function Board({
 
   useEffect(() => { setAttachmentError('') }, [openCardId])
 
+
   useEffect(() => {
     let active = true
     setRecoveredCount(0)
@@ -839,8 +849,8 @@ export default function Board({
     }
     if (recoveredCount > 0) {
       try {
-        await acknowledgeRecoveredBoardOps(boardId, recovery.recovered.map(entry => entry.id))
-        setRecoveredCount((await readRecoveredBoardOps(boardId)).length)
+        await acknowledgeRecoveredBoardOps(boardId)
+        setRecoveredCount(0)
       } catch {
         setSyncNote('The recovery copy downloaded, but the reminder could not be dismissed.')
       }
@@ -1162,7 +1172,7 @@ export default function Board({
     mutate({
       type: 'add-card',
       columnId: colId,
-      card: { id, title, notes: '', label: 'none', due: '', checklist: [], attachments: [], assignee: '', assigneeHost: '', createdAt },
+      card: { id, title, notes: '', pullRequestUrl: '', label: 'none', due: '', checklist: [], attachments: [], assignee: '', assigneeHost: '', createdAt },
     })
     setOpenCardId(id)
     window.mobius?.signal?.('item_created', { type: 'card' })
@@ -1461,6 +1471,30 @@ export default function Board({
   }, [drag])
   const openCard = id => { if (!suppressClick.current) setOpenCardId(id) }
 
+  const access = boardAccess(share, online)
+  const hasFilters = !!filterText.trim() || filterLabels.length > 0
+  const linkedPulls = Object.values(board?.cards || {}).map(card => ({ id: card.id, path: githubPullPath(card.pullRequestUrl) })).filter(link => link.path)
+  const linkedPullsKey = linkedPulls.map(link => `${link.id}:${link.path}`).sort().join('|')
+
+  useEffect(() => {
+    if (!online || !access.canWrite || !linkedPulls.length) return undefined
+    let active = true
+    Promise.all(linkedPulls.map(async link => {
+      const response = await fetch(`/api/github/api/${link.path}`, { headers: { Authorization: `Bearer ${token}` } })
+      return response.ok ? { link, pull: await response.json() } : null
+    })).then(results => {
+      if (!active) return
+      for (const result of results.filter(Boolean)) {
+        if (!result.pull?.merged_at) continue
+        const card = boardRef.current?.cards[result.link.id]
+        const done = boardRef.current?.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
+        if (card && done && (card.checklist || []).every(item => item?.done === true) && !done.cardIds.includes(card.id)) moveCard(card.id, done.id, null)
+      }
+    }).catch(() => {})
+    return () => { active = false }
+  }, [linkedPullsKey, online, access.canWrite, token])
+
+
   if (!board) return <>
     <div className="kb-header">
       <button className="kb-btn" onClick={onAllBoards}><ChevronLeft /> All boards</button>
@@ -1477,9 +1511,6 @@ export default function Board({
   const openCard_ = openCardId ? board.cards[openCardId] : null
   const openCardColumn = openCard_ ? board.columns.find(column => column.cardIds.includes(openCard_.id)) : null
   const openCardIndex = openCardColumn ? openCardColumn.cardIds.indexOf(openCard_.id) : -1
-  const access = boardAccess(share, online)
-  const hasFilters = !!filterText.trim() || filterLabels.length > 0
-
   return (
     <>
       <div className="kb-header kb-board-header">
@@ -1711,6 +1742,12 @@ export default function Board({
             <div className="kb-sheet-grab kb-desktop-only" />
             <CardTitleEditor card={openCard_} canWrite={access.canWrite} onCommit={title => updateCard(openCard_.id, { title })} />
             <CardNotesEditor card={openCard_} canWrite={access.canWrite} onCommit={notes => updateCard(openCard_.id, { notes })} />
+            <label className="kb-card-field kb-field-spaced">Pull request
+              <input className="kb-input" type="url" defaultValue={openCard_.pullRequestUrl || ''} placeholder="https://github.com/owner/repo/pull/123" readOnly={!access.canWrite} onBlur={event => {
+                const pullRequestUrl = event.currentTarget.value.trim()
+                if (pullRequestUrl !== String(openCard_.pullRequestUrl || '')) updateCard(openCard_.id, { pullRequestUrl })
+              }} />
+            </label>
 
             <div>
               <div className="kb-section-heading"><h3>Checklist</h3>{Array.isArray(openCard_.checklist) && openCard_.checklist.length > 0 && <span>{openCard_.checklist.filter(item => item.done).length}/{openCard_.checklist.length}</span>}</div>
