@@ -409,7 +409,10 @@ function AutoGrowTextarea({ valueKey, onCommit, expandOnFocus = false, ...props 
     const writingHeight = Math.min(Math.max(contentHeight, window.innerHeight * 0.42), 520)
     textarea.style.height = `${expandOnFocus && focused ? writingHeight : compactHeight}px`
   }, [expandOnFocus, focused])
-  useEffect(resize, [resize, valueKey])
+  useEffect(() => {
+    const id = requestAnimationFrame(resize)
+    return () => cancelAnimationFrame(id)
+  }, [resize, valueKey])
   return <textarea
     {...props}
     data-modal-inline-editor
