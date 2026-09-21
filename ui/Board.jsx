@@ -412,6 +412,7 @@ function AutoGrowTextarea({ valueKey, onCommit, expandOnFocus = false, ...props 
   useEffect(resize, [resize, valueKey])
   return <textarea
     {...props}
+    data-modal-inline-editor
     ref={textareaRef}
     onInput={resize}
     onFocus={() => setFocused(true)}
@@ -448,8 +449,8 @@ function githubPullPath(value) {
 }
 
 function CardTitleEditor({ card, canWrite, onCommit }) {
-  const [editing, setEditing] = useState(false)
-  useEffect(() => { setEditing(false) }, [card.id])
+  const [editing, setEditing] = useState(!card.title)
+  useEffect(() => { setEditing(!card.title) }, [card.id])
   if (!editing || !canWrite) return <div className="kb-detail-field kb-title-field">
     <div
       className={`kb-title-display${canWrite ? ' kb-editable-field' : ''}`}
@@ -464,6 +465,7 @@ function CardTitleEditor({ card, canWrite, onCommit }) {
     className="kb-input kb-title-input"
     rows={1}
     autoFocus
+    placeholder="Card title…"
     defaultValue={card.title}
     key={`st-${card.id}`}
     valueKey={`${card.id}:${card.title}`}
@@ -1702,7 +1704,7 @@ export default function Board({
                   <div className="kb-empty">{hasFilters && allCards.length ? 'No matching cards' : 'Nothing here yet'}</div>
                 )}
               </div>
-              {access.canWrite && <button className="kb-addcard" onClick={() => addCard(col.id, 'New card')}>
+              {access.canWrite && <button className="kb-addcard" onClick={() => addCard(col.id, '')}>
                 <Plus /> Add card
               </button>}
             </section>
