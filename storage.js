@@ -56,6 +56,10 @@ export function normalizeBoard(doc) {
     if (!isIsoDate(card.due)) card.due = ''
     if (typeof card.assignee !== 'string') card.assignee = ''
     if (typeof card.assigneeHost !== 'string') card.assigneeHost = ''
+    if (typeof card.pullRequestUrl !== 'string') card.pullRequestUrl = ''
+    if (!Array.isArray(card.pullRequestUrls)) card.pullRequestUrls = card.pullRequestUrl ? [card.pullRequestUrl] : []
+    card.pullRequestUrls = [...new Set(card.pullRequestUrls.filter(value => typeof value === 'string' && value.trim()).map(value => value.trim()))]
+    if (!card.pullRequestUrl && card.pullRequestUrls[0]) card.pullRequestUrl = card.pullRequestUrls[0]
     // Images were the first attachment type. Migrate that field into the
     // general attachment collection without losing existing card media.
     if (!Array.isArray(card.attachments)) {

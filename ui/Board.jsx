@@ -405,11 +405,13 @@ function AutoGrowTextarea({ valueKey, onCommit, ...props }) {
     textarea.style.height = 'auto'
     textarea.style.height = `${textarea.scrollHeight}px`
   }, [])
+
   useLayoutEffect(() => { resize() }, [resize, valueKey])
+
   return <textarea
     {...props}
-    data-modal-inline-editor
     ref={textareaRef}
+    data-modal-inline-editor
     onInput={resize}
     onFocus={resize}
     onBlur={event => {
@@ -449,6 +451,36 @@ function pullStatus(pull) {
   if (pull?.state === 'open') return { label: 'Open', tone: 'open' }
   if (pull?.state === 'closed') return { label: 'Closed', tone: 'closed' }
   return { label: 'Unavailable', tone: 'unavailable' }
+}
+
+function cardPullUrls(card) {
+  const urls = Array.isArray(card?.pullRequestUrls) ? card.pullRequestUrls : []
+  return [...new Set([...urls, card?.pullRequestUrl].filter(value => typeof value === 'string' && value.trim()).map(value => value.trim()))]
+}
+
+function PullRequestReferences({ card, canWrite, statuses, onUpdate, onRefresh }) {
+  const urls = cardPullUrls(card)
+  const [drafts, setDrafts] = useState(urls)
+  useEffect(() => { setDrafts(urls) }, [card.id, card.pullRequestUrl, JSON.stringify(card.pullRequestUrls || [])])
+  const save = next => {
+    const cleaned = [...new Set(next.map(value => value.trim()).filter(Boolean))]
+    onUpdate({ pullRequestUrls: cleaned, pullRequestUrl: cleaned[0] || '' })
+  }
+  return <section className="kb-pr-reference" aria-labelledby="kb-pr-reference-title">
+    <div className="kb-section-heading"><h3 id="kb-pr-reference-title">Pull requests</h3>{urls.length > 0 && <button type="button" className="kb-btn kb-pr-refresh" onClick={onRefresh}>Refresh</button>}</div>
+    <p>Paste GitHub pull request links to keep their statuses visible on this card.</p>
+    <div className="kb-pr-list">
+      {drafts.map((url, index) => {
+        const status = statuses[`${card.id}:${githubPullPath(url)}`]
+        return <div className="kb-pr-reference-row" key={`${card.id}-${index}`}>
+          <input className="kb-input" type="url" value={url} placeholder="https://github.com/owner/repo/pull/123" readOnly={!canWrite} onChange={event => setDrafts(current => current.map((value, itemIndex) => itemIndex === index ? event.target.value : value))} onBlur={() => save(drafts)} />
+          {url && <span className={`kb-pr-status kb-pr-status-${(status || { tone: 'checking' }).tone}`}>{(status || { label: 'Checking…' }).label}</span>}
+          {canWrite && <button type="button" className="kb-btn kb-pr-remove" aria-label="Remove pull request" onClick={() => { const next = drafts.filter((_, itemIndex) => itemIndex !== index); setDrafts(next); save(next) }}>Remove</button>}
+        </div>
+      })}
+    </div>
+    {canWrite && <button type="button" className="kb-btn kb-pr-add" onClick={() => setDrafts(current => [...current, ''])}>Add pull request</button>}
+  </section>
 }
 
 function CardTitleEditor({ card, canWrite, onCommit }) {
@@ -1178,7 +1210,7 @@ export default function Board({
     mutate({
       type: 'add-card',
       columnId: colId,
-      card: { id, title, notes: '', pullRequestUrl: '', label: 'none', due: '', checklist: [], attachments: [], assignee: '', assigneeHost: '', createdAt },
+      card: { id, title, notes: '', pullRequestUrl: '', pullRequestUrls: [], label: 'none', due: '', checklist: [], attachments: [], assignee: '', assigneeHost: '', createdAt },
     })
     setOpenCardId(id)
     window.mobius?.signal?.('item_created', { type: 'card' })
@@ -1479,8 +1511,8 @@ export default function Board({
 
   const access = boardAccess(share, online)
   const hasFilters = !!filterText.trim() || filterLabels.length > 0
-  const linkedPulls = Object.values(board?.cards || {}).map(card => ({ id: card.id, path: githubPullPath(card.pullRequestUrl) })).filter(link => link.path)
-  const linkedPullsKey = linkedPulls.map(link => `${link.id}:${link.path}`).sort().join('|')
+  const linkedPulls = Object.values(board?.cards || {}).flatMap(card => cardPullUrls(card).map(url => ({ id: card.id, path: githubPullPath(url) })).filter(link => link.path)).map(link => ({ ...link, key: `${link.id}:${link.path}` }))
+  const linkedPullsKey = linkedPulls.map(link => link.key).sort().join('|')
 
   useEffect(() => {
     if (!online || !linkedPulls.length) return undefined
@@ -1488,13 +1520,13 @@ export default function Board({
     Promise.all(linkedPulls.map(async link => {
       try {
         const response = await fetch(`/api/github/api/${link.path}`, { headers: { Authorization: `Bearer ${token}` } })
-        return { id: link.id, status: response.ok ? pullStatus(await response.json()) : { label: 'Unavailable', tone: 'unavailable' } }
+        return { key: link.key, status: response.ok ? pullStatus(await response.json()) : { label: 'Unavailable', tone: 'unavailable' } }
       } catch {
-        return { id: link.id, status: { label: 'Unavailable', tone: 'unavailable' } }
+        return { key: link.key, status: { label: 'Unavailable', tone: 'unavailable' } }
       }
     })).then(results => {
       if (!active) return
-      setPullStatuses(Object.fromEntries(results.map(result => [result.id, result.status])))
+      setPullStatuses(Object.fromEntries(results.map(result => [result.key, result.status])))
     })
     return () => { active = false }
   }, [linkedPullsKey, online, token, openCardId, pullStatusRefresh])
@@ -1747,20 +1779,7 @@ export default function Board({
             <div className="kb-sheet-grab kb-desktop-only" />
             <CardTitleEditor card={openCard_} canWrite={access.canWrite} onCommit={title => updateCard(openCard_.id, { title })} />
             <CardNotesEditor card={openCard_} canWrite={access.canWrite} onCommit={notes => updateCard(openCard_.id, { notes })} />
-            <section className="kb-pr-reference" aria-labelledby="kb-pr-reference-title">
-              <div className="kb-section-heading">
-                <h3 id="kb-pr-reference-title">Pull request</h3>
-                {openCard_.pullRequestUrl && <span className={`kb-pr-status kb-pr-status-${(pullStatuses[openCard_.id] || { tone: 'checking' }).tone}`}>{(pullStatuses[openCard_.id] || { label: 'Checking…' }).label}</span>}
-              </div>
-              <p>Paste a GitHub pull request to keep its status visible on this card.</p>
-              <div className="kb-pr-reference-row">
-                <input className="kb-input" type="url" defaultValue={openCard_.pullRequestUrl || ''} placeholder="https://github.com/owner/repo/pull/123" readOnly={!access.canWrite} onBlur={event => {
-                  const pullRequestUrl = event.currentTarget.value.trim()
-                  if (pullRequestUrl !== String(openCard_.pullRequestUrl || '')) updateCard(openCard_.id, { pullRequestUrl })
-                }} />
-                {openCard_.pullRequestUrl && <button type="button" className="kb-btn kb-pr-refresh" onClick={() => setPullStatusRefresh(value => value + 1)}>Refresh</button>}
-              </div>
-            </section>
+            <PullRequestReferences card={openCard_} canWrite={access.canWrite} statuses={pullStatuses} onUpdate={patch => updateCard(openCard_.id, patch)} onRefresh={() => setPullStatusRefresh(value => value + 1)} />
 
             <div>
               <div className="kb-section-heading"><h3>Checklist</h3>{Array.isArray(openCard_.checklist) && openCard_.checklist.length > 0 && <span>{openCard_.checklist.filter(item => item.done).length}/{openCard_.checklist.length}</span>}</div>
