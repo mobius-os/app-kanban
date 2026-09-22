@@ -443,6 +443,14 @@ function githubPullPath(value) {
   } catch { return '' }
 }
 
+function pullStatus(pull) {
+  if (pull?.merged_at) return { label: 'Merged', tone: 'merged' }
+  if (pull?.draft) return { label: 'Draft', tone: 'draft' }
+  if (pull?.state === 'open') return { label: 'Open', tone: 'open' }
+  if (pull?.state === 'closed') return { label: 'Closed', tone: 'closed' }
+  return { label: 'Unavailable', tone: 'unavailable' }
+}
+
 function CardTitleEditor({ card, canWrite, onCommit }) {
   const [editing, setEditing] = useState(!card.title)
   useEffect(() => { setEditing(!card.title) }, [card.id])
@@ -751,6 +759,8 @@ export default function Board({
   const [recoveredCount, setRecoveredCount] = useState(0)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [attachmentError, setAttachmentError] = useState('')
+  const [pullStatuses, setPullStatuses] = useState({})
+  const [pullStatusRefresh, setPullStatusRefresh] = useState(0)
 
   const boardRef = useRef(null)
   const boardScrollRef = useRef(null)
@@ -1473,22 +1483,21 @@ export default function Board({
   const linkedPullsKey = linkedPulls.map(link => `${link.id}:${link.path}`).sort().join('|')
 
   useEffect(() => {
-    if (!online || !access.canWrite || !linkedPulls.length) return undefined
+    if (!online || !linkedPulls.length) return undefined
     let active = true
     Promise.all(linkedPulls.map(async link => {
-      const response = await fetch(`/api/github/api/${link.path}`, { headers: { Authorization: `Bearer ${token}` } })
-      return response.ok ? { link, pull: await response.json() } : null
+      try {
+        const response = await fetch(`/api/github/api/${link.path}`, { headers: { Authorization: `Bearer ${token}` } })
+        return { id: link.id, status: response.ok ? pullStatus(await response.json()) : { label: 'Unavailable', tone: 'unavailable' } }
+      } catch {
+        return { id: link.id, status: { label: 'Unavailable', tone: 'unavailable' } }
+      }
     })).then(results => {
       if (!active) return
-      for (const result of results.filter(Boolean)) {
-        if (!result.pull?.merged_at) continue
-        const card = boardRef.current?.cards[result.link.id]
-        const done = boardRef.current?.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
-        if (card && done && (card.checklist || []).every(item => item?.done === true) && !done.cardIds.includes(card.id)) moveCard(card.id, done.id, null)
-      }
-    }).catch(() => {})
+      setPullStatuses(Object.fromEntries(results.map(result => [result.id, result.status])))
+    })
     return () => { active = false }
-  }, [linkedPullsKey, online, access.canWrite, token])
+  }, [linkedPullsKey, online, token, openCardId, pullStatusRefresh])
 
 
   if (!board) return <>
@@ -1738,21 +1747,20 @@ export default function Board({
             <div className="kb-sheet-grab kb-desktop-only" />
             <CardTitleEditor card={openCard_} canWrite={access.canWrite} onCommit={title => updateCard(openCard_.id, { title })} />
             <CardNotesEditor card={openCard_} canWrite={access.canWrite} onCommit={notes => updateCard(openCard_.id, { notes })} />
-            {(access.canWrite || openCard_.pullRequestUrl) && <details className="kb-automation" open={Boolean(openCard_.pullRequestUrl)}>
-              <summary>
-                <span>Automation</span>
-                <span className="kb-automation-summary">{openCard_.pullRequestUrl ? 'GitHub PR connected' : 'Connect a GitHub pull request'}</span>
-              </summary>
-              <div className="kb-automation-body">
-                <p>Move this card to Done when the pull request merges and every checklist item is complete.</p>
-                <label className="kb-card-field">GitHub pull request
-                  <input className="kb-input" type="url" defaultValue={openCard_.pullRequestUrl || ''} placeholder="https://github.com/owner/repo/pull/123" readOnly={!access.canWrite} onBlur={event => {
-                    const pullRequestUrl = event.currentTarget.value.trim()
-                    if (pullRequestUrl !== String(openCard_.pullRequestUrl || '')) updateCard(openCard_.id, { pullRequestUrl })
-                  }} />
-                </label>
+            <section className="kb-pr-reference" aria-labelledby="kb-pr-reference-title">
+              <div className="kb-section-heading">
+                <h3 id="kb-pr-reference-title">Pull request</h3>
+                {openCard_.pullRequestUrl && <span className={`kb-pr-status kb-pr-status-${(pullStatuses[openCard_.id] || { tone: 'checking' }).tone}`}>{(pullStatuses[openCard_.id] || { label: 'Checking…' }).label}</span>}
               </div>
-            </details>}
+              <p>Paste a GitHub pull request to keep its status visible on this card.</p>
+              <div className="kb-pr-reference-row">
+                <input className="kb-input" type="url" defaultValue={openCard_.pullRequestUrl || ''} placeholder="https://github.com/owner/repo/pull/123" readOnly={!access.canWrite} onBlur={event => {
+                  const pullRequestUrl = event.currentTarget.value.trim()
+                  if (pullRequestUrl !== String(openCard_.pullRequestUrl || '')) updateCard(openCard_.id, { pullRequestUrl })
+                }} />
+                {openCard_.pullRequestUrl && <button type="button" className="kb-btn kb-pr-refresh" onClick={() => setPullStatusRefresh(value => value + 1)}>Refresh</button>}
+              </div>
+            </section>
 
             <div>
               <div className="kb-section-heading"><h3>Checklist</h3>{Array.isArray(openCard_.checklist) && openCard_.checklist.length > 0 && <span>{openCard_.checklist.filter(item => item.done).length}/{openCard_.checklist.length}</span>}</div>

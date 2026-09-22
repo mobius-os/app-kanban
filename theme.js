@@ -685,13 +685,16 @@ export const CSS = `
   }
   .kb-notes-display a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
   .kb-notes-empty { color: var(--muted); }
-  .kb-automation { border-block: 1px solid var(--border); }
-  .kb-automation > summary { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; font-size: 13.5px; font-weight: 600; }
-  .kb-automation > summary::-webkit-details-marker { display: none; }
-  .kb-automation-summary { color: var(--muted); font-size: 12px; font-weight: 500; text-align: right; }
-  .kb-automation-body { display: grid; gap: 10px; padding: 0 0 14px; }
-  .kb-automation-body p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
-  .kb-automation-body label { display: grid; gap: 6px; color: var(--text); font-size: 12px; font-weight: 600; }
+  .kb-pr-reference { display: grid; gap: 8px; border-block: 1px solid var(--border); padding-block: 12px; }
+  .kb-pr-reference p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+  .kb-pr-reference-row { display: flex; align-items: center; gap: 8px; }
+  .kb-pr-reference-row .kb-input { min-width: 0; flex: 1 1 auto; }
+  .kb-pr-refresh { flex: 0 0 auto; min-height: 40px; padding-inline: 11px; font-size: 12px; }
+  .kb-pr-status { padding: 3px 7px; border-radius: 999px; font-size: 11px; font-weight: 650; }
+  .kb-pr-status-open { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+  .kb-pr-status-draft, .kb-pr-status-checking { background: var(--surface-2); color: var(--muted); }
+  .kb-pr-status-merged { background: color-mix(in srgb, #38b875 18%, transparent); color: #319867; }
+  .kb-pr-status-closed, .kb-pr-status-unavailable { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
   .kb-card-sheet {
     top: clamp(56px, 9dvh, 104px);
     bottom: auto;
