@@ -120,10 +120,17 @@ export function saveLastBoardId(lastBoardId) {
 
 export const boardPath = id => `boards/${id}.json`
 
-export async function listBoards() {
+export async function listBoardsWithStatus() {
   const s = store()
-  if (!s) return []
-  const entries = await s.list('boards/', { includeContent: true })
+  if (!s) return { boards: [], complete: false, source: 'unavailable' }
+  const listing = typeof s.listWithStatus === 'function'
+    ? await s.listWithStatus('boards/', { includeContent: true })
+    : {
+        entries: await s.list('boards/', { includeContent: true }),
+        complete: window.mobius?.online !== false,
+        source: 'legacy',
+      }
+  const entries = listing.entries || []
   const boards = []
   for (const e of entries) {
     if (!e.name.endsWith('.json')) continue
@@ -151,7 +158,15 @@ export async function listBoards() {
     }
   }
   boards.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  return boards
+  return {
+    boards,
+    complete: listing.complete === true,
+    source: listing.source || 'unknown',
+  }
+}
+
+export async function listBoards() {
+  return (await listBoardsWithStatus()).boards
 }
 
 // A joined board remains discoverable if its replaceable local copy is absent.

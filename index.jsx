@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { CSS } from './theme.js'
-import { listBoards, includeSharedBoards, createBoard, deleteBoard, loadUi, migrateLegacy, saveLastBoardId, seedFirstBoard } from './storage.js'
+import { listBoards, listBoardsWithStatus, includeSharedBoards, createBoard, deleteBoard, loadUi, migrateLegacy, saveLastBoardId, seedFirstBoard } from './storage.js'
 import { configureSync, recoverMemberships, loadShareMap, listInvitations, acceptInvitation, joinWithInvite, declineInvitation, leaveBoard, deleteSharedObject, removeShareEntry } from './sync.js'
 import { sharingFromBoards } from './publication.js'
 import Home from './ui/Home.jsx'
@@ -35,7 +35,9 @@ export default function App({ appId, token }) {
 
   const refresh = useCallback(async () => {
     try {
-      const [cached, loadedMap] = await Promise.all([listBoards(), loadShareMap()])
+      const [listing, loadedMap] = await Promise.all([listBoardsWithStatus(), loadShareMap()])
+      if (!listing.complete) return null
+      const cached = listing.boards
       const map = sharingFromBoards(cached, loadedMap)
       const b = includeSharedBoards(cached, map)
       setBoards(b)
@@ -61,11 +63,13 @@ export default function App({ appId, token }) {
         try { await recoverMemberships() } catch(error) {
           window.mobius?.signal?.('error', {source:'membership-recovery',message:String(error?.message || error)})
         }
-        let [b, map, ui] = await Promise.all([listBoards(), loadShareMap(), loadUi()])
+        let [boardListing, map, ui] = await Promise.all([listBoardsWithStatus(), loadShareMap(), loadUi()])
+        let b = boardListing.boards
         map = sharingFromBoards(b, map)
         b = includeSharedBoards(b, map)
-        // First run: seed one board so the app is immediately useful.
-        if (b.length === 0) {
+        // Seed only after a current server-authoritative empty listing. A cold
+        // or cached offline empty result may be missing boards created elsewhere.
+        if (b.length === 0 && boardListing.complete && boardListing.source === 'server') {
           await seedFirstBoard()
           b = await listBoards()
         }
@@ -93,8 +97,26 @@ export default function App({ appId, token }) {
         setResolved(true)
       }
     })()
-    const t = setInterval(() => setOnline(window.mobius?.online !== false), 3000)
-    return () => clearInterval(t)
+    let firstOnlineStatus = true
+    const unsubscribeOnline = typeof window.mobius?.onOnlineChange === 'function'
+      ? window.mobius.onOnlineChange((next) => {
+          setOnline(next)
+          if (firstOnlineStatus) { firstOnlineStatus = false; return }
+          if (next) refresh()
+        })
+      : null
+    let t = null
+    if (!unsubscribeOnline) {
+      t = setInterval(() => {
+        const next = window.mobius?.online !== false
+        setOnline(next)
+        if (next) refresh()
+      }, 3000)
+    }
+    return () => {
+      try { unsubscribeOnline?.() } catch {}
+      if (t) clearInterval(t)
+    }
   }, [refresh, refreshInvitations, loadAttempt])
 
   useEffect(() => {
