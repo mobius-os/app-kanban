@@ -649,7 +649,11 @@ export const CSS = `
   .kb-card-meta-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
   .kb-card-field { min-width: 0; }
   .kb-title-input,
-  .kb-notes-input { flex: 0 0 auto; min-height: 68px; max-height: none; overflow: hidden; }
+  .kb-notes-input {
+    flex: 0 0 auto;
+    max-height: none;
+    overflow: hidden;
+  }
   .kb-detail-field { position: relative; min-width: 0; flex: 0 0 auto; }
   .kb-editable-field { cursor: text; border-radius: 10px; }
   .kb-editable-field:hover { background: color-mix(in srgb, var(--surface-2) 68%, transparent); }
@@ -685,12 +689,24 @@ export const CSS = `
   }
   .kb-notes-display a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
   .kb-notes-empty { color: var(--muted); }
-  .kb-pr-reference { display: grid; gap: 8px; border-block: 1px solid var(--border); padding-block: 12px; }
-  .kb-pr-reference p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
-  .kb-pr-reference-row { display: flex; align-items: center; gap: 8px; }
-  .kb-pr-reference-row .kb-input { min-width: 0; flex: 1 1 auto; }
-  .kb-pr-refresh { flex: 0 0 auto; min-height: 40px; padding-inline: 11px; font-size: 12px; }
-  .kb-pr-status { padding: 3px 7px; border-radius: 999px; font-size: 11px; font-weight: 650; }
+  .kb-pr-reference { display: grid; gap: 10px; border-block: 1px solid var(--border); padding-block: 14px; }
+  .kb-pr-list { display: grid; gap: 6px; }
+  .kb-pr-item { min-height: 42px; display: flex; align-items: center; gap: 9px; padding: 7px 8px 7px 11px; border: 1px solid color-mix(in srgb, var(--border) 78%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--surface-2) 56%, transparent); }
+  .kb-pr-link { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 13px; font-weight: 650; text-decoration: none; }
+  .kb-pr-link:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+  .kb-pr-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
+  .kb-pr-edit { border: 0; padding: 6px; color: var(--muted); background: transparent; font: 600 12px/1 var(--font); cursor: pointer; }
+  .kb-pr-edit:hover { color: var(--text); }
+  .kb-pr-remove, .kb-pr-refresh { flex: 0 0 30px; width: 30px; height: 30px; min-height: 30px; padding: 0; font-size: 18px; line-height: 1; }
+  .kb-pr-remove > svg { width: 15px; height: 15px; }
+  .kb-pr-editor { display: flex; align-items: center; gap: 7px; padding: 2px 0; }
+  .kb-pr-editor .kb-input { min-width: 0; flex: 1 1 auto; }
+  .kb-pr-editor .kb-btn { min-height: 38px; padding-inline: 11px; }
+  .kb-pr-cancel { color: var(--muted); background: transparent; }
+  .kb-pr-add { justify-self: start; min-height: 36px; padding-inline: 10px; color: var(--muted); background: transparent; border: 1px dashed var(--border); }
+  .kb-pr-add:hover { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  .kb-pr-add > svg { width: 15px; height: 15px; }
+  .kb-pr-status { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; font-size: 11px; font-weight: 650; }
   .kb-pr-status-open { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
   .kb-pr-status-draft, .kb-pr-status-checking { background: var(--surface-2); color: var(--muted); }
   .kb-pr-status-merged { background: color-mix(in srgb, #38b875 18%, transparent); color: #319867; }

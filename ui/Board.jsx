@@ -458,28 +458,56 @@ function cardPullUrls(card) {
   return [...new Set([...urls, card?.pullRequestUrl].filter(value => typeof value === 'string' && value.trim()).map(value => value.trim()))]
 }
 
+function pullRequestLabel(url) {
+  try {
+    const parsed = new URL(url)
+    const match = parsed.hostname === 'github.com' && parsed.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/u)
+    return match ? `${match[1]}/${match[2]} #${match[3]}` : parsed.hostname
+  } catch { return 'Pull request' }
+}
+
 function PullRequestReferences({ card, canWrite, statuses, onUpdate, onRefresh }) {
   const urls = cardPullUrls(card)
-  const [drafts, setDrafts] = useState(urls)
-  useEffect(() => { setDrafts(urls) }, [card.id, card.pullRequestUrl, JSON.stringify(card.pullRequestUrls || [])])
-  const save = next => {
+  const [editor, setEditor] = useState(null)
+  const [draft, setDraft] = useState('')
+  useEffect(() => { setEditor(null); setDraft('') }, [card.id])
+  const save = index => {
+    const next = index === null ? [...urls, draft] : urls.map((url, itemIndex) => itemIndex === index ? draft : url)
     const cleaned = [...new Set(next.map(value => value.trim()).filter(Boolean))]
+    onUpdate({ pullRequestUrls: cleaned, pullRequestUrl: cleaned[0] || '' })
+    setEditor(null); setDraft('')
+  }
+  const remove = index => {
+    const cleaned = urls.filter((_, itemIndex) => itemIndex !== index)
     onUpdate({ pullRequestUrls: cleaned, pullRequestUrl: cleaned[0] || '' })
   }
   return <section className="kb-pr-reference" aria-labelledby="kb-pr-reference-title">
-    <div className="kb-section-heading"><h3 id="kb-pr-reference-title">Pull requests</h3>{urls.length > 0 && <button type="button" className="kb-btn kb-pr-refresh" onClick={onRefresh}>Refresh</button>}</div>
-    <p>Paste GitHub pull request links to keep their statuses visible on this card.</p>
-    <div className="kb-pr-list">
-      {drafts.map((url, index) => {
-        const status = statuses[`${card.id}:${githubPullPath(url)}`]
-        return <div className="kb-pr-reference-row" key={`${card.id}-${index}`}>
-          <input className="kb-input" type="url" value={url} placeholder="https://github.com/owner/repo/pull/123" readOnly={!canWrite} onChange={event => setDrafts(current => current.map((value, itemIndex) => itemIndex === index ? event.target.value : value))} onBlur={() => save(drafts)} />
-          {url && <span className={`kb-pr-status kb-pr-status-${(status || { tone: 'checking' }).tone}`}>{(status || { label: 'Checking…' }).label}</span>}
-          {canWrite && <button type="button" className="kb-btn kb-pr-remove" aria-label="Remove pull request" onClick={() => { const next = drafts.filter((_, itemIndex) => itemIndex !== index); setDrafts(next); save(next) }}>Remove</button>}
+    <div className="kb-section-heading">
+      <h3 id="kb-pr-reference-title">Linked pull requests</h3>
+      {urls.length > 0 && <button type="button" className="kb-iconbtn kb-pr-refresh" aria-label="Refresh pull request statuses" title="Refresh statuses" onClick={onRefresh}>↻</button>}
+    </div>
+    {urls.length > 0 && <div className="kb-pr-list">
+      {urls.map((url, index) => {
+        const status = statuses[`${card.id}:${githubPullPath(url)}`] || { label: 'Checking…', tone: 'checking' }
+        const isEditing = editor === index
+        return <div className="kb-pr-item" key={`${card.id}-${url}`}>
+          {isEditing ? <form className="kb-pr-editor" onSubmit={event => { event.preventDefault(); save(index) }}>
+            <input className="kb-input" type="url" autoFocus value={draft} placeholder="https://github.com/owner/repo/pull/123" onChange={event => setDraft(event.target.value)} />
+            <button type="submit" className="kb-btn">Save</button>
+            <button type="button" className="kb-btn kb-pr-cancel" onClick={() => { setEditor(null); setDraft('') }}>Cancel</button>
+          </form> : <>
+            <a className="kb-pr-link" href={url} target="_blank" rel="noreferrer">{pullRequestLabel(url)}</a>
+            <span className={`kb-pr-status kb-pr-status-${status.tone}`}>{status.label}</span>
+            {canWrite && <span className="kb-pr-actions"><button type="button" className="kb-pr-edit" onClick={() => { setEditor(index); setDraft(url) }}>Edit</button><button type="button" className="kb-iconbtn kb-pr-remove" aria-label={`Remove ${pullRequestLabel(url)}`} title="Remove pull request" onClick={() => remove(index)}><Trash /></button></span>}
+          </>}
         </div>
       })}
-    </div>
-    {canWrite && <button type="button" className="kb-btn kb-pr-add" onClick={() => setDrafts(current => [...current, ''])}>Add pull request</button>}
+    </div>}
+    {canWrite && (editor === 'add' ? <form className="kb-pr-editor" onSubmit={event => { event.preventDefault(); save(null) }}>
+      <input className="kb-input" type="url" autoFocus value={draft} placeholder="https://github.com/owner/repo/pull/123" onChange={event => setDraft(event.target.value)} />
+      <button type="submit" className="kb-btn">Add</button>
+      <button type="button" className="kb-btn kb-pr-cancel" onClick={() => { setEditor(null); setDraft('') }}>Cancel</button>
+    </form> : <button type="button" className="kb-btn kb-pr-add" onClick={() => { setEditor('add'); setDraft('') }}><Plus /> Add pull request</button>)}
   </section>
 }
 
