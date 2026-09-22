@@ -369,10 +369,15 @@ export function acceptSharedPoll(previous, entry, state) {
   }
   const current = previous?.host === entry.host && previous?.oid === entry.oid ? previous : null
   if (current && state.version < current.version) return null
-  if (!state.doc && (!current || state.version !== current.version)) throw invalidSharedPoll()
-  const confirmed = rememberSharedState(current, entry, state)
-  if (!confirmed) throw invalidSharedPoll()
-  return confirmed
+  const hasDocument = Object.hasOwn(state, 'doc')
+  const document = hasDocument ? normalizeBoard(structuredClone(state.doc)) : null
+  if (hasDocument && !document) throw invalidSharedPoll()
+  if (!hasDocument) {
+    if (!current || state.version !== current.version) throw invalidSharedPoll()
+    return current
+  }
+  if (current && state.version === current.version) return current
+  return { host: entry.host, oid: entry.oid, version: state.version, doc: document }
 }
 
 export function sharedPollAvailability(error, hasCachedBoard) {

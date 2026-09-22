@@ -52,6 +52,39 @@ test('a failed polling streak is reported again only after authoritative integra
   ])
 })
 
+test('a malformed advancing response stays failed until that exact version integrates', async () => {
+  const fixture = harness(true)
+  let confirmed = null
+  const integrate = async state => {
+    confirmed = acceptSharedPoll(confirmed, entry, state)
+    return true
+  }
+  const refresh = state => fixture.lifecycle.refresh({
+    pull: async () => state,
+    integrate,
+    hasCachedBoard: fixture.hasCachedBoard,
+  })
+
+  await refresh({ version: 1, doc: document('Current') })
+  for (const malformed of [[], 'not a board', 42]) {
+    const result = await refresh({ version: 2, doc: malformed })
+    assert.equal(result.status, 'failed')
+    assert.equal(confirmed.version, 1)
+    assert.equal(confirmed.doc.title, 'Current')
+  }
+
+  assert.equal(fixture.signals.length, 1, 'malformed responses remain one failed streak')
+  assert.deepEqual(fixture.availability.map(state => state.kind), [
+    'ready', 'reconnecting', 'reconnecting', 'reconnecting',
+  ])
+
+  const recovered = await refresh({ version: 2, doc: document('Recovered') })
+  assert.equal(recovered.status, 'ready')
+  assert.equal(confirmed.version, 2)
+  assert.equal(confirmed.doc.title, 'Recovered')
+  assert.equal(fixture.availability.at(-1).kind, 'ready')
+})
+
 test('a cached board reconnects without inventing recoverable edits', async () => {
   const fixture = harness(true)
   await fixture.lifecycle.refresh({
