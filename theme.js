@@ -648,7 +648,7 @@ export const CSS = `
   .kb-card-meta-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
   .kb-card-field { min-width: 0; }
   .kb-title-input,
-  .kb-notes-input { min-height: 68px; overflow: hidden; }
+  .kb-notes-input { flex: 0 0 auto; min-height: 68px; max-height: none; overflow: hidden; }
   .kb-detail-field { position: relative; min-width: 0; flex: 0 0 auto; }
   .kb-editable-field { cursor: text; border-radius: 10px; }
   .kb-editable-field:hover { background: color-mix(in srgb, var(--surface-2) 68%, transparent); }
