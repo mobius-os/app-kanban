@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
@@ -397,41 +397,22 @@ function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
   )
 }
 
-function AutoGrowTextarea({ valueKey, onCommit, expandOnFocus = false, ...props }) {
+function AutoGrowTextarea({ valueKey, onCommit, ...props }) {
   const textareaRef = useRef(null)
-  const focusedRef = useRef(false)
   const resize = useCallback(() => {
     const textarea = textareaRef.current
     if (!textarea) return
-    textarea.style.height = 'auto'
-    const contentHeight = textarea.scrollHeight
-    const compactHeight = expandOnFocus ? Math.min(contentHeight, 144) : contentHeight
-    const writingHeight = Math.min(Math.max(contentHeight, window.innerHeight * 0.42), 520)
-    textarea.style.height = `${expandOnFocus && focusedRef.current ? writingHeight : compactHeight}px`
-  }, [expandOnFocus])
-  // Re-measure whenever the textarea's own size changes (flex layout settling, modal animation, etc.)
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(resize)
-    observer.observe(textarea)
-    return () => observer.disconnect()
-  }, [resize])
-  // Re-measure when content key changes (different card or saved value)
-  useEffect(() => {
-    resize()
-  }, [resize, valueKey])
+    textarea.style.height = '0px'
+    textarea.style.height = `${textarea.scrollHeight}px`
+  }, [])
+  useLayoutEffect(resize, [resize, valueKey])
   return <textarea
     {...props}
     data-modal-inline-editor
     ref={textareaRef}
     onInput={resize}
-    onFocus={() => {
-      focusedRef.current = true
-      resize()
-    }}
+    onFocus={resize}
     onBlur={event => {
-      focusedRef.current = false
       onCommit?.(event.target.value)
     }}
   />
@@ -508,7 +489,6 @@ function CardNotesEditor({ card, canWrite, onCommit }) {
   return <AutoGrowTextarea
     className="kb-input kb-notes-input"
     rows={2}
-    expandOnFocus
     autoFocus
     placeholder="Notes…"
     defaultValue={card.notes}
