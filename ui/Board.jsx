@@ -69,7 +69,7 @@ function Card({ boardId, share, card, assigneeLabel, lifted, onOpen, onDragStart
       tabIndex={0}
       onClick={event => { event.currentTarget.focus(); onOpen(card.id) }}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(card.id) } }}
-      onPointerDown={canWrite ? e => onDragStart(e, card.id) : undefined}
+      onPointerDown={canWrite ? e => { if (!e.target.closest('a')) onDragStart(e, card.id) } : undefined}
     >
       {card.label && card.label !== 'none' && (
         <div
@@ -89,7 +89,7 @@ function Card({ boardId, share, card, assigneeLabel, lifted, onOpen, onDragStart
         />
         {attachments.length > 1 && <span className="kb-card-image-count">+{attachments.length - 1}</span>}
       </div>}
-      <div className="kb-card-title">{card.title}</div>
+      <div className="kb-card-title"><LinkifiedText text={card.title} /></div>
       {notePreview && <div className="kb-card-notes">{notePreview}</div>}
       {!cover && attachments.length > 0 && <div className="kb-card-attachment-summary">
         <Paperclip aria-hidden="true" /> {attachments.length} {attachments.length === 1 ? 'file' : 'files'}
@@ -428,7 +428,7 @@ function LinkifiedText({ text }) {
     try {
       const parsed = new URL(url)
       if (!['http:', 'https:'].includes(parsed.protocol)) return part
-      return <span key={`${url}-${index}`}><a href={parsed.href} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}>{url}</a>{punctuation}</span>
+      return <span key={`${url}-${index}`}><a href={parsed.href} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>{url}</a>{punctuation}</span>
     } catch {
       return part
     }
@@ -1738,12 +1738,21 @@ export default function Board({
             <div className="kb-sheet-grab kb-desktop-only" />
             <CardTitleEditor card={openCard_} canWrite={access.canWrite} onCommit={title => updateCard(openCard_.id, { title })} />
             <CardNotesEditor card={openCard_} canWrite={access.canWrite} onCommit={notes => updateCard(openCard_.id, { notes })} />
-            <label className="kb-card-field kb-field-spaced">Pull request
-              <input className="kb-input" type="url" defaultValue={openCard_.pullRequestUrl || ''} placeholder="https://github.com/owner/repo/pull/123" readOnly={!access.canWrite} onBlur={event => {
-                const pullRequestUrl = event.currentTarget.value.trim()
-                if (pullRequestUrl !== String(openCard_.pullRequestUrl || '')) updateCard(openCard_.id, { pullRequestUrl })
-              }} />
-            </label>
+            {(access.canWrite || openCard_.pullRequestUrl) && <details className="kb-automation" open={Boolean(openCard_.pullRequestUrl)}>
+              <summary>
+                <span>Automation</span>
+                <span className="kb-automation-summary">{openCard_.pullRequestUrl ? 'GitHub PR connected' : 'Connect a GitHub pull request'}</span>
+              </summary>
+              <div className="kb-automation-body">
+                <p>Move this card to Done when the pull request merges and every checklist item is complete.</p>
+                <label className="kb-card-field">GitHub pull request
+                  <input className="kb-input" type="url" defaultValue={openCard_.pullRequestUrl || ''} placeholder="https://github.com/owner/repo/pull/123" readOnly={!access.canWrite} onBlur={event => {
+                    const pullRequestUrl = event.currentTarget.value.trim()
+                    if (pullRequestUrl !== String(openCard_.pullRequestUrl || '')) updateCard(openCard_.id, { pullRequestUrl })
+                  }} />
+                </label>
+              </div>
+            </details>}
 
             <div>
               <div className="kb-section-heading"><h3>Checklist</h3>{Array.isArray(openCard_.checklist) && openCard_.checklist.length > 0 && <span>{openCard_.checklist.filter(item => item.done).length}/{openCard_.checklist.length}</span>}</div>

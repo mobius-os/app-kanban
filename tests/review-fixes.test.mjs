@@ -283,3 +283,13 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
 })
 
 test.beforeEach(() => configureFixture('fixture', 1))
+
+test('card-title links open directly and pull-request automation stays optional', async () => {
+  const boardSource = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
+  const themeSource = await readFile(new URL('../theme.js', import.meta.url), 'utf8')
+  assert.match(boardSource, /className="kb-card-title"><LinkifiedText text=\{card\.title\}/)
+  assert.match(boardSource, /if \(!e\.target\.closest\('a'\)\) onDragStart/)
+  assert.match(boardSource, /<details className="kb-automation" open=\{Boolean\(openCard_\.pullRequestUrl\)\}/)
+  assert.match(boardSource, /Connect a GitHub pull request/)
+  assert.match(themeSource, /\.kb-automation > summary/)
+})

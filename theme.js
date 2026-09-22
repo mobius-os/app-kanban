@@ -354,6 +354,7 @@ export const CSS = `
     font-weight: 700;
   }
   .kb-card-title { font-size: 14px; font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; }
+  .kb-card-title a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
   .kb-card-notes {
     margin-top: 7px;
     color: var(--muted);
@@ -684,6 +685,13 @@ export const CSS = `
   }
   .kb-notes-display a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
   .kb-notes-empty { color: var(--muted); }
+  .kb-automation { border-block: 1px solid var(--border); }
+  .kb-automation > summary { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; font-size: 13.5px; font-weight: 600; }
+  .kb-automation > summary::-webkit-details-marker { display: none; }
+  .kb-automation-summary { color: var(--muted); font-size: 12px; font-weight: 500; text-align: right; }
+  .kb-automation-body { display: grid; gap: 10px; padding: 0 0 14px; }
+  .kb-automation-body p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+  .kb-automation-body label { display: grid; gap: 6px; color: var(--text); font-size: 12px; font-weight: 600; }
   .kb-card-sheet {
     top: clamp(56px, 9dvh, 104px);
     bottom: auto;
