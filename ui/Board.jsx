@@ -988,6 +988,10 @@ export default function Board({
           })
           pullFailureReported = true
         }
+        // With no cached document there is no last copy to show. Keep the
+        // initial-load retry available instead of leaving the board on the
+        // loading placeholder while the poll keeps retrying in the background.
+        if (!boardRef.current) setLoadFailure(true)
         setSyncNote('Reconnecting — showing your last copy')
       } finally {
         pulling = false

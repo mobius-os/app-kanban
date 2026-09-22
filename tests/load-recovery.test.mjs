@@ -41,7 +41,7 @@ test('a transient shared refresh failure does not claim that edits need recovery
     source.indexOf('  const mutate = useCallback'),
   )
   assert.match(polling, /setLoadFailure\(false\)/)
-  assert.doesNotMatch(polling, /setLoadFailure\(true\)/)
+  assert.match(polling, /if \(!boardRef\.current\) setLoadFailure\(true\)/)
   assert.match(polling, /source: 'shared-board-poll'/)
   assert.match(polling, /if \(!pullFailureReported\)/)
 })
