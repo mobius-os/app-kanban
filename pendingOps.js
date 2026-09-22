@@ -66,6 +66,10 @@ export async function readRecoveredBoardOps(boardId, storage = defaultStorage())
   return recovered.filter(entry => !acknowledgedIds.has(entry.id))
 }
 
+export function hasRecoverableBoardOps(queuedCount, recoveredCount) {
+  return queuedCount > 0 || recoveredCount > 0
+}
+
 // Acknowledging a recovery notice never deletes the recovery copy. It only
 // prevents an already-downloaded rejected edit from reopening the same banner.
 export async function acknowledgeRecoveredBoardOps(boardId, entryIds, storage = defaultStorage()) {

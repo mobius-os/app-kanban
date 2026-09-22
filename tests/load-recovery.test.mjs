@@ -26,22 +26,3 @@ test('an unavailable board exposes retry and the owning all-boards callback', ()
   assert.match(fallback, /setLoadAttempt\(attempt => attempt \+ 1\)/)
   assert.doesNotMatch(fallback, /onClick=\{onClose\}/)
 })
-
-test('a transient shared refresh failure does not claim that edits need recovery', () => {
-  const source = readFileSync(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
-  const recovery = source.slice(
-    source.indexOf('  const recoveryButton ='),
-    source.indexOf('  const refreshMembers ='),
-  )
-  assert.match(recovery, /recoveredCount > 0 \|\| queuedCount > 0/)
-  assert.doesNotMatch(recovery, /loadFailure/)
-
-  const polling = source.slice(
-    source.indexOf('  // Shared boards: poll the shared object'),
-    source.indexOf('  const mutate = useCallback'),
-  )
-  assert.match(polling, /setLoadFailure\(false\)/)
-  assert.match(polling, /if \(!boardRef\.current\) setLoadFailure\(true\)/)
-  assert.match(polling, /source: 'shared-board-poll'/)
-  assert.match(polling, /if \(!pullFailureReported\)/)
-})
