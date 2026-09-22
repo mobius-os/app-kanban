@@ -846,7 +846,9 @@ export default function Board({
       }
     }
   }
-  const recoveryButton = (recoveredCount > 0 || queuedCount > 0 || loadFailure) && <button
+  // A failed refresh is not unsynced work. Only saved pending/rejected edits
+  // justify the recovery affordance.
+  const recoveryButton = (recoveredCount > 0 || queuedCount > 0) && <button
     className="kb-btn" onClick={downloadUnsyncedEdits}
     title="Download pending and rejected edits as a recovery file. Saved copies are kept here."
   >Download recovery copy</button>
@@ -935,6 +937,7 @@ export default function Board({
     if (!share) return undefined
     let alive = true
     let pulling = false
+    let pullFailureReported = false
     let timer = null
     confirmedSharedRef.current = null
     lastInteractionAtRef.current = Date.now()
@@ -954,6 +957,8 @@ export default function Board({
       try {
         const state = await pullShared(share, confirmedSharedRef.current?.version ?? -1)
         if (!alive) return
+        pullFailureReported = false
+        setLoadFailure(false)
         const previous = confirmedSharedRef.current
         if (state.version < (previous?.version ?? -1)) return
         const confirmed = rememberSharedState(previous, share, state)
@@ -976,7 +981,13 @@ export default function Board({
         if (pendingEntriesRef.current.length === 0) setSyncNote('')
       } catch (e) {
         if (!alive) return
-        setLoadFailure(true)
+        if (!pullFailureReported) {
+          window.mobius?.signal?.('error', {
+            message: String(e?.message || e),
+            source: 'shared-board-poll',
+          })
+          pullFailureReported = true
+        }
         setSyncNote('Reconnecting — showing your last copy')
       } finally {
         pulling = false
