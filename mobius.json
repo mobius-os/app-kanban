@@ -3,7 +3,7 @@
   "package_id": "urn:uuid:5130825e-905c-4527-8ad0-4bdd2a7357c0",
   "name": "Kanban",
   "version": "0.6.1",
-  "description": "Kanban boards that open where you left off: drag-and-drop lists, due dates and assignees, and live collaboration with people on their own Möbius.",
+  "description": "Kanban boards that open where you left off: drag-and-drop lists, due dates and assignees, and live collaboration with people on their own M\u00f6bius.",
   "author": "mobius-os",
   "license": "MIT",
   "homepage": "https://github.com/mobius-os/app-kanban",
@@ -42,6 +42,7 @@
     "ui/modalFocus.js",
     "ui/Home.jsx",
     "ui/Board.jsx",
+    "prMatching.js",
     "scripts/kanban.mjs",
     "kanban-agent.md",
     "service.py",
@@ -53,8 +54,8 @@
     "publication.js"
   ],
   "store": {
-    "tagline": "Boards that open where you left off — and that your friends can join.",
-    "description": "Kanban keeps your projects moving with drag-and-drop boards that stay out of your way. The app opens straight onto the board you last used, with a one-tap switcher for the rest.\n\nCards carry exactly what you need at a glance: where the work stands, its due date with overdue and due-today cues, and who owns it. Add notes, color labels, and checklists when a card needs more; filter by text or label when a board grows busy.\n\nBoards are collaborative: share one and invite people by their Möbius handle — they accept on their own Möbius and edit live from their own Kanban app, with every change merging safely so nobody's work is lost. Everything also works offline and syncs when you're back.",
+    "tagline": "Boards that open where you left off \u2014 and that your friends can join.",
+    "description": "Kanban keeps your projects moving with drag-and-drop boards that stay out of your way. The app opens straight onto the board you last used, with a one-tap switcher for the rest.\n\nCards carry exactly what you need at a glance: where the work stands, its due date with overdue and due-today cues, and who owns it. Add notes, color labels, and checklists when a card needs more; filter by text or label when a board grows busy.\n\nBoards are collaborative: share one and invite people by their M\u00f6bius handle \u2014 they accept on their own M\u00f6bius and edit live from their own Kanban app, with every change merging safely so nobody's work is lost. Everything also works offline and syncs when you're back.",
     "screenshots": [
       {
         "src": "static/store/board-phone.png",

@@ -76,11 +76,16 @@ const reservedIds = new Set(['__proto__', 'prototype', 'constructor'])
 const validId = value => typeof value === 'string'
   && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(value)
   && !reservedIds.has(value)
+function normalizedAssignee(value) {
+  const normalized = String(value || '').trim().replace(/^@/u, '').toLocaleLowerCase()
+  return normalized === 'me' ? null : normalized
+}
 function validatePatch(patch) {
   if (patch.title !== undefined && (typeof patch.title !== 'string' || !patch.title.trim())) throw new Error('title must be a non-empty string.')
   for (const field of ['notes', 'assignee', 'assigneeHost', 'pullRequestUrl']) {
     if (patch[field] !== undefined && typeof patch[field] !== 'string') throw new Error(`${field} must be a string.`)
   }
+  if (patch.pullRequestUrls !== undefined && (!Array.isArray(patch.pullRequestUrls) || patch.pullRequestUrls.some(value => typeof value !== 'string'))) throw new Error('pullRequestUrls must be an array of strings.')
   if (patch.label !== undefined && !labels.has(patch.label)) throw new Error('label is invalid.')
   if (patch.due !== undefined && patch.due !== '' && !isIsoDate(patch.due)) throw new Error('due must be empty or a valid YYYY-MM-DD date.')
 }
@@ -145,24 +150,28 @@ async function syncOpenPrs(dryRun) {
   for (const board of boards) {
     const state = await repository.read(board.id)
     for (const card of Object.values(state.doc.cards)) {
-      if (card.assignee?.toLocaleLowerCase() === ownerLogin.toLocaleLowerCase() && !card.pullRequestUrl) {
+      const assignee = normalizedAssignee(card.assignee)
+      if ((assignee === null || assignee === ownerLogin.toLocaleLowerCase()) && !card.pullRequestUrl) {
         candidateCards.push({ board, card })
       }
     }
   }
   const matched = []
   const skipped = []
+  const reservedCardIds = new Set()
   for (const pull of pulls) {
     const scored = candidateCards
       .map(({ board, card }) => ({ board, card, score: pullCardScore(pull, card) }))
-      .filter(({ score }) => score.eligible)
+      .filter(({ card, score }) => score.eligible && !reservedCardIds.has(card.id))
     if (scored.length !== 1) {
       skipped.push({ pr: pull.html_url, title: pull.title, reason: scored.length === 0 ? 'no match' : 'multiple matches' })
       continue
     }
     const { board, card } = scored[0]
+    reservedCardIds.add(card.id)
     if (!dryRun) {
-      await repository.mutate(board.id, { type: 'update-card', cardId: card.id, patch: { pullRequestUrl: pull.html_url } })
+      const urls = [...new Set([...(Array.isArray(card.pullRequestUrls) ? card.pullRequestUrls : []), card.pullRequestUrl, pull.html_url].filter(Boolean))]
+      await repository.mutate(board.id, { type: 'update-card', cardId: card.id, patch: { pullRequestUrl: urls[0], pullRequestUrls: urls } })
     }
     matched.push({ pr: pull.html_url, prTitle: pull.title, card: card.title, boardId: board.id, cardId: card.id })
   }
@@ -177,9 +186,12 @@ try {
     if (!data || typeof data !== 'object' || Array.isArray(data) || !validId(data.cardId) || !validId(data.itemId) || typeof data.done !== 'boolean') {
       throw new Error('cardId, itemId, and boolean done are required.')
     }
+    const fresh = await repository.read(boardId)
+    if (!fresh.doc.cards[data.cardId]?.checklist?.some(item => item?.id === data.itemId)) throw new Error('Checklist item was not found on the current card.')
     const saved = await repository.mutate(boardId, {
       type: 'set-checklist-item', cardId: data.cardId, itemId: data.itemId, done: data.done,
     })
+    if (!saved.doc.cards[data.cardId]?.checklist?.some(item => item?.id === data.itemId && item.done === data.done)) throw new Error('Checklist item was not saved.')
     result = { status: 'saved', appId, boardId, cardId: data.cardId, authority: saved.authority,
       version: saved.version, card: saved.doc.cards[data.cardId] }
   }
@@ -198,7 +210,7 @@ try {
       } }
     } else if (command === 'update-card') {
       if (!validId(data.cardId) || !data.patch || typeof data.patch !== 'object' || Array.isArray(data.patch)) throw new Error('cardId and patch are required.')
-      const fields = ['title', 'notes', 'label', 'due', 'assignee', 'assigneeHost', 'pullRequestUrl']
+      const fields = ['title', 'notes', 'label', 'due', 'assignee', 'assigneeHost', 'pullRequestUrl', 'pullRequestUrls']
       if (Object.keys(data.patch).some(key => !fields.includes(key))) throw new Error('Patch must contain editable card fields only.')
       validatePatch(data.patch)
       op = { type: command, cardId: data.cardId, patch: data.patch }

@@ -243,8 +243,10 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
     'the phone checklist stays between notes and card properties',
   )
   assert.match(boardSource, /className="kb-card-danger-zone kb-mobile-only"/)
-  assert.match(boardSource, /className=\{`kb-title-display[\s\S]*aria-label=\{canWrite \? 'Edit card title' : undefined\}[\s\S]*<LinkifiedText text=\{card\.title\}/)
-  assert.match(boardSource, /className=\{`kb-notes-display[\s\S]*aria-label=\{canWrite \? 'Edit card notes' : undefined\}[\s\S]*<LinkifiedText text=\{card\.notes\}/)
+  assert.match(boardSource, /className=\{`kb-title-display[\s\S]*aria-label=\{canWrite \? 'Edit card title' : undefined\}[\s\S]*>\{card\.title\}<\/div>/)
+  assert.doesNotMatch(boardSource, /kb-title-display[\s\S]*<LinkifiedText text=\{card\.title\}/)
+  assert.match(boardSource, /className=\{`kb-notes-display[\s\S]*aria-label=\{canWrite \? 'Edit card notes' : undefined\}[\s\S]*>\{card\.notes \|\| 'Notes…'\}<\/div>/)
+  assert.match(boardSource, /event\.key === 'Escape'[\s\S]*onCancel\?\.\(\)/)
   assert.match(boardSource, /textarea\.style\.height = 'auto'[\s\S]*textarea\.scrollHeight/)
   assert.match(boardSource, /useLayoutEffect\(\(\) => \{ resize\(\) \}, \[resize, valueKey\]\)/)
   assert.match(themeSource, /\.kb-notes-input \{[^}]*flex: 0 0 auto;[^}]*max-height: none/)

@@ -397,7 +397,7 @@ function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
   )
 }
 
-function AutoGrowTextarea({ valueKey, onCommit, ...props }) {
+function AutoGrowTextarea({ valueKey, onCommit, onCancel, ...props }) {
   const textareaRef = useRef(null)
   const resize = useCallback(() => {
     const textarea = textareaRef.current
@@ -414,6 +414,9 @@ function AutoGrowTextarea({ valueKey, onCommit, ...props }) {
     data-modal-inline-editor
     onInput={resize}
     onFocus={resize}
+    onKeyDown={event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); event.currentTarget.value = props.defaultValue || ''; onCancel?.(); }
+    }}
     onBlur={event => {
       onCommit?.(event.target.value)
     }}
@@ -511,7 +514,7 @@ function PullRequestReferences({ card, canWrite, statuses, onUpdate, onRefresh }
   </section>
 }
 
-function CardTitleEditor({ card, canWrite, onCommit }) {
+function CardTitleEditor({ card, canWrite, onCommit, onCancel }) {
   const [editing, setEditing] = useState(!card.title)
   useEffect(() => { setEditing(!card.title) }, [card.id])
   if (!editing || !canWrite) return <div className="kb-detail-field kb-title-field">
@@ -522,7 +525,7 @@ function CardTitleEditor({ card, canWrite, onCommit }) {
       onClick={() => { if (canWrite) setEditing(true) }}
       onKeyDown={event => { if (canWrite && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); setEditing(true) } }}
       aria-label={canWrite ? 'Edit card title' : undefined}
-    ><LinkifiedText text={card.title} /></div>
+    >{card.title}</div>
   </div>
   return <AutoGrowTextarea
     className="kb-input kb-title-input"
@@ -536,8 +539,10 @@ function CardTitleEditor({ card, canWrite, onCommit }) {
     onCommit={value => {
       const next = value.trim()
       if (next && next !== card.title) onCommit(next)
+      else if (!next) onCancel?.()
       setEditing(false)
     }}
+    onCancel={() => { if (!card.title) onCancel?.(); else setEditing(false) }}
   />
 }
 
@@ -552,7 +557,7 @@ function CardNotesEditor({ card, canWrite, onCommit }) {
       onClick={() => { if (canWrite) setEditing(true) }}
       onKeyDown={event => { if (canWrite && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); setEditing(true) } }}
       aria-label={canWrite ? 'Edit card notes' : undefined}
-    >{card.notes ? <LinkifiedText text={card.notes} /> : 'Notes…'}</div>
+    >{card.notes || 'Notes…'}</div>
   </div>
   return <AutoGrowTextarea
     className="kb-input kb-notes-input"
@@ -567,6 +572,7 @@ function CardNotesEditor({ card, canWrite, onCommit }) {
       if (value !== card.notes) onCommit(value)
       setEditing(false)
     }}
+    onCancel={() => setEditing(false)}
   />
 }
 
@@ -1557,7 +1563,7 @@ export default function Board({
       setPullStatuses(Object.fromEntries(results.map(result => [result.key, result.status])))
     })
     return () => { active = false }
-  }, [linkedPullsKey, online, token, openCardId, pullStatusRefresh])
+  }, [linkedPullsKey, online, token, pullStatusRefresh])
 
 
   if (!board) return <>
@@ -1805,7 +1811,7 @@ export default function Board({
               <button className="kb-btn kb-btn-primary kb-card-toolbar-done" type="button" onClick={() => setOpenCardId(null)}>Done</button>
             </div>
             <div className="kb-sheet-grab kb-desktop-only" />
-            <CardTitleEditor card={openCard_} canWrite={access.canWrite} onCommit={title => updateCard(openCard_.id, { title })} />
+            <CardTitleEditor card={openCard_} canWrite={access.canWrite} onCommit={title => updateCard(openCard_.id, { title })} onCancel={() => { mutate({ type: 'delete-card', cardId: openCard_.id }); setOpenCardId(null) }} />
             <CardNotesEditor card={openCard_} canWrite={access.canWrite} onCommit={notes => updateCard(openCard_.id, { notes })} />
             <PullRequestReferences card={openCard_} canWrite={access.canWrite} statuses={pullStatuses} onUpdate={patch => updateCard(openCard_.id, patch)} onRefresh={() => setPullStatusRefresh(value => value + 1)} />
 
