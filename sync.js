@@ -349,6 +349,8 @@ const TERMINAL_SHARED_POLL_ERRORS = new Set([
   'board-missing',
   'membership-revoked',
   'migration-required',
+  'migration-staged',
+  'authority-retired',
 ])
 
 function invalidSharedPoll() {
@@ -386,6 +388,8 @@ export function sharedPollAvailability(error, hasCachedBoard) {
       'board-missing': 'This shared board no longer exists. Your local copy and saved edits are unchanged.',
       'membership-revoked': 'You no longer have access to this shared board. Your local copy and saved edits are unchanged.',
       'migration-required': 'This board needs a new invitation from its host after the Kanban upgrade. Your local copy and saved edits are unchanged.',
+      'migration-staged': 'This shared board is being moved to a new authority. Ask its host for a fresh invitation; your local copy and saved edits are unchanged.',
+      'authority-retired': 'This shared board has moved to a new authority. Ask its host for a fresh invitation; your local copy and saved edits are unchanged.',
     }
     return { kind: 'terminal', message: messages[error.code], retryable: false }
   }

@@ -123,7 +123,7 @@ test('an uncached transient failure becomes ready when a later poll integrates',
 })
 
 test('terminal shared-board failures stop automatic retry and stay actionable', async () => {
-  for (const code of ['membership-revoked', 'migration-required', 'board-missing']) {
+  for (const code of ['membership-revoked', 'migration-required', 'migration-staged', 'authority-retired', 'board-missing']) {
     for (const cached of [false, true]) {
       const fixture = harness(cached)
       const error = Object.assign(new Error(code), { code })
