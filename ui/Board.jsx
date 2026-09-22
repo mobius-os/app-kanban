@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
-import { resolveMemberHandles, pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay } from '../sync.js'
+import { resolveMemberHandles, pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay, acceptSharedPoll, createSharedRefreshLifecycle } from '../sync.js'
 import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
-import { acknowledgeRecoveredBoardOps, applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps } from '../pendingOps.js'
+import { acknowledgeRecoveredBoardOps, applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps, hasRecoverableBoardOps } from '../pendingOps.js'
 import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
 import {
   deleteCardAttachment,
@@ -732,7 +732,7 @@ export default function Board({
   const [drag, setDrag] = useState(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [syncNote, setSyncNote] = useState('')
-  const [loadFailure, setLoadFailure] = useState(false)
+  const [availability, setAvailability] = useState({ kind: 'loading', message: '' })
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [filterText, setFilterText] = useState('')
@@ -754,6 +754,7 @@ export default function Board({
   const dragRef = useRef(null)
   const rectsRef = useRef(null)
   const confirmedSharedRef = useRef(null)
+  const availabilityRef = useRef(availability)
   const shareRef = useRef(share)
   const onlineRef = useRef(online)
   const filtersRef = useRef({ text: filterText, labels: filterLabels })
@@ -767,6 +768,10 @@ export default function Board({
   shareRef.current = share
   onlineRef.current = online
   filtersRef.current = { text: filterText, labels: filterLabels }
+  const publishAvailability = useCallback(next => {
+    availabilityRef.current = next
+    setAvailability(next)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -848,7 +853,7 @@ export default function Board({
   }
   // A failed refresh is not unsynced work. Only saved pending/rejected edits
   // justify the recovery affordance.
-  const recoveryButton = (recoveredCount > 0 || queuedCount > 0) && <button
+  const recoveryButton = hasRecoverableBoardOps(queuedCount, recoveredCount) && <button
     className="kb-btn" onClick={downloadUnsyncedEdits}
     title="Download pending and rejected edits as a recovery file. Saved copies are kept here."
   >Download recovery copy</button>
@@ -899,7 +904,8 @@ export default function Board({
   useEffect(() => {
     let unsub = null
     let alive = true
-    setLoadFailure(false)
+    const loading = { kind: 'loading', message: '' }
+    publishAvailability(loading)
     Promise.all([getBoard(boardId), readPendingBoardOps(boardId)]).then(([doc, pendingEntries]) => {
       if (!alive) return
       pendingEntriesRef.current = pendingEntries
@@ -907,8 +913,16 @@ export default function Board({
         const initial = applyPendingBoardOps(doc, pendingEntries)
         boardRef.current = initial
         setBoard(initial)
+        if (!shareRef.current) {
+          const ready = { kind: 'ready', message: '' }
+          publishAvailability(ready)
+        } else if (availabilityRef.current.kind === 'unavailable') {
+          const reconnecting = { kind: 'reconnecting', message: 'Reconnecting — showing your last copy' }
+          publishAvailability(reconnecting)
+        }
       } else if (!shareRef.current) {
-        setLoadFailure(true)
+        const unavailable = { kind: 'unavailable', message: 'This board couldn’t be loaded. Your saved data is unchanged.' }
+        publishAvailability(unavailable)
       }
       setQueuedCount(pendingEntries.length)
       unsub = subscribeBoard(boardId, async v => {
@@ -926,23 +940,35 @@ export default function Board({
       })
     }).catch(err => {
       if (!alive) return
-      setLoadFailure(true)
+      if (availabilityRef.current.kind !== 'terminal') {
+        const unavailable = { kind: 'unavailable', message: 'This board couldn’t be loaded. Your saved data is unchanged.' }
+        publishAvailability(unavailable)
+      }
       window.mobius?.signal?.('error', { message: String(err?.message || err), source: 'board-load' })
     })
     return () => { alive = false; unsub?.() }
-  }, [boardId, loadAttempt])
+  }, [boardId, loadAttempt, publishAvailability])
 
   // Shared boards: poll the shared object and fold newer documents in.
   useEffect(() => {
     if (!share) return undefined
     let alive = true
     let pulling = false
-    let pullFailureReported = false
     let timer = null
     confirmedSharedRef.current = null
     lastInteractionAtRef.current = Date.now()
+    const refresh = createSharedRefreshLifecycle({
+      onSignal: error => window.mobius?.signal?.('error', {
+        message: String(error?.message || error),
+        source: 'shared-board-poll',
+      }),
+      onAvailability: next => {
+        if (!alive) return
+        publishAvailability(next)
+      },
+    })
     const schedule = () => {
-      if (!alive) return
+      if (!alive || !refresh.shouldContinue()) return
       clearTimeout(timer)
       timer = setTimeout(tick, sharedBoardPollDelay(lastInteractionAtRef.current))
     }
@@ -955,40 +981,33 @@ export default function Board({
       }
       pulling = true
       try {
-        const state = await pullShared(share, confirmedSharedRef.current?.version ?? -1)
-        if (!alive) return
-        pullFailureReported = false
-        setLoadFailure(false)
-        const previous = confirmedSharedRef.current
-        if (state.version < (previous?.version ?? -1)) return
-        const confirmed = rememberSharedState(previous, share, state)
-        confirmedSharedRef.current = confirmed
-        if (confirmed && confirmed !== previous) {
-          window.mobius?.storage?.set(boardPath(boardId), confirmed.doc).catch(() => {})
-        }
-        // Even an unchanged poll can now reveal a document received while a
-        // drag/write temporarily suppressed rendering. The version never
-        // advances independently of the document we must eventually show.
-        if (confirmed && pendingRef.current === 0 && !replayingRef.current && !dragRef.current) {
-          const rendered = applyPendingBoardOps(confirmed.doc, pendingEntriesRef.current)
-          boardRef.current = rendered
-          setBoard(rendered)
-        }
-        if (state.object) {
-          const nextMembers = memberRecords(state.object)
-          if (nextMembers) setMembers(nextMembers)
-        }
-        if (pendingEntriesRef.current.length === 0) setSyncNote('')
-      } catch (e) {
-        if (!alive) return
-        if (!pullFailureReported) {
-          window.mobius?.signal?.('error', {
-            message: String(e?.message || e),
-            source: 'shared-board-poll',
-          })
-          pullFailureReported = true
-        }
-        setSyncNote('Reconnecting — showing your last copy')
+        await refresh.refresh({
+          pull: () => pullShared(share, confirmedSharedRef.current?.version ?? -1),
+          hasCachedBoard: () => Boolean(boardRef.current),
+          integrate: async state => {
+            if (!alive) return false
+            const previous = confirmedSharedRef.current
+            const confirmed = acceptSharedPoll(previous, share, state)
+            if (!confirmed) return false
+            confirmedSharedRef.current = confirmed
+            if (confirmed !== previous) {
+              window.mobius?.storage?.set(boardPath(boardId), confirmed.doc).catch(() => {})
+            }
+            // Even an unchanged poll can reveal a document received while a
+            // drag/write temporarily suppressed rendering.
+            if (pendingRef.current === 0 && !replayingRef.current && !dragRef.current) {
+              const rendered = applyPendingBoardOps(confirmed.doc, pendingEntriesRef.current)
+              boardRef.current = rendered
+              setBoard(rendered)
+            }
+            if (state.object) {
+              const nextMembers = memberRecords(state.object)
+              if (nextMembers) setMembers(nextMembers)
+            }
+            if (pendingEntriesRef.current.length === 0) setSyncNote('')
+            return true
+          },
+        })
       } finally {
         pulling = false
         schedule()
@@ -996,17 +1015,18 @@ export default function Board({
     }
     tick()
     const onVis = () => {
-      if (document.hidden) return
+      if (document.hidden || !refresh.shouldContinue()) return
       lastInteractionAtRef.current = Date.now()
       clearTimeout(timer)
       tick()
     }
     document.addEventListener('visibilitychange', onVis)
     return () => { alive = false; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis) }
-  }, [share, boardId, loadAttempt])
+  }, [share, boardId, loadAttempt, publishAvailability])
 
   const mutate = useCallback((operation, onCommit) => {
     const entry = shareRef.current
+    if (availabilityRef.current.kind === 'terminal') return false
     if (!boardAccess(entry, onlineRef.current).canWrite) return false
     const current = boardRef.current
     if (!current) return false
@@ -1477,18 +1497,19 @@ export default function Board({
       <button className="kb-btn" onClick={onAllBoards}><ChevronLeft /> All boards</button>
       {recoveryButton}
     </div>
-    <div className="kb-board kb-board-empty"><div className="kb-empty-board-state" role={loadFailure ? 'alert' : 'status'}>
-      {loadFailure ? <>
-        <p>This board couldn’t be loaded. Your saved data is unchanged.</p>
-        <button className="kb-btn kb-btn-primary" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Try again</button>
-      </> : 'Loading board…'}
+    <div className="kb-board kb-board-empty"><div className="kb-empty-board-state" role={availability.kind === 'loading' ? 'status' : 'alert'}>
+      {availability.kind === 'loading' ? 'Loading board…' : <>
+        <p>{availability.message}</p>
+        {availability.kind !== 'terminal' && <button className="kb-btn kb-btn-primary" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Try again</button>}
+      </>}
     </div></div>
   </>
 
   const openCard_ = openCardId ? board.cards[openCardId] : null
   const openCardColumn = openCard_ ? board.columns.find(column => column.cardIds.includes(openCard_.id)) : null
   const openCardIndex = openCardColumn ? openCardColumn.cardIds.indexOf(openCard_.id) : -1
-  const access = boardAccess(share, online)
+  const access = boardAccess(share, online && availability.kind !== 'terminal')
+  const accessStatus = availability.kind === 'terminal' ? '' : access.status
   const hasFilters = !!filterText.trim() || filterLabels.length > 0
 
   return (
@@ -1510,9 +1531,10 @@ export default function Board({
           onCreate={onCreateBoard}
         />
         <div className="kb-header-spacer" />
-        {(queuedCount > 0 || access.status) && <span className="kb-offline">
-          {queuedCount > 0 ? `${queuedCount} change${queuedCount === 1 ? '' : 's'} pending` : access.status}
+        {(queuedCount > 0 || accessStatus) && <span className="kb-offline">
+          {queuedCount > 0 ? `${queuedCount} change${queuedCount === 1 ? '' : 's'} pending` : accessStatus}
         </span>}
+        {availability.kind === 'reconnecting' && <span className="kb-offline">{availability.message}</span>}
         {syncNote && <span className="kb-offline">{syncNote}</span>}
         {share && <BoardPresence members={displayMembers} onOpen={() => setShareOpen(true)} />}
         <button
@@ -1528,6 +1550,9 @@ export default function Board({
         </button>
       </div>
       <div className="kb-divider" />
+      {availability.kind === 'terminal' && <div className="kb-recovery" role="alert">
+        <span>{availability.message}</span>
+      </div>}
       {recoveryButton && <div className="kb-recovery" role="status">
         <span>{recoveredCount > 0 ? 'A recovery copy is ready to download.' : 'Unsynced edits are kept on this instance.'}</span>{recoveryButton}
       </div>}
