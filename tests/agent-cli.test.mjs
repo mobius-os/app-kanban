@@ -23,6 +23,10 @@ test('CLI writes private and shared boards through their authority using JSON an
     }
     if (req.url === '/api/apps/1/service/boards/resume-joins') return send({results:[]})
     if (req.url === '/api/apps/1/service/boards') return send({hosted:[],joined:[]})
+    if (req.url === '/api/github/api/user') return send({ login: 'alice' })
+    if (req.url.startsWith('/api/github/api/search/issues?')) return send({ items: [1, 2].map(number => ({
+      title: 'Fixture card', html_url: `https://github.com/mobius-os/app-kanban/pull/${number}`,
+    })) })
     if (req.url === '/api/apps/') return send([{ id: 1, slug: 'kanban' }])
     if (req.url.startsWith('/api/storage/apps-list/1/boards/')) return send({entries:[{name:'b.json',path:'boards/b.json'}],next_cursor:null})
     if (req.url === '/api/storage/apps/1/shared.json') {
@@ -85,6 +89,30 @@ test('CLI writes private and shared boards through their authority using JSON an
     assert.equal((await run('add-card', input)).authority, 'private')
     assert.equal(cacheWrites, 1)
     assert.equal(sharedWrites, 4)
+
+    local.cards.stable.assignee = 'Me'
+    const dryRun = await run('sync-open-prs', undefined, '--dry-run')
+    assert.equal(dryRun.matched.length, 2)
+    assert.equal(local.cards.stable.pullRequestUrls, undefined)
+    const synced = await run('sync-open-prs')
+    assert.equal(synced.matched.length, 2)
+    assert.deepEqual(local.cards.stable.pullRequestUrls, [1, 2].map(number =>
+      `https://github.com/mobius-os/app-kanban/pull/${number}`))
+    assert.equal(local.cards.stable.pullRequestUrl, local.cards.stable.pullRequestUrls[0])
+    await run('sync-open-prs')
+    assert.equal(local.cards.stable.pullRequestUrls.length, 2, 'retry does not duplicate links')
+
+    local.cards.stable.checklist = [{ id: 'check-1', text: 'Review', done: false }]
+    await run('set-checklist-item', { cardId: 'stable', itemId: 'check-1', done: true })
+    assert.equal(local.cards.stable.checklist[0].done, true)
+    await assert.rejects(run('set-checklist-item', { cardId: 'stable', itemId: 'stale', done: true }), /Checklist item was not found/)
+
+    local.cards.stable.assignee = ''
+    assert.equal((await run('sync-open-prs', undefined, '--dry-run')).matched.length, 0,
+      'unassigned cards are not claimed')
+    local.cards.stable.assignee = '@alice'
+    assert.equal((await run('sync-open-prs', undefined, '--dry-run')).matched.length, 2,
+      'the UI handle representation matches the connected GitHub owner')
 
     const completion = { title: 'Fixture card', summary: 'Shipped the exact task', prUrl: 'https://github.com/mobius-os/app-kanban/pull/19' }
     assert.equal((await run('complete-matching-card', completion)).status, 'saved')

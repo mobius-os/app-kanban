@@ -17,6 +17,13 @@ export function hasCardCompletion(notes, prUrl) {
   })
 }
 
+export function cardPullUrls(card) {
+  const urls = Array.isArray(card?.pullRequestUrls) ? card.pullRequestUrls : []
+  return [...new Set([...urls, card?.pullRequestUrl]
+    .filter(value => typeof value === 'string' && value.trim())
+    .map(value => value.trim()))]
+}
+
 export function applyBoardOp(board, op) {
   if (!board || !op || typeof op !== 'object') return board
   switch (op.type) {
@@ -32,7 +39,25 @@ export function applyBoardOp(board, op) {
     }
     case 'update-card': {
       const card = board.cards[op.cardId]
-      if (card && op.patch && typeof op.patch === 'object') Object.assign(card, op.patch)
+      if (card && op.patch && typeof op.patch === 'object') {
+        const previousUrls = cardPullUrls(card)
+        Object.assign(card, op.patch)
+        if (Array.isArray(op.patch.pullRequestUrls)) {
+          card.pullRequestUrls = cardPullUrls({ pullRequestUrls: op.patch.pullRequestUrls })
+          card.pullRequestUrl = card.pullRequestUrls[0] || ''
+        } else if (typeof op.patch.pullRequestUrl === 'string') {
+          card.pullRequestUrls = cardPullUrls({ pullRequestUrls: [op.patch.pullRequestUrl, ...previousUrls.slice(1)] })
+          card.pullRequestUrl = card.pullRequestUrls[0] || ''
+        }
+      }
+      return board
+    }
+    case 'link-pull-request': {
+      const card = board.cards[op.cardId]
+      if (!card || typeof op.prUrl !== 'string' || !op.prUrl) return board
+      const urls = [...new Set([...cardPullUrls(card), op.prUrl])]
+      card.pullRequestUrls = urls
+      card.pullRequestUrl = urls[0]
       return board
     }
     case 'add-checklist-item': {

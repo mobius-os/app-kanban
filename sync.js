@@ -41,6 +41,9 @@ async function _json(res) {
     const err = new Error(detail)
     err.status = res.status
     err.code = code
+    if (['board-missing', 'membership-revoked'].includes(code)) {
+      err.retryable = false
+    }
     throw err
   }
   return res.json()
@@ -340,6 +343,91 @@ export async function deleteSharedAsset(entry, assetId, request = fetch) {
 // can relax to the former cadence without creating a permanent fast poll.
 export function sharedBoardPollDelay(lastInteractionAt, now = Date.now()) {
   return now - lastInteractionAt < 15_000 ? 1000 : 3000
+}
+
+const TERMINAL_SHARED_POLL_ERRORS = new Set([
+  'board-missing',
+  'membership-revoked',
+  'migration-required',
+  'migration-staged',
+  'authority-retired',
+])
+
+function invalidSharedPoll() {
+  return Object.assign(new Error('The board host returned an invalid state.'), {
+    code: 'authority-unavailable',
+  })
+}
+
+// Poll responses may omit the document only when they confirm the version we
+// already hold. A request is not a successful refresh until its authority and
+// document have passed this boundary.
+export function acceptSharedPoll(previous, entry, state) {
+  if (!entry || !Number.isSafeInteger(state?.version) || state.version < 0) {
+    throw invalidSharedPoll()
+  }
+  if ((state.host && state.host !== entry.host) || (state.oid && state.oid !== entry.oid)) {
+    throw invalidSharedPoll()
+  }
+  const current = previous?.host === entry.host && previous?.oid === entry.oid ? previous : null
+  if (current && state.version < current.version) return null
+  const hasDocument = Object.hasOwn(state, 'doc')
+  const document = hasDocument ? normalizeBoard(structuredClone(state.doc)) : null
+  if (hasDocument && !document) throw invalidSharedPoll()
+  if (!hasDocument) {
+    if (!current || state.version !== current.version) throw invalidSharedPoll()
+    return current
+  }
+  if (current && state.version === current.version) return current
+  return { host: entry.host, oid: entry.oid, version: state.version, doc: document }
+}
+
+export function sharedPollAvailability(error, hasCachedBoard) {
+  if (TERMINAL_SHARED_POLL_ERRORS.has(error?.code)) {
+    const messages = {
+      'board-missing': 'This shared board no longer exists. Your local copy and saved edits are unchanged.',
+      'membership-revoked': 'You no longer have access to this shared board. Your local copy and saved edits are unchanged.',
+      'migration-required': 'This board needs a new invitation from its host after the Kanban upgrade. Your local copy and saved edits are unchanged.',
+      'migration-staged': 'This shared board is being moved to a new authority. Ask its host for a fresh invitation; your local copy and saved edits are unchanged.',
+      'authority-retired': 'This shared board has moved to a new authority. Ask its host for a fresh invitation; your local copy and saved edits are unchanged.',
+    }
+    return { kind: 'terminal', message: messages[error.code], retryable: false }
+  }
+  return hasCachedBoard
+    ? { kind: 'reconnecting', message: 'Reconnecting — showing your last copy', retryable: true }
+    : { kind: 'unavailable', message: 'This shared board couldn’t be reached. Your saved edits are unchanged.', retryable: true }
+}
+
+// One lifecycle owns both visible availability and error-streak reporting. A
+// fulfilled request does not reset the streak; only successful authoritative
+// integration does.
+export function createSharedRefreshLifecycle({ onSignal, onAvailability }) {
+  let failureReported = false
+  let continueAutomatically = true
+  return {
+    async refresh({ pull, integrate, hasCachedBoard }) {
+      try {
+        const state = await pull()
+        const integrated = await integrate(state)
+        if (integrated === false) return { status: 'superseded' }
+        failureReported = false
+        continueAutomatically = true
+        const availability = { kind: 'ready', message: '', retryable: true }
+        onAvailability(availability)
+        return { status: 'ready', availability }
+      } catch (error) {
+        if (!failureReported) onSignal(error)
+        failureReported = true
+        const availability = sharedPollAvailability(error, hasCachedBoard())
+        continueAutomatically = availability.retryable
+        onAvailability(availability)
+        return { status: 'failed', error, availability }
+      }
+    },
+    shouldContinue() {
+      return continueAutomatically
+    },
+  }
 }
 
 // A shared object's poll is its only authority. The app-storage document is an

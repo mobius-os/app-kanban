@@ -5,8 +5,7 @@ import { configureSync, recoverMemberships } from '../sync.js'
 import { uid } from '../storage.js'
 import { isIsoDate } from '../domain.js'
 import { hasCardCompletion } from '../operations.js'
-import { pullCardScore } from '../prMatching.js'
-
+import { pullMatchesCard } from '../prMatching.js'
 
 const base = process.env.API_BASE_URL
 const token = process.env.AGENT_TOKEN
@@ -151,27 +150,23 @@ async function syncOpenPrs(dryRun) {
     const state = await repository.read(board.id)
     for (const card of Object.values(state.doc.cards)) {
       const assignee = normalizedAssignee(card.assignee)
-      if ((assignee === null || assignee === ownerLogin.toLocaleLowerCase()) && !card.pullRequestUrl) {
+      if ((assignee === null && state.authority === 'private') || assignee === ownerLogin.toLocaleLowerCase()) {
         candidateCards.push({ board, card })
       }
     }
   }
   const matched = []
   const skipped = []
-  const reservedCardIds = new Set()
   for (const pull of pulls) {
-    const scored = candidateCards
-      .map(({ board, card }) => ({ board, card, score: pullCardScore(pull, card) }))
-      .filter(({ card, score }) => score.eligible && !reservedCardIds.has(card.id))
-    if (scored.length !== 1) {
-      skipped.push({ pr: pull.html_url, title: pull.title, reason: scored.length === 0 ? 'no match' : 'multiple matches' })
+    const matches = candidateCards
+      .filter(({ card }) => pullMatchesCard(pull, card))
+    if (matches.length !== 1) {
+      skipped.push({ pr: pull.html_url, title: pull.title, reason: matches.length === 0 ? 'no match' : 'multiple matches' })
       continue
     }
-    const { board, card } = scored[0]
-    reservedCardIds.add(card.id)
+    const { board, card } = matches[0]
     if (!dryRun) {
-      const urls = [...new Set([...(Array.isArray(card.pullRequestUrls) ? card.pullRequestUrls : []), card.pullRequestUrl, pull.html_url].filter(Boolean))]
-      await repository.mutate(board.id, { type: 'update-card', cardId: card.id, patch: { pullRequestUrl: urls[0], pullRequestUrls: urls } })
+      await repository.mutate(board.id, { type: 'link-pull-request', cardId: card.id, prUrl: pull.html_url })
     }
     matched.push({ pr: pull.html_url, prTitle: pull.title, card: card.title, boardId: board.id, cardId: card.id })
   }
