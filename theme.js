@@ -303,6 +303,7 @@ export const CSS = `
   .kb-board::-webkit-scrollbar-thumb, .kb-cards::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
   .kb-board::-webkit-scrollbar-track, .kb-cards::-webkit-scrollbar-track { background: transparent; }
   .kb-card {
+    position: relative;
     flex-shrink: 0;
     background: var(--surface);
     border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
@@ -317,7 +318,8 @@ export const CSS = `
     min-height: 44px;
   }
   .kb-card:active { cursor: grabbing; }
-  .kb-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .kb-card-open { position: absolute; inset: 0; z-index: 1; width: 100%; border: 0; border-radius: inherit; background: transparent; cursor: pointer; }
+  .kb-card-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .kb-card.kb-readonly { cursor: pointer; }
   .kb-card-cover-wrap {
     position: relative;
@@ -353,7 +355,8 @@ export const CSS = `
     font-size: 11px;
     font-weight: 700;
   }
-  .kb-card-title { font-size: 14px; font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; }
+  .kb-card-title { font-size: 14px; font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; pointer-events: none; }
+  .kb-card-title a { position: relative; z-index: 2; pointer-events: auto; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
   .kb-card-notes {
     margin-top: 7px;
     color: var(--muted);
@@ -648,19 +651,16 @@ export const CSS = `
   .kb-card-meta-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
   .kb-card-field { min-width: 0; }
   .kb-title-input,
-  .kb-notes-input { min-height: 68px; overflow-y: hidden; }
-  .kb-editor-display { position: relative; }
-  .kb-editor-can-edit .kb-title-display,
-  .kb-editor-can-edit .kb-notes-display { padding-right: 72px; }
-  .kb-editor-action {
-    position: absolute;
-    top: 0;
-    right: 0;
-    min-width: 64px;
-    min-height: 44px;
-    padding-inline: 12px;
+  .kb-notes-input {
+    flex: 0 0 auto;
+    max-height: none;
+    overflow: hidden;
+    font-size: 16px;
   }
-  .kb-notes-edit { top: 4px; right: 4px; }
+  .kb-detail-field { position: relative; min-width: 0; flex: 0 0 auto; }
+  .kb-editable-field { cursor: text; border-radius: 10px; }
+  .kb-editable-field:hover { background: color-mix(in srgb, var(--surface-2) 68%, transparent); }
+  .kb-editable-field:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .kb-title-input {
     min-height: 44px;
     padding-inline: 2px;
@@ -671,8 +671,14 @@ export const CSS = `
     letter-spacing: -0.02em;
   }
   .kb-title-display {
+    display: block;
+    width: 100%;
     min-height: 44px;
     padding: 8px 2px;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    font-family: var(--font);
     color: var(--text);
     font-size: 20px;
     font-weight: 700;
@@ -689,9 +695,35 @@ export const CSS = `
     line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    pointer-events: none;
   }
-  .kb-notes-display a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .kb-notes-field:hover .kb-notes-display { background: color-mix(in srgb, var(--surface-2) 68%, transparent); }
+  .kb-notes-edit-hit { position: absolute; inset: 0; z-index: 1; width: 100%; border: 0; border-radius: 10px; background: transparent; cursor: text; }
+  .kb-notes-edit-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .kb-notes-display a { position: relative; z-index: 2; pointer-events: auto; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
   .kb-notes-empty { color: var(--muted); }
+  .kb-pr-reference { display: grid; gap: 10px; border-block: 1px solid var(--border); padding-block: 14px; }
+  .kb-pr-list { display: grid; gap: 6px; }
+  .kb-pr-item { min-height: 44px; display: flex; align-items: center; gap: 9px; padding: 7px 8px 7px 11px; border: 1px solid color-mix(in srgb, var(--border) 78%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--surface-2) 56%, transparent); }
+  .kb-pr-link { min-width: 0; min-height: 44px; display: inline-flex; align-items: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 13px; font-weight: 650; text-decoration: none; }
+  .kb-pr-link:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+  .kb-pr-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
+  .kb-pr-edit { min-height: 44px; border: 0; padding: 6px; color: var(--muted); background: transparent; font: 600 12px/1 var(--font); cursor: pointer; }
+  .kb-pr-edit:hover { color: var(--text); }
+  .kb-pr-remove, .kb-pr-refresh { flex: 0 0 44px; width: 44px; height: 44px; min-height: 44px; padding: 0; font-size: 18px; line-height: 1; }
+  .kb-pr-remove > svg { width: 15px; height: 15px; }
+  .kb-pr-editor { display: flex; align-items: center; gap: 7px; padding: 2px 0; }
+  .kb-pr-editor .kb-input { min-width: 0; flex: 1 1 auto; font-size: 16px; }
+  .kb-pr-editor .kb-btn { min-height: 44px; padding-inline: 11px; }
+  .kb-pr-cancel { color: var(--muted); background: transparent; }
+  .kb-pr-add { justify-self: start; min-height: 44px; padding-inline: 10px; color: var(--muted); background: transparent; border: 1px dashed var(--border); }
+  .kb-pr-add:hover { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  .kb-pr-add > svg { width: 15px; height: 15px; }
+  .kb-pr-status { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; font-size: 11px; font-weight: 650; }
+  .kb-pr-status-open { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+  .kb-pr-status-draft, .kb-pr-status-checking { background: var(--surface-2); color: var(--muted); }
+  .kb-pr-status-merged { background: color-mix(in srgb, #38b875 18%, transparent); color: #319867; }
+  .kb-pr-status-closed, .kb-pr-status-unavailable { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
   .kb-card-sheet {
     top: clamp(56px, 9dvh, 104px);
     bottom: auto;
@@ -703,8 +735,6 @@ export const CSS = `
   }
   .kb-notes-input {
     resize: none;
-    max-height: min(48dvh, 520px);
-    overflow-y: auto;
     scroll-margin-block: 16px;
     border-color: transparent;
     background: var(--surface-2);
