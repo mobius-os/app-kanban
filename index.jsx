@@ -6,6 +6,15 @@ import { sharingFromBoards } from './publication.js'
 import Home from './ui/Home.jsx'
 import Board from './ui/Board.jsx'
 
+function LoadingBoards() {
+  return (
+    <div className="kb-loading" role="status" aria-live="polite">
+      <span className="kb-loading-spinner" aria-hidden="true" />
+      <span>Loading boards…</span>
+    </div>
+  )
+}
+
 export default function App({ appId, token }) {
   const [boards, setBoards] = useState(null)
   const [shareMap, setShareMap] = useState({ byBoard: {} })
@@ -268,7 +277,7 @@ export default function App({ appId, token }) {
           else refresh()
         }}>Try again</button>
       </section>}
-      {!resolved ? null : openId ? (
+      {!resolved ? <LoadingBoards /> : openId ? (
         <Board
           key={openId}
           token={token}

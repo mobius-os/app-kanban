@@ -23,6 +23,28 @@ export const CSS = `
     font-family: var(--font);
     overflow: hidden;
   }
+  .kb-loading {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 24px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .kb-loading-spinner {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 auto;
+    border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 999px;
+    animation: kb-loading-spin 700ms linear infinite;
+  }
+  @keyframes kb-loading-spin { to { transform: rotate(360deg); } }
   .kb-root :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .kb-root button, .kb-root input, .kb-root textarea { -webkit-tap-highlight-color: transparent; }
   .kb-root button { transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out, transform 120ms ease-out, filter 120ms ease-out; }
@@ -1257,6 +1279,7 @@ export const CSS = `
 
   @media (prefers-reduced-motion: reduce) {
     .kb-board-enter .kb-col { animation: none; }
+    .kb-loading-spinner { animation: none; }
     .kb-card, .kb-tile, .kb-col-actions, .kb-root button { transition: none; }
   }
 `
