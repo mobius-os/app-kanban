@@ -148,22 +148,29 @@ export default function App({ appId, token }) {
     })
   }, [])
 
+  const showHome = useCallback(() => {
+    openBoardIdRef.current = null
+    setOpenId(null)
+    saveLastBoardId(null).catch(e => {
+      window.mobius?.signal?.('error', { message: String(e?.message || e), source: 'save-ui' })
+    })
+    refresh()
+  }, [refresh])
+
   const closeBoard = useCallback(async () => {
     if (navRef.current) {
       // This board was entered from home; closing its sentinel reveals that
       // same home entry without adding another history item.
       navRef.current.close()
       navRef.current = null
-      setOpenId(null)
-      refresh()
+      showHome()
       return
     }
 
     const previousId = openId
     const nav = window.mobius?.nav
     if (!previousId || !nav?.open) {
-      setOpenId(null)
-      refresh()
+      showHome()
       return
     }
 
@@ -173,15 +180,14 @@ export default function App({ appId, token }) {
     let handle = null
     handle = nav.open('kanban-home', {
       onBack: () => { navRef.current = null; showBoard(previousId) },
-      onForward: () => { navRef.current = handle; setOpenId(null); refresh() },
+      onForward: () => { navRef.current = handle; showHome() },
     })
     navRef.current = handle
     const { status } = await handle.outcome
     if (navRef.current !== handle) { handle.close(); return }
     if (status !== 'owned') { navRef.current = null; return }
-    setOpenId(null)
-    refresh()
-  }, [openId, refresh, showBoard])
+    showHome()
+  }, [openId, showBoard, showHome])
 
   const openBoard = useCallback(async id => {
     const nav = window.mobius?.nav

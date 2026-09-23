@@ -528,6 +528,33 @@ export const CSS = `
   }
   .kb-empty-left { padding: 0; text-align: left; }
   .kb-board-empty { align-items: center; justify-content: center; }
+  .kb-board-skeleton { overflow: hidden; pointer-events: none; }
+  .kb-board-skeleton-col {
+    flex: 0 0 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--surface) 55%, var(--bg));
+  }
+  .kb-board-skeleton-line,
+  .kb-board-skeleton-card {
+    display: block;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--surface-2) 78%, var(--border));
+    animation: kb-board-skeleton-pulse 1.25s ease-in-out infinite alternate;
+  }
+  .kb-board-skeleton-line { width: 42%; height: 14px; margin: 7px 2px 5px; border-radius: 999px; }
+  .kb-board-skeleton-card { width: 100%; height: 92px; }
+  .kb-board-skeleton-card-short { height: 68px; }
+  .kb-board-skeleton-col:nth-of-type(2) .kb-board-skeleton-card:nth-child(2) { height: 72px; }
+  .kb-board-skeleton-col:nth-of-type(3) .kb-board-skeleton-card:nth-child(3) { height: 112px; }
+  @keyframes kb-board-skeleton-pulse {
+    from { opacity: 0.5; }
+    to { opacity: 0.92; }
+  }
   .kb-empty-board-state {
     min-width: min(100%, 320px);
     display: flex;
@@ -1280,6 +1307,7 @@ export const CSS = `
   @media (prefers-reduced-motion: reduce) {
     .kb-board-enter .kb-col { animation: none; }
     .kb-loading-spinner { animation: none; }
+    .kb-board-skeleton-line, .kb-board-skeleton-card { animation: none; }
     .kb-card, .kb-tile, .kb-col-actions, .kb-root button { transition: none; }
   }
 `

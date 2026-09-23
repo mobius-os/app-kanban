@@ -1477,12 +1477,24 @@ export default function Board({
       <button className="kb-btn" onClick={onAllBoards}><ChevronLeft /> All boards</button>
       {recoveryButton}
     </div>
-    <div className="kb-board kb-board-empty"><div className="kb-empty-board-state" role={loadFailure ? 'alert' : 'status'}>
-      {loadFailure ? <>
+    {loadFailure ? (
+      <div className="kb-board kb-board-empty"><div className="kb-empty-board-state" role="alert">
         <p>This board couldn’t be loaded. Your saved data is unchanged.</p>
         <button className="kb-btn kb-btn-primary" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Try again</button>
-      </> : 'Loading board…'}
-    </div></div>
+      </div></div>
+    ) : (
+      <div className="kb-board kb-board-skeleton" role="status" aria-busy="true">
+        <span className="kb-visually-hidden">Loading board…</span>
+        {[0, 1, 2].map(column => (
+          <div className="kb-board-skeleton-col" aria-hidden="true" key={column}>
+            <span className="kb-board-skeleton-line kb-board-skeleton-line-title" />
+            <span className="kb-board-skeleton-card" />
+            <span className="kb-board-skeleton-card" />
+            <span className="kb-board-skeleton-card kb-board-skeleton-card-short" />
+          </div>
+        ))}
+      </div>
+    )}
   </>
 
   const openCard_ = openCardId ? board.cards[openCardId] : null
