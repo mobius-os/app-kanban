@@ -26,7 +26,11 @@ export default function App({ appId, token }) {
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [online, setOnline] = useState(() => window.mobius?.online !== false)
   const navRef = useRef(null)
-  const openBoardIdRef = useRef(null)
+  // The current history entry owns its board destination independently from
+  // the visible route. Back can show the gallery without destroying the
+  // destination that Forward must restore; switching boards updates that same
+  // entry in place.
+  const boardEntryDestinationRef = useRef(null)
   const navigationIntentRef = useRef(0)
   const readySignalled = useRef(false)
 
@@ -96,7 +100,7 @@ export default function App({ appId, token }) {
           // This is intentionally plain state, not nav.open: system Back from
           // the launch board must leave the app rather than reveal home.
           setOpenId(ui.lastBoardId)
-          openBoardIdRef.current = ui.lastBoardId
+          boardEntryDestinationRef.current = ui.lastBoardId
           saveLastBoardId(ui.lastBoardId).catch(() => {})
         }
         refreshInvitations()
@@ -150,7 +154,7 @@ export default function App({ appId, token }) {
 
   const showBoard = useCallback(id => {
     navigationIntentRef.current += 1
-    openBoardIdRef.current = id
+    boardEntryDestinationRef.current = id
     setOpenId(id)
     saveLastBoardId(id).catch(e => {
       window.mobius?.signal?.('error', { message: String(e?.message || e), source: 'save-ui' })
@@ -168,7 +172,6 @@ export default function App({ appId, token }) {
     // decision. saveLastBoardId serializes the durable choices separately;
     // this guard owns only which destination is still current in this frame.
     if (navigationIntentRef.current !== intent) return false
-    openBoardIdRef.current = null
     setOpenId(null)
     refresh()
     return true
@@ -215,7 +218,7 @@ export default function App({ appId, token }) {
       onBack: () => { navRef.current = null; void showHome() },
       onForward: () => {
         navRef.current = handle
-        if (openBoardIdRef.current) showBoard(openBoardIdRef.current)
+        if (boardEntryDestinationRef.current) showBoard(boardEntryDestinationRef.current)
       },
     })
     navRef.current = handle

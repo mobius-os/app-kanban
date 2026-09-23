@@ -27,8 +27,12 @@ test('the all-boards destination is persisted instead of reopening a stale board
   assert.match(showHome, /await saveLastBoardId\(null\)/)
   assert.ok(showHome.indexOf('await saveLastBoardId(null)') < showHome.indexOf('setOpenId(null)'),
     'the gallery is not presented as settled until its destination is durable')
+  assert.doesNotMatch(showHome, /boardEntryDestinationRef\.current\s*=\s*null/,
+    'gallery visibility must not erase the board destination owned by browser Forward')
   assert.match(app, /navRef\.current\.close\(\)[\s\S]*await showHome\(\)/)
   assert.match(app, /onForward: \(\) => \{ navRef\.current = handle; void showHome\(\) \}/)
+  assert.match(app, /onForward:[\s\S]*boardEntryDestinationRef\.current[\s\S]*showBoard\(boardEntryDestinationRef\.current\)/,
+    'browser Forward must restore the destination retained by the history entry')
 })
 
 test('an individual board uses a shaped skeleton rather than a second visible loading message', () => {
