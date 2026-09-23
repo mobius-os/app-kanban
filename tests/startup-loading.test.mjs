@@ -35,6 +35,15 @@ test('an individual board uses a shaped skeleton rather than a second visible lo
   assert.match(board, /className="kb-board kb-board-skeleton" role="status" aria-busy="true"/)
   assert.match(board, /className="kb-visually-hidden">Loading board…<\/span>/)
   assert.doesNotMatch(board, /: 'Loading board…'/)
-  assert.match(CSS, /\.kb-board-skeleton-col \{[^}]*flex: 0 0 320px/s)
+  assert.match(CSS, /\.kb-board-skeleton-col \{[^}]*flex: 0 0 336px/s)
   assert.match(CSS, /\.kb-board-skeleton-card \{[^}]*height: 92px/s)
+})
+
+test('the board skeleton reuses the settled header, lane, card-stack, and responsive geometry', () => {
+  assert.match(board, /kb-header kb-board-header kb-board-skeleton-header/)
+  assert.match(board, /kb-col-head kb-board-skeleton-col-head/)
+  assert.match(board, /kb-cards kb-board-skeleton-cards/)
+  assert.match(CSS, /\.kb-board-skeleton-col \{[^}]*width: 336px[^}]*border-radius: 14px/s)
+  assert.match(CSS, /\.kb-board-skeleton-card \{[^}]*border-radius: 11px/s)
+  assert.match(CSS, /\.kb-board-skeleton-col \{ flex-basis: min\(336px, calc\(100vw - 32px\)\)/)
 })
