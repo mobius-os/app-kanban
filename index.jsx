@@ -22,6 +22,7 @@ export default function App({ appId, token }) {
   const [openId, setOpenId] = useState(null)
   const [resolved, setResolved] = useState(false)
   const [loadError, setLoadError] = useState(false)
+  const [directoryUnavailable, setDirectoryUnavailable] = useState(false)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [online, setOnline] = useState(() => window.mobius?.online !== false)
   const navRef = useRef(null)
@@ -45,12 +46,16 @@ export default function App({ appId, token }) {
   const refresh = useCallback(async () => {
     try {
       const [listing, loadedMap] = await Promise.all([listBoardsWithStatus(), loadShareMap()])
-      if (!listing.complete) return null
+      if (!listing.complete) {
+        setDirectoryUnavailable(listing.boards.length === 0)
+        return null
+      }
       const cached = listing.boards
       const map = sharingFromBoards(cached, loadedMap)
       const b = includeSharedBoards(cached, map)
       setBoards(b)
       setLoadError(false)
+      setDirectoryUnavailable(false)
       setShareMap(map)
       refreshInvitations()
       if (!readySignalled.current) {
@@ -76,6 +81,7 @@ export default function App({ appId, token }) {
         let b = boardListing.boards
         map = sharingFromBoards(b, map)
         b = includeSharedBoards(b, map)
+        setDirectoryUnavailable(!boardListing.complete && b.length === 0)
         // Seed only after a current server-authoritative empty listing. A cold
         // or cached offline empty result may be missing boards created elsewhere.
         if (b.length === 0 && boardListing.complete && boardListing.source === 'server') {
@@ -99,6 +105,7 @@ export default function App({ appId, token }) {
         }
       } catch (e) {
         setLoadError(true)
+        setDirectoryUnavailable(window.mobius?.online === false && boards === null)
         window.mobius?.signal?.('error', { message: String(e?.message || e), source: 'initial-load' })
       } finally {
         // The loading root remains the only rendered view until the launch
@@ -276,7 +283,11 @@ export default function App({ appId, token }) {
   return (
     <div className="kb-root">
       <style>{CSS}</style>
-      {resolved && loadError && <section className="kb-load-error" role="alert">
+      {resolved && directoryUnavailable && !online && <section className="kb-load-error" role="status">
+        <h2>No boards are available offline yet</h2>
+        <p>Reconnect to load your boards.</p>
+      </section>}
+      {resolved && loadError && !(directoryUnavailable && !online) && <section className="kb-load-error" role="alert">
         <h2>Boards couldn’t be loaded</h2>
         <p>{boards ? 'Your last loaded boards are still here. Try refreshing the list.' : 'We couldn’t read your boards. Try again to load them.'}</p>
         <button className="kb-btn kb-btn-primary" onClick={() => {

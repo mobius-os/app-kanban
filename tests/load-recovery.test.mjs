@@ -18,6 +18,13 @@ test('load failure preserves last loaded boards and offers an explicit retry', (
   assert.match(source, /setLoadAttempt\(attempt => attempt \+ 1\)/)
 })
 
+test('a cold offline directory has honest app-owned copy and no futile retry', () => {
+  const source = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
+  assert.match(source, /No boards are available offline yet/)
+  assert.match(source, /Reconnect to load your boards\./)
+  assert.match(source, /directoryUnavailable && !online/)
+})
+
 
 test('an unavailable board exposes retry and the owning all-boards callback', () => {
   const source = readFileSync(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
