@@ -300,7 +300,7 @@ test('card-title links open directly and pull-request status stays informational
   assert.match(boardSource, /kb-pr-status/)
   assert.match(boardSource, /setPullStatusRefresh/)
   assert.match(boardSource, /function PullRequestReferences/)
-  assert.match(boardSource, /pullRequestUrls: cleaned/)
+  assert.match(boardSource, /type: 'edit-pull-request'/)
   assert.match(boardSource, /Add pull request/)
   assert.match(storageSource, /pullRequestUrls/)
   assert.doesNotMatch(boardSource, /moveCard\(card\.id, done\.id, null\)/)

@@ -467,43 +467,38 @@ function PullRequestReferences({ card, canWrite, statuses, onUpdate, onRefresh }
   const [draft, setDraft] = useState('')
   const [error, setError] = useState('')
   useEffect(() => { setEditor(null); setDraft(''); setError('') }, [card.id])
-  const save = index => {
+  const save = () => {
     if (!githubPullPath(draft.trim())) { setError('Use a GitHub pull request URL.'); return }
-    const next = index === null ? [...urls, draft] : urls.map((url, itemIndex) => itemIndex === index ? draft : url)
-    const cleaned = [...new Set(next.map(value => value.trim()).filter(Boolean))]
-    onUpdate({ pullRequestUrls: cleaned, pullRequestUrl: cleaned[0] || '' })
+    onUpdate(editor === 'add' ? null : editor, draft.trim())
     setEditor(null); setDraft(''); setError('')
   }
-  const remove = index => {
-    const cleaned = urls.filter((_, itemIndex) => itemIndex !== index)
-    onUpdate({ pullRequestUrls: cleaned, pullRequestUrl: cleaned[0] || '' })
-  }
+  const remove = url => onUpdate(url, '')
   return <section className="kb-pr-reference" aria-labelledby="kb-pr-reference-title">
     <div className="kb-section-heading">
       <h3 id="kb-pr-reference-title">Linked pull requests</h3>
       {urls.length > 0 && <button type="button" className="kb-iconbtn kb-pr-refresh" aria-label="Refresh pull request statuses" title="Refresh statuses" onClick={onRefresh}>↻</button>}
     </div>
     {urls.length > 0 && <div className="kb-pr-list">
-      {urls.map((url, index) => {
+      {urls.map(url => {
         const path = githubPullPath(url)
         const status = path
           ? statuses[`${card.id}:${path}`] || { label: 'Checking…', tone: 'checking' }
           : { label: 'Unavailable', tone: 'unavailable' }
-        const isEditing = editor === index
+        const isEditing = editor === url
         return <div className="kb-pr-item" key={`${card.id}-${url}`}>
-          {isEditing ? <form className="kb-pr-editor" onSubmit={event => { event.preventDefault(); save(index) }}>
+          {isEditing ? <form className="kb-pr-editor" onSubmit={event => { event.preventDefault(); save() }}>
             <input className="kb-input" type="url" autoFocus value={draft} placeholder="https://github.com/owner/repo/pull/123" onChange={event => { setDraft(event.target.value); setError('') }} />
             <button type="submit" className="kb-btn">Save</button>
             <button type="button" className="kb-btn kb-pr-cancel" onClick={() => { setEditor(null); setDraft('') }}>Cancel</button>
           </form> : <>
             <a className="kb-pr-link" href={url} target="_blank" rel="noreferrer">{pullRequestLabel(url)}</a>
             <span className={`kb-pr-status kb-pr-status-${status.tone}`}>{status.label}</span>
-            {canWrite && <span className="kb-pr-actions"><button type="button" className="kb-pr-edit" onClick={() => { setEditor(index); setDraft(url) }}>Edit</button><button type="button" className="kb-iconbtn kb-pr-remove" aria-label={`Remove ${pullRequestLabel(url)}`} title="Remove pull request" onClick={() => remove(index)}><Trash /></button></span>}
+            {canWrite && <span className="kb-pr-actions"><button type="button" className="kb-pr-edit" onClick={() => { setEditor(url); setDraft(url) }}>Edit</button><button type="button" className="kb-iconbtn kb-pr-remove" aria-label={`Remove ${pullRequestLabel(url)}`} title="Remove pull request" onClick={() => remove(url)}><Trash /></button></span>}
           </>}
         </div>
       })}
     </div>}
-    {canWrite && (editor === 'add' ? <form className="kb-pr-editor" onSubmit={event => { event.preventDefault(); save(null) }}>
+    {canWrite && (editor === 'add' ? <form className="kb-pr-editor" onSubmit={event => { event.preventDefault(); save() }}>
       <input className="kb-input" type="url" autoFocus value={draft} placeholder="https://github.com/owner/repo/pull/123" onChange={event => { setDraft(event.target.value); setError('') }} />
       <button type="submit" className="kb-btn">Add</button>
       <button type="button" className="kb-btn kb-pr-cancel" onClick={() => { setEditor(null); setDraft('') }}>Cancel</button>
@@ -1845,7 +1840,7 @@ export default function Board({
             }} onCancel={() => { if (isDraftCard) { setDraftCard(null); setOpenCardId(null) } }} />
             {!isDraftCard && <>
             <CardNotesEditor card={openCard_} canWrite={access.canWrite} onCommit={notes => updateCard(openCard_.id, { notes })} />
-            <PullRequestReferences card={openCard_} canWrite={access.canWrite} statuses={pullStatuses} onUpdate={patch => updateCard(openCard_.id, patch)} onRefresh={() => setPullStatusRefresh(value => value + 1)} />
+            <PullRequestReferences card={openCard_} canWrite={access.canWrite} statuses={pullStatuses} onUpdate={(previousUrl, nextUrl) => mutate({ type: 'edit-pull-request', cardId: openCard_.id, previousUrl, nextUrl })} onRefresh={() => setPullStatusRefresh(value => value + 1)} />
 
             <div>
               <div className="kb-section-heading"><h3>Checklist</h3>{Array.isArray(openCard_.checklist) && openCard_.checklist.length > 0 && <span>{openCard_.checklist.filter(item => item.done).length}/{openCard_.checklist.length}</span>}</div>

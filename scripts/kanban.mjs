@@ -166,7 +166,12 @@ async function syncOpenPrs(dryRun) {
     }
     const { board, card } = matches[0]
     if (!dryRun) {
-      await repository.mutate(board.id, { type: 'link-pull-request', cardId: card.id, prUrl: pull.html_url })
+      const saved = await repository.mutate(board.id, {
+        type: 'edit-pull-request', cardId: card.id, previousUrl: null, nextUrl: pull.html_url,
+      })
+      if (!saved.doc.cards[card.id]?.pullRequestUrls?.includes(pull.html_url)) {
+        throw new Error(`Card changed before linking ${pull.html_url}; retry after refreshing the board.`)
+      }
     }
     matched.push({ pr: pull.html_url, prTitle: pull.title, card: card.title, boardId: board.id, cardId: card.id })
   }

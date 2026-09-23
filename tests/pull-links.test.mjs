@@ -32,3 +32,14 @@ test('normalization preserves a legacy scalar PR link', () => {
   const result = normalizeBoard(doc)
   assert.deepEqual(result.cards.card.pullRequestUrls, ['https://github.com/acme/app/pull/1'])
 })
+
+test('PR link edits rebase on concurrent links without overwriting them', () => {
+  const doc = board()
+  doc.cards.card.pullRequestUrls.push('https://github.com/acme/app/pull/3')
+  applyBoardOp(doc, { type: 'edit-pull-request', cardId: 'card', previousUrl: null, nextUrl: 'https://github.com/acme/app/pull/4' })
+  assert.deepEqual(doc.cards.card.pullRequestUrls, [1, 2, 3, 4].map(number => `https://github.com/acme/app/pull/${number}`))
+  applyBoardOp(doc, { type: 'edit-pull-request', cardId: 'card', previousUrl: 'https://github.com/acme/app/pull/1', nextUrl: 'https://github.com/acme/app/pull/5' })
+  assert.deepEqual(doc.cards.card.pullRequestUrls, [5, 2, 3, 4].map(number => `https://github.com/acme/app/pull/${number}`))
+  applyBoardOp(doc, { type: 'edit-pull-request', cardId: 'card', previousUrl: 'https://github.com/acme/app/pull/2', nextUrl: '' })
+  assert.deepEqual(doc.cards.card.pullRequestUrls, [5, 3, 4].map(number => `https://github.com/acme/app/pull/${number}`))
+})

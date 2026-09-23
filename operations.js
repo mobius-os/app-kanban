@@ -52,12 +52,20 @@ export function applyBoardOp(board, op) {
       }
       return board
     }
-    case 'link-pull-request': {
+    case 'edit-pull-request': {
       const card = board.cards[op.cardId]
-      if (!card || typeof op.prUrl !== 'string' || !op.prUrl) return board
-      const urls = [...new Set([...cardPullUrls(card), op.prUrl])]
-      card.pullRequestUrls = urls
-      card.pullRequestUrl = urls[0]
+      if (!card || typeof op.nextUrl !== 'string') return board
+      const urls = cardPullUrls(card)
+      if (op.previousUrl === null) {
+        if (op.nextUrl.trim()) urls.push(op.nextUrl.trim())
+      } else {
+        const index = urls.indexOf(op.previousUrl)
+        if (index < 0) return board
+        if (op.nextUrl.trim()) urls.splice(index, 1, op.nextUrl.trim())
+        else urls.splice(index, 1)
+      }
+      card.pullRequestUrls = [...new Set(urls)]
+      card.pullRequestUrl = card.pullRequestUrls[0] || ''
       return board
     }
     case 'add-checklist-item': {
