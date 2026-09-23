@@ -47,3 +47,14 @@ test('the board skeleton reuses the settled header, lane, card-stack, and respon
   assert.match(CSS, /\.kb-board-skeleton-card \{[^}]*border-radius: 11px/s)
   assert.match(CSS, /\.kb-board-skeleton-col \{ flex-basis: min\(336px, calc\(100vw - 32px\)\)/)
 })
+
+test('reduced motion disables every pulsing skeleton element', () => {
+  const reducedMotion = CSS.slice(CSS.lastIndexOf('@media (prefers-reduced-motion: reduce)'))
+  for (const className of [
+    'icon', 'header-title', 'nav-pill', 'line', 'count',
+    'actions', 'dot', 'card', 'add',
+  ]) {
+    assert.match(reducedMotion, new RegExp(`\\.kb-board-skeleton-${className}`))
+  }
+  assert.match(reducedMotion, /animation: none/)
+})

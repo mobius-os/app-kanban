@@ -27,6 +27,7 @@ export default function App({ appId, token }) {
   const [online, setOnline] = useState(() => window.mobius?.online !== false)
   const navRef = useRef(null)
   const openBoardIdRef = useRef(null)
+  const navigationIntentRef = useRef(0)
   const readySignalled = useRef(false)
 
   configureSync(token, appId)
@@ -148,6 +149,7 @@ export default function App({ appId, token }) {
   }, [refreshInvitations])
 
   const showBoard = useCallback(id => {
+    navigationIntentRef.current += 1
     openBoardIdRef.current = id
     setOpenId(id)
     saveLastBoardId(id).catch(e => {
@@ -156,14 +158,20 @@ export default function App({ appId, token }) {
   }, [])
 
   const showHome = useCallback(async () => {
+    const intent = ++navigationIntentRef.current
     try {
       await saveLastBoardId(null)
     } catch (e) {
       window.mobius?.signal?.('error', { message: String(e?.message || e), source: 'save-ui' })
     }
+    // A slow preference write must not visually rewind a newer Back/Forward
+    // decision. saveLastBoardId serializes the durable choices separately;
+    // this guard owns only which destination is still current in this frame.
+    if (navigationIntentRef.current !== intent) return false
     openBoardIdRef.current = null
     setOpenId(null)
     refresh()
+    return true
   }, [refresh])
 
   const closeBoard = useCallback(async () => {
@@ -204,7 +212,7 @@ export default function App({ appId, token }) {
     navRef.current?.close()
     let handle = null
     handle = nav.open('kanban-board', {
-      onBack: () => { navRef.current = null; setOpenId(null); refresh() },
+      onBack: () => { navRef.current = null; void showHome() },
       onForward: () => {
         navRef.current = handle
         if (openBoardIdRef.current) showBoard(openBoardIdRef.current)
@@ -215,7 +223,7 @@ export default function App({ appId, token }) {
     if (navRef.current !== handle) { handle.close(); return }
     if (status !== 'owned') { navRef.current = null; return }
     showBoard(id)
-  }, [refresh, showBoard])
+  }, [showBoard, showHome])
 
   // Switching within the board surface deliberately keeps the current nav
   // handle. A board entered from home still has exactly one Back sentinel;

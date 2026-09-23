@@ -1325,7 +1325,15 @@ export const CSS = `
   @media (prefers-reduced-motion: reduce) {
     .kb-board-enter .kb-col { animation: none; }
     .kb-loading-spinner { animation: none; }
-    .kb-board-skeleton-line, .kb-board-skeleton-card { animation: none; }
+    .kb-board-skeleton-icon,
+    .kb-board-skeleton-header-title,
+    .kb-board-skeleton-nav-pill,
+    .kb-board-skeleton-line,
+    .kb-board-skeleton-count,
+    .kb-board-skeleton-actions,
+    .kb-board-skeleton-dot,
+    .kb-board-skeleton-card,
+    .kb-board-skeleton-add { animation: none; }
     .kb-card, .kb-tile, .kb-col-actions, .kb-root button { transition: none; }
   }
 `
