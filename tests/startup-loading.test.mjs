@@ -23,9 +23,12 @@ test('startup spinner is themed and respects reduced motion', () => {
 })
 
 test('the all-boards destination is persisted instead of reopening a stale board', () => {
-  assert.match(app, /const showHome = useCallback\(\(\) => \{[\s\S]*openBoardIdRef\.current = null[\s\S]*saveLastBoardId\(null\)/)
-  assert.match(app, /navRef\.current\.close\(\)[\s\S]*showHome\(\)/)
-  assert.match(app, /onForward: \(\) => \{ navRef\.current = handle; showHome\(\) \}/)
+  const showHome = app.slice(app.indexOf('const showHome = useCallback'), app.indexOf('const closeBoard'))
+  assert.match(showHome, /await saveLastBoardId\(null\)/)
+  assert.ok(showHome.indexOf('await saveLastBoardId(null)') < showHome.indexOf('setOpenId(null)'),
+    'the gallery is not presented as settled until its destination is durable')
+  assert.match(app, /navRef\.current\.close\(\)[\s\S]*await showHome\(\)/)
+  assert.match(app, /onForward: \(\) => \{ navRef\.current = handle; void showHome\(\) \}/)
 })
 
 test('an individual board uses a shaped skeleton rather than a second visible loading message', () => {
