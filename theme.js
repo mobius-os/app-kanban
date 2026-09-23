@@ -23,6 +23,28 @@ export const CSS = `
     font-family: var(--font);
     overflow: hidden;
   }
+  .kb-loading {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 24px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .kb-loading-spinner {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 auto;
+    border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 999px;
+    animation: kb-loading-spin 700ms linear infinite;
+  }
+  @keyframes kb-loading-spin { to { transform: rotate(360deg); } }
   .kb-root :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .kb-root button, .kb-root input, .kb-root textarea { -webkit-tap-highlight-color: transparent; }
   .kb-root button { transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out, transform 120ms ease-out, filter 120ms ease-out; }
@@ -506,6 +528,49 @@ export const CSS = `
   }
   .kb-empty-left { padding: 0; text-align: left; }
   .kb-board-empty { align-items: center; justify-content: center; }
+  .kb-board-skeleton { overflow: hidden; pointer-events: none; }
+  .kb-board-skeleton-header { pointer-events: none; }
+  .kb-board-skeleton-icon,
+  .kb-board-skeleton-header-title,
+  .kb-board-skeleton-nav-pill,
+  .kb-board-skeleton-line,
+  .kb-board-skeleton-count,
+  .kb-board-skeleton-actions,
+  .kb-board-skeleton-dot,
+  .kb-board-skeleton-card,
+  .kb-board-skeleton-add {
+    display: block;
+    background: color-mix(in srgb, var(--surface-2) 78%, var(--border));
+    animation: kb-board-skeleton-pulse 1.25s ease-in-out infinite alternate;
+  }
+  .kb-board-skeleton-icon { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 8px; }
+  .kb-board-skeleton-header-title { width: min(210px, 34vw); height: 24px; border-radius: 8px; }
+  .kb-board-skeleton-nav-pill { width: 112px; height: 44px; flex: 0 0 112px; border-radius: 10px; }
+  .kb-board-skeleton-col {
+    flex: 0 0 336px;
+    width: 336px;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 8px;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--surface-2) 72%, var(--bg));
+  }
+  .kb-board-skeleton-col-head { flex-wrap: nowrap; }
+  .kb-board-skeleton-dot { width: 7px; height: 7px; margin-right: 4px; flex: 0 0 7px; border-radius: 999px; }
+  .kb-board-skeleton-line { width: 42%; height: 14px; flex: 1 1 auto; border-radius: 999px; }
+  .kb-board-skeleton-count { width: 30px; height: 22px; flex: 0 0 30px; border-radius: 999px; }
+  .kb-board-skeleton-actions { width: 72px; height: 44px; flex: 0 0 72px; border-radius: 8px; }
+  .kb-board-skeleton-cards { flex: 0 1 auto; overflow: hidden; }
+  .kb-board-skeleton-card { width: 100%; height: 92px; flex: 0 0 auto; border-radius: 11px; }
+  .kb-board-skeleton-card-short { height: 68px; }
+  .kb-board-skeleton-col:nth-of-type(2) .kb-board-skeleton-card:nth-child(1) { height: 72px; }
+  .kb-board-skeleton-col:nth-of-type(3) .kb-board-skeleton-card:nth-child(2) { height: 112px; }
+  .kb-board-skeleton-add { height: 44px; margin: 4px 10px 0; border-radius: 8px; }
+  @keyframes kb-board-skeleton-pulse {
+    from { opacity: 0.5; }
+    to { opacity: 0.92; }
+  }
   .kb-empty-board-state {
     min-width: min(100%, 320px);
     display: flex;
@@ -743,6 +808,8 @@ export const CSS = `
     .kb-filterbar { padding-inline: 16px; }
     .kb-board { gap: 12px; padding: 14px 16px 18px; scroll-padding-inline: 16px; }
     .kb-col { width: min(336px, calc(100vw - 32px)); }
+    .kb-board-skeleton-col { flex-basis: min(336px, calc(100vw - 32px)); width: min(336px, calc(100vw - 32px)); }
+    .kb-board-skeleton-header-title { width: min(160px, 38vw); }
     .kb-card:hover { transform: none; box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent); }
   }
 
@@ -1257,6 +1324,16 @@ export const CSS = `
 
   @media (prefers-reduced-motion: reduce) {
     .kb-board-enter .kb-col { animation: none; }
+    .kb-loading-spinner { animation: none; }
+    .kb-board-skeleton-icon,
+    .kb-board-skeleton-header-title,
+    .kb-board-skeleton-nav-pill,
+    .kb-board-skeleton-line,
+    .kb-board-skeleton-count,
+    .kb-board-skeleton-actions,
+    .kb-board-skeleton-dot,
+    .kb-board-skeleton-card,
+    .kb-board-skeleton-add { animation: none; }
     .kb-card, .kb-tile, .kb-col-actions, .kb-root button { transition: none; }
   }
 `

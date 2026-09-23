@@ -1492,18 +1492,57 @@ export default function Board({
   }, [drag])
   const openCard = id => { if (!suppressClick.current) setOpenCardId(id) }
 
-  if (!board) return <>
-    <div className="kb-header">
-      <button className="kb-btn" onClick={onAllBoards}><ChevronLeft /> All boards</button>
-      {recoveryButton}
-    </div>
-    <div className="kb-board kb-board-empty"><div className="kb-empty-board-state" role={availability.kind === 'loading' ? 'status' : 'alert'}>
-      {availability.kind === 'loading' ? 'Loading board…' : <>
-        <p>{availability.message}</p>
-        {availability.kind !== 'terminal' && <button className="kb-btn kb-btn-primary" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Try again</button>}
-      </>}
-    </div></div>
-  </>
+  if (!board) {
+    const summary = boards.find(candidate => candidate.id === boardId)
+    const skeletonColumns = Math.max(1, Math.min(summary?.columnCount || 3, 6))
+    const loading = availability.kind === 'loading'
+    return <>
+      {loading ? <>
+        <div className="kb-header kb-board-header kb-board-skeleton-header" aria-hidden="true">
+          <span className="kb-board-skeleton-icon" />
+          <span className="kb-board-skeleton-header-title" />
+          <div className="kb-header-spacer" />
+          <span className="kb-board-skeleton-icon" />
+          <span className="kb-board-skeleton-icon" />
+        </div>
+        <div className="kb-divider" />
+        {skeletonColumns > 1 && <div className="kb-list-nav kb-board-skeleton-nav" aria-hidden="true">
+          {Array.from({ length: Math.min(skeletonColumns, 3) }, (_, column) => (
+            <span className="kb-board-skeleton-nav-pill" key={column} />
+          ))}
+        </div>}
+      </> : <div className="kb-header">
+        <button className="kb-btn" onClick={onAllBoards}><ChevronLeft /> All boards</button>
+        {recoveryButton}
+      </div>}
+      {loading ? (
+        <div className="kb-board kb-board-skeleton" role="status" aria-busy="true">
+          <span className="kb-visually-hidden">Loading board…</span>
+          {Array.from({ length: skeletonColumns }, (_, column) => (
+            <div className="kb-board-skeleton-col" aria-hidden="true" key={column}>
+              <div className="kb-col-head kb-board-skeleton-col-head">
+                <span className="kb-board-skeleton-dot" />
+                <span className="kb-board-skeleton-line kb-board-skeleton-line-title" />
+                <span className="kb-board-skeleton-count" />
+                <span className="kb-board-skeleton-actions" />
+              </div>
+              <div className="kb-cards kb-board-skeleton-cards">
+                <span className="kb-board-skeleton-card" />
+                <span className="kb-board-skeleton-card" />
+                <span className="kb-board-skeleton-card kb-board-skeleton-card-short" />
+              </div>
+              <span className="kb-board-skeleton-add" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="kb-board kb-board-empty"><div className="kb-empty-board-state" role="alert">
+          <p>{availability.message}</p>
+          {availability.kind !== 'terminal' && <button className="kb-btn kb-btn-primary" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Try again</button>}
+        </div></div>
+      )}
+    </>
+  }
 
   const openCard_ = openCardId ? board.cards[openCardId] : null
   const openCardColumn = openCard_ ? board.columns.find(column => column.cardIds.includes(openCard_.id)) : null
