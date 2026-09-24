@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { CSS } from './theme.js'
-import { listBoards, includeSharedBoards, createBoard, deleteBoard, loadUi, migrateLegacy, saveLastBoardId, seedFirstBoard } from './storage.js'
+import { listBoards, listBoardsWithStatus, includeSharedBoards, createBoard, deleteBoard, loadUi, migrateLegacy, saveLastBoardId, seedFirstBoard } from './storage.js'
 import { configureSync, recoverMemberships, loadShareMap, listInvitations, acceptInvitation, joinWithInvite, declineInvitation, leaveBoard, deleteSharedObject, removeShareEntry } from './sync.js'
 import { sharingFromBoards } from './publication.js'
 import Home from './ui/Home.jsx'
