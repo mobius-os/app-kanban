@@ -37,6 +37,7 @@
     "pendingOps.js",
     "storage.js",
     "sync.js",
+    "request-guard.js",
     "theme.js",
     "ui/focusableElements.js",
     "ui/modalFocus.js",

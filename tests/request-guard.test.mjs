@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import { createLatestRequestGuard } from '../request-guard.js'
 
@@ -52,4 +53,10 @@ test('a late startup failure cannot replace a successful reconnect refresh', asy
   await Promise.all([startupRun, reconnectRun])
 
   assert.deepEqual(visible, ['fresh boards'])
+})
+
+
+test('manifest ships the latest-request guard used by app startup', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../mobius.json', import.meta.url), 'utf8'))
+  assert.ok(manifest.source_files.includes('request-guard.js'))
 })
