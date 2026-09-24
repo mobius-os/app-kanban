@@ -19,7 +19,11 @@ export function useModalFocus(open, onClose) {
     const isTopmost = () => openDialogs[openDialogs.length - 1] === dialog
     const focusable = () => visibleFocusableElements(dialog)
 
-    ;(focusable()[0] || dialog)?.focus()
+    // React autoFocus may already have placed the cursor in an editor.
+    // Stealing it triggers blur (and can cancel an empty new card on mobile).
+    if (!dialog?.contains(document.activeElement)) {
+      ;(focusable()[0] || dialog)?.focus()
+    }
     const onKeyDown = event => {
       if (!isTopmost()) return
       if (event.key === 'Escape') {
