@@ -6,10 +6,30 @@ import {
   casMutate,
   migrateLegacy,
   loadUi,
+  listBoardsWithStatus,
   normalizeBoard,
   saveLastBoardId,
   seedFirstBoard,
 } from '../storage.js'
+
+test('board enumeration preserves an explicit incomplete offline result', async () => {
+  globalThis.window = { mobius: { online: false, storage: {
+    async listWithStatus() {
+      return {
+        entries: [{
+          name: 'cached.json', path: 'boards/cached.json', type: 'file',
+          content: { title: 'Cached', columns: [], cards: {} },
+        }],
+        complete: false,
+        source: 'derived',
+      }
+    },
+  } } }
+  const result = await listBoardsWithStatus()
+  assert.equal(result.complete, false)
+  assert.equal(result.source, 'derived')
+  assert.deepEqual(result.boards.map((board) => board.id), ['cached'])
+})
 
 test.afterEach(() => { delete globalThis.window })
 
