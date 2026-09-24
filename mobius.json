@@ -13,7 +13,8 @@
   "permissions": {
     "cross_app_access": "none",
     "share_with_apps": "none",
-    "identity_manage": true
+    "identity_manage": true,
+    "github_access": true
   },
   "runtime": {
     "imports": [
@@ -41,6 +42,7 @@
     "ui/modalFocus.js",
     "ui/Home.jsx",
     "ui/Board.jsx",
+    "prMatching.js",
     "scripts/kanban.mjs",
     "kanban-agent.md",
     "service.py",

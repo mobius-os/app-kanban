@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronLeft, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, Share, Trash, User } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard } from '../storage.js'
 import { resolveMemberHandles, pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay, acceptSharedPoll, createSharedRefreshLifecycle } from '../sync.js'
-import { applyBoardOp, cardMoveAnchor, columnMoveAnchor } from '../operations.js'
+import { applyBoardOp, cardMoveAnchor, columnMoveAnchor, cardPullUrls } from '../operations.js'
 import { acknowledgeRecoveredBoardOps, applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps, hasRecoverableBoardOps } from '../pendingOps.js'
 import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
 import {
@@ -65,12 +65,9 @@ function Card({ boardId, share, card, assigneeLabel, lifted, onOpen, onDragStart
     <div
       className={`kb-card${lifted ? ' kb-lifted' : ''}${canWrite ? '' : ' kb-readonly'}`}
       data-card-id={card.id}
-      role="button"
-      tabIndex={0}
-      onClick={event => { event.currentTarget.focus(); onOpen(card.id) }}
-      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(card.id) } }}
-      onPointerDown={canWrite ? e => onDragStart(e, card.id) : undefined}
+      onPointerDown={canWrite ? e => { if (!e.target.closest('a')) onDragStart(e, card.id) } : undefined}
     >
+      <button type="button" className="kb-card-open" aria-label={`Open card details: ${card.title}`} onClick={() => onOpen(card.id)} />
       {card.label && card.label !== 'none' && (
         <div
           className="kb-label"
@@ -89,7 +86,7 @@ function Card({ boardId, share, card, assigneeLabel, lifted, onOpen, onDragStart
         />
         {attachments.length > 1 && <span className="kb-card-image-count">+{attachments.length - 1}</span>}
       </div>}
-      <div className="kb-card-title">{card.title}</div>
+      <div className="kb-card-title"><LinkifiedText text={card.title} /></div>
       {notePreview && <div className="kb-card-notes">{notePreview}</div>}
       {!cover && attachments.length > 0 && <div className="kb-card-attachment-summary">
         <Paperclip aria-hidden="true" /> {attachments.length} {attachments.length === 1 ? 'file' : 'files'}
@@ -397,33 +394,27 @@ function AssigneePicker({ card, canWrite, members, share, onUpdate }) {
   )
 }
 
-function AutoGrowTextarea({ valueKey, onCommit, onCancel, expandOnFocus = false, ...props }) {
+function AutoGrowTextarea({ valueKey, onCommit, onCancel, ...props }) {
   const textareaRef = useRef(null)
-  const [focused, setFocused] = useState(false)
   const resize = useCallback(() => {
     const textarea = textareaRef.current
     if (!textarea) return
     textarea.style.height = 'auto'
-    const contentHeight = textarea.scrollHeight
-    const compactHeight = expandOnFocus ? Math.min(contentHeight, 144) : contentHeight
-    const writingHeight = Math.min(Math.max(contentHeight, window.innerHeight * 0.42), 520)
-    textarea.style.height = `${expandOnFocus && focused ? writingHeight : compactHeight}px`
-  }, [expandOnFocus, focused])
-  useEffect(resize, [resize, valueKey])
+    textarea.style.height = `${textarea.scrollHeight}px`
+  }, [])
+
+  useLayoutEffect(() => { resize() }, [resize, valueKey])
+
   return <textarea
     {...props}
-    data-modal-inline-editor
     ref={textareaRef}
+    data-modal-inline-editor
     onInput={resize}
-    onFocus={() => setFocused(true)}
+    onFocus={resize}
     onKeyDown={event => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      event.stopPropagation()
-      onCancel?.()
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); event.currentTarget.value = props.defaultValue || ''; onCancel?.(); }
     }}
     onBlur={event => {
-      setFocused(false)
       onCommit?.(event.target.value)
     }}
   />
@@ -439,61 +430,137 @@ function LinkifiedText({ text }) {
     try {
       const parsed = new URL(url)
       if (!['http:', 'https:'].includes(parsed.protocol)) return part
-      return <span key={`${url}-${index}`}><a href={parsed.href} target="_blank" rel="noreferrer">{url}</a>{punctuation}</span>
+      return <span key={`${url}-${index}`}><a href={parsed.href} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>{url}</a>{punctuation}</span>
     } catch {
       return part
     }
   })
 }
 
-function CardTitleEditor({ card, canWrite, onCommit }) {
-  const [editing, setEditing] = useState(false)
-  useEffect(() => { setEditing(false) }, [card.id])
-  if (!editing || !canWrite) return <div className={`kb-editor-display${canWrite ? ' kb-editor-can-edit' : ''}`}>
-    <div className="kb-title-display">{card.title}</div>
-    {canWrite && <button type="button" className="kb-btn kb-btn-quiet kb-editor-action" aria-label="Edit card title" onClick={() => setEditing(true)}>Edit</button>}
+function githubPullPath(value) {
+  try {
+    const url = new URL(String(value || ''))
+    const match = url.hostname === 'github.com' && url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/u)
+    return match ? `repos/${match[1]}/${match[2]}/pulls/${match[3]}` : ''
+  } catch { return '' }
+}
+
+function pullStatus(pull) {
+  if (pull?.merged_at) return { label: 'Merged', tone: 'merged' }
+  if (pull?.draft) return { label: 'Draft', tone: 'draft' }
+  if (pull?.state === 'open') return { label: 'Open', tone: 'open' }
+  if (pull?.state === 'closed') return { label: 'Closed', tone: 'closed' }
+  return { label: 'Unavailable', tone: 'unavailable' }
+}
+
+function pullRequestLabel(url) {
+  try {
+    const parsed = new URL(url)
+    const match = parsed.hostname === 'github.com' && parsed.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/u)
+    return match ? `${match[1]}/${match[2]} #${match[3]}` : parsed.hostname
+  } catch { return 'Pull request' }
+}
+
+function PullRequestReferences({ card, canWrite, statuses, onUpdate, onRefresh }) {
+  const urls = cardPullUrls(card)
+  const [editor, setEditor] = useState(null)
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState('')
+  useEffect(() => { setEditor(null); setDraft(''); setError('') }, [card.id])
+  const save = () => {
+    if (!githubPullPath(draft.trim())) { setError('Use a GitHub pull request URL.'); return }
+    onUpdate(editor === 'add' ? null : editor, draft.trim())
+    setEditor(null); setDraft(''); setError('')
+  }
+  const remove = url => onUpdate(url, '')
+  return <section className="kb-pr-reference" aria-labelledby="kb-pr-reference-title">
+    <div className="kb-section-heading">
+      <h3 id="kb-pr-reference-title">Linked pull requests</h3>
+      {urls.length > 0 && <button type="button" className="kb-iconbtn kb-pr-refresh" aria-label="Refresh pull request statuses" title="Refresh statuses" onClick={onRefresh}>↻</button>}
+    </div>
+    {urls.length > 0 && <div className="kb-pr-list">
+      {urls.map(url => {
+        const path = githubPullPath(url)
+        const status = path
+          ? statuses[`${card.id}:${path}`] || { label: 'Checking…', tone: 'checking' }
+          : { label: 'Unavailable', tone: 'unavailable' }
+        const isEditing = editor === url
+        return <div className="kb-pr-item" key={`${card.id}-${url}`}>
+          {isEditing ? <form className="kb-pr-editor" onSubmit={event => { event.preventDefault(); save() }}>
+            <input className="kb-input" type="url" autoFocus value={draft} placeholder="https://github.com/owner/repo/pull/123" onChange={event => { setDraft(event.target.value); setError('') }} />
+            <button type="submit" className="kb-btn">Save</button>
+            <button type="button" className="kb-btn kb-pr-cancel" onClick={() => { setEditor(null); setDraft('') }}>Cancel</button>
+          </form> : <>
+            <a className="kb-pr-link" href={url} target="_blank" rel="noreferrer">{pullRequestLabel(url)}</a>
+            <span className={`kb-pr-status kb-pr-status-${status.tone}`}>{status.label}</span>
+            {canWrite && <span className="kb-pr-actions"><button type="button" className="kb-pr-edit" onClick={() => { setEditor(url); setDraft(url) }}>Edit</button><button type="button" className="kb-iconbtn kb-pr-remove" aria-label={`Remove ${pullRequestLabel(url)}`} title="Remove pull request" onClick={() => remove(url)}><Trash /></button></span>}
+          </>}
+        </div>
+      })}
+    </div>}
+    {canWrite && (editor === 'add' ? <form className="kb-pr-editor" onSubmit={event => { event.preventDefault(); save() }}>
+      <input className="kb-input" type="url" autoFocus value={draft} placeholder="https://github.com/owner/repo/pull/123" onChange={event => { setDraft(event.target.value); setError('') }} />
+      <button type="submit" className="kb-btn">Add</button>
+      <button type="button" className="kb-btn kb-pr-cancel" onClick={() => { setEditor(null); setDraft('') }}>Cancel</button>
+    </form> : <button type="button" className="kb-btn kb-pr-add" onClick={() => { setEditor('add'); setDraft('') }}><Plus /> Add pull request</button>)}
+    {error && <p className="kb-attachment-error" role="alert">{error}</p>}
+  </section>
+}
+
+function CardTitleEditor({ card, canWrite, onCommit, onCancel }) {
+  const [editing, setEditing] = useState(!card.title)
+  useEffect(() => { setEditing(!card.title) }, [card.id])
+  if (!editing || !canWrite) return <div className="kb-detail-field kb-title-field">
+    {canWrite
+      ? <button type="button" className="kb-title-display kb-editable-field" onClick={() => setEditing(true)} aria-label="Edit card title">{card.title}</button>
+      : <div className="kb-title-display">{card.title}</div>}
   </div>
   return <AutoGrowTextarea
     className="kb-input kb-title-input"
     rows={1}
     autoFocus
+    placeholder="Card title…"
     defaultValue={card.title}
     key={`st-${card.id}`}
     valueKey={`${card.id}:${card.title}`}
     aria-label="Card title"
-    onCancel={() => setEditing(false)}
     onCommit={value => {
       const next = value.trim()
-      if (next && next !== card.title) onCommit(next)
+      if (!next) {
+        if (!card.title) onCancel?.()
+        else setEditing(false)
+        return
+      }
+      if (next !== card.title && onCommit(next) === false) return
       setEditing(false)
     }}
+    onCancel={() => { if (!card.title) onCancel?.(); else setEditing(false) }}
   />
 }
 
 function CardNotesEditor({ card, canWrite, onCommit }) {
   const [editing, setEditing] = useState(false)
   useEffect(() => { setEditing(false) }, [card.id])
-  if (!editing || !canWrite) return <div className={`kb-editor-display${canWrite ? ' kb-editor-can-edit' : ''}`}>
+  if (!editing || !canWrite) return <div className="kb-detail-field kb-notes-field">
     <div className={`kb-notes-display${card.notes ? '' : ' kb-notes-empty'}`}>
       {card.notes ? <LinkifiedText text={card.notes} /> : 'Notes…'}
     </div>
-    {canWrite && <button type="button" className="kb-btn kb-btn-quiet kb-editor-action kb-notes-edit" aria-label={card.notes ? 'Edit card notes' : 'Add card notes'} onClick={() => setEditing(true)}>{card.notes ? 'Edit' : 'Add'}</button>}
+    {canWrite && <button type="button" className="kb-notes-edit-hit" aria-label={card.notes ? 'Edit card notes' : 'Add card notes'} onClick={() => setEditing(true)} />}
   </div>
   return <AutoGrowTextarea
     className="kb-input kb-notes-input"
     rows={2}
-    expandOnFocus
     autoFocus
     placeholder="Notes…"
     defaultValue={card.notes}
     key={`sn-${card.id}`}
     valueKey={`${card.id}:${card.notes}`}
     aria-label="Card notes"
-    onCancel={() => setEditing(false)}
     onCommit={value => {
       if (value !== card.notes) onCommit(value)
       setEditing(false)
     }}
+    onCancel={() => setEditing(false)}
   />
 }
 
@@ -727,6 +794,7 @@ export default function Board({
 }) {
   const [board, setBoard] = useState(null)
   const [openCardId, setOpenCardId] = useState(null)
+  const [draftCard, setDraftCard] = useState(null)
   const [previewAttachment, setPreviewAttachment] = useState(null)
   const [confirmDeleteCol, setConfirmDeleteCol] = useState(null)
   const [drag, setDrag] = useState(null)
@@ -746,6 +814,8 @@ export default function Board({
   const [recoveredCount, setRecoveredCount] = useState(0)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [attachmentError, setAttachmentError] = useState('')
+  const [pullStatuses, setPullStatuses] = useState({})
+  const [pullStatusRefresh, setPullStatusRefresh] = useState(0)
 
   const boardRef = useRef(null)
   const boardScrollRef = useRef(null)
@@ -762,7 +832,7 @@ export default function Board({
   const pendingEntriesRef = useRef([])
   const lastInteractionAtRef = useRef(Date.now())
   const fileInputRef = useRef(null)
-  const cardSheetRef = useModalFocus(Boolean(openCardId), () => setOpenCardId(null))
+  const cardSheetRef = useModalFocus(Boolean(openCardId), () => { setOpenCardId(null); setDraftCard(null) })
   const columnConfirmRef = useModalFocus(confirmDeleteCol, () => setConfirmDeleteCol(null))
   boardRef.current = board
   shareRef.current = share
@@ -820,6 +890,7 @@ export default function Board({
   }
 
   useEffect(() => { setAttachmentError('') }, [openCardId])
+
 
   useEffect(() => {
     let active = true
@@ -1187,16 +1258,10 @@ export default function Board({
     return () => { alive = false; clearInterval(timer) }
   }, [boardId, online, share, queuedCount])
 
-  const addCard = (colId, title) => {
-    const id = uid()
-    const createdAt = new Date().toISOString()
-    mutate({
-      type: 'add-card',
-      columnId: colId,
-      card: { id, title, notes: '', label: 'none', due: '', checklist: [], attachments: [], assignee: '', assigneeHost: '', createdAt },
-    })
-    setOpenCardId(id)
-    window.mobius?.signal?.('item_created', { type: 'card' })
+  const addCard = colId => {
+    const card = { id: uid(), title: '', notes: '', pullRequestUrl: '', pullRequestUrls: [], label: 'none', due: '', checklist: [], attachments: [], assignee: '', assigneeHost: '', createdAt: new Date().toISOString() }
+    setDraftCard({ boardId, columnId: colId, card })
+    setOpenCardId(card.id)
   }
 
   const updateCard = (cardId, patch) => {
@@ -1490,7 +1555,32 @@ export default function Board({
     if (drag?.moved) suppressClick.current = true
     else if (!drag) setTimeout(() => { suppressClick.current = false }, 80)
   }, [drag])
-  const openCard = id => { if (!suppressClick.current) setOpenCardId(id) }
+  const openCard = id => { if (!suppressClick.current) { setDraftCard(null); setOpenCardId(id) } }
+
+  const access = boardAccess(share, online && availability.kind !== 'terminal')
+  const accessStatus = availability.kind === 'terminal' ? '' : access.status
+  const hasFilters = !!filterText.trim() || filterLabels.length > 0
+  const linkedCard = board?.cards?.[openCardId]
+  const linkedPulls = linkedCard ? cardPullUrls(linkedCard).map(url => ({ id: linkedCard.id, path: githubPullPath(url) })).filter(link => link.path).map(link => ({ ...link, key: `${link.id}:${link.path}` })) : []
+  const linkedPullsKey = linkedPulls.map(link => link.key).sort().join('|')
+
+  useEffect(() => {
+    if (!online || !linkedPulls.length) return undefined
+    let active = true
+    Promise.all(linkedPulls.map(async link => {
+      try {
+        const response = await fetch(`/api/github/api/${link.path}`, { headers: { Authorization: `Bearer ${token}` } })
+        return { key: link.key, status: response.ok ? pullStatus(await response.json()) : { label: 'Unavailable', tone: 'unavailable' } }
+      } catch {
+        return { key: link.key, status: { label: 'Unavailable', tone: 'unavailable' } }
+      }
+    })).then(results => {
+      if (!active) return
+      setPullStatuses(Object.fromEntries(results.map(result => [result.key, result.status])))
+    })
+    return () => { active = false }
+  }, [linkedPullsKey, online, token, pullStatusRefresh])
+
 
   if (!board) {
     const summary = boards.find(candidate => candidate.id === boardId)
@@ -1544,13 +1634,10 @@ export default function Board({
     </>
   }
 
-  const openCard_ = openCardId ? board.cards[openCardId] : null
+  const isDraftCard = draftCard?.boardId === boardId && draftCard.card.id === openCardId
+  const openCard_ = openCardId ? board.cards[openCardId] || (isDraftCard ? draftCard.card : null) : null
   const openCardColumn = openCard_ ? board.columns.find(column => column.cardIds.includes(openCard_.id)) : null
   const openCardIndex = openCardColumn ? openCardColumn.cardIds.indexOf(openCard_.id) : -1
-  const access = boardAccess(share, online && availability.kind !== 'terminal')
-  const accessStatus = availability.kind === 'terminal' ? '' : access.status
-  const hasFilters = !!filterText.trim() || filterLabels.length > 0
-
   return (
     <>
       <div className="kb-header kb-board-header">
@@ -1746,7 +1833,7 @@ export default function Board({
                   <div className="kb-empty">{hasFilters && allCards.length ? 'No matching cards' : 'Nothing here yet'}</div>
                 )}
               </div>
-              {access.canWrite && <button className="kb-addcard" onClick={() => addCard(col.id, 'New card')}>
+              {access.canWrite && <button className="kb-addcard" onClick={() => addCard(col.id)}>
                 <Plus /> Add card
               </button>}
             </section>
@@ -1769,7 +1856,7 @@ export default function Board({
 
       {openCard_ && (
         <>
-          <div className="kb-scrim" onClick={() => setOpenCardId(null)} />
+          <div className="kb-scrim" onClick={() => { setOpenCardId(null); setDraftCard(null) }} />
           <div
             ref={cardSheetRef}
             tabIndex={-1}
@@ -1781,11 +1868,18 @@ export default function Board({
           >
             <div className="kb-card-toolbar kb-mobile-only">
               <span className="kb-card-toolbar-title">Card details</span>
-              <button className="kb-btn kb-btn-primary kb-card-toolbar-done" type="button" onClick={() => setOpenCardId(null)}>Done</button>
+              <button className="kb-btn kb-btn-primary kb-card-toolbar-done" type="button" onClick={() => { setOpenCardId(null); setDraftCard(null) }}>{isDraftCard ? 'Cancel' : 'Done'}</button>
             </div>
             <div className="kb-sheet-grab kb-desktop-only" />
-            <CardTitleEditor card={openCard_} canWrite={access.canWrite} onCommit={title => updateCard(openCard_.id, { title })} />
+            <CardTitleEditor card={openCard_} canWrite={access.canWrite} onCommit={title => {
+              if (!isDraftCard) return updateCard(openCard_.id, { title })
+              const saved = mutate({ type: 'add-card', columnId: draftCard.columnId, card: { ...draftCard.card, title } })
+              if (saved) { setDraftCard(null); window.mobius?.signal?.('item_created', { type: 'card' }) }
+              return saved
+            }} onCancel={() => { if (isDraftCard) { setDraftCard(null); setOpenCardId(null) } }} />
+            {!isDraftCard && <>
             <CardNotesEditor card={openCard_} canWrite={access.canWrite} onCommit={notes => updateCard(openCard_.id, { notes })} />
+            <PullRequestReferences card={openCard_} canWrite={access.canWrite} statuses={pullStatuses} onUpdate={(previousUrl, nextUrl) => mutate({ type: 'edit-pull-request', cardId: openCard_.id, previousUrl, nextUrl })} onRefresh={() => setPullStatusRefresh(value => value + 1)} />
 
             <div>
               <div className="kb-section-heading"><h3>Checklist</h3>{Array.isArray(openCard_.checklist) && openCard_.checklist.length > 0 && <span>{openCard_.checklist.filter(item => item.done).length}/{openCard_.checklist.length}</span>}</div>
@@ -2009,6 +2103,7 @@ export default function Board({
               </button>}
               <button className="kb-btn kb-btn-primary" onClick={() => setOpenCardId(null)}>Done</button>
             </div>
+            </>}
           </div>
         </>
       )}
