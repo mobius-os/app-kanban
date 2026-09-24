@@ -3,7 +3,7 @@ import { CSS } from './theme.js'
 import { listBoards, listBoardsWithStatus, includeSharedBoards, createBoard, deleteBoard, loadUi, migrateLegacy, saveLastBoardId, seedFirstBoard } from './storage.js'
 import { configureSync, recoverMemberships, loadShareMap, listInvitations, acceptInvitation, joinWithInvite, declineInvitation, leaveBoard, deleteSharedObject, removeShareEntry } from './sync.js'
 import { sharingFromBoards } from './publication.js'
-import { createLatestRequestGuard } from './request-guard.js'
+import { createBoardLoadCoordinator } from './request-guard.js'
 import Home from './ui/Home.jsx'
 import Board from './ui/Board.jsx'
 
@@ -34,8 +34,8 @@ export default function App({ appId, token }) {
   const boardEntryDestinationRef = useRef(null)
   const navigationIntentRef = useRef(0)
   const readySignalled = useRef(false)
-  const boardRequestGuardRef = useRef(null)
-  if (!boardRequestGuardRef.current) boardRequestGuardRef.current = createLatestRequestGuard()
+  const boardLoadCoordinatorRef = useRef(null)
+  if (!boardLoadCoordinatorRef.current) boardLoadCoordinatorRef.current = createBoardLoadCoordinator()
 
   configureSync(token, appId)
 
@@ -52,7 +52,8 @@ export default function App({ appId, token }) {
   }, [])
 
   const refresh = useCallback(async () => {
-    const isCurrent = boardRequestGuardRef.current.begin()
+    const isCurrent = boardLoadCoordinatorRef.current.beginRefresh()
+    if (!isCurrent) return null
     try {
       const [listing, loadedMap] = await Promise.all([listBoardsWithStatus(), loadShareMap()])
       if (!isCurrent()) return null
@@ -85,7 +86,7 @@ export default function App({ appId, token }) {
   }, [refreshInvitations])
 
   useEffect(() => {
-    const isCurrent = boardRequestGuardRef.current.begin()
+    const isCurrent = boardLoadCoordinatorRef.current.beginStartup()
     ;(async () => {
       try {
         await migrateLegacy()
@@ -130,7 +131,10 @@ export default function App({ appId, token }) {
       } finally {
         // The loading root remains the only rendered view until the launch
         // destination has been decided, preventing a home-gallery flash.
-        if (isCurrent()) setResolved(true)
+        if (isCurrent()) {
+          setResolved(true)
+          if (boardLoadCoordinatorRef.current.finishStartup()) void refresh()
+        }
       }
     })()
     let wasOnline = window.mobius?.online !== false
