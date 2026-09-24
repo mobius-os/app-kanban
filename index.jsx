@@ -57,17 +57,12 @@ export default function App({ appId, token }) {
     try {
       const [listing, loadedMap] = await Promise.all([listBoardsWithStatus(), loadShareMap()])
       if (!isCurrent()) return null
-      if (!listing.complete) {
-        setDirectoryUnavailable(listing.boards.length === 0)
-        setResolved(true)
-        return null
-      }
       const cached = listing.boards
       const map = sharingFromBoards(cached, loadedMap)
       const b = includeSharedBoards(cached, map)
       setBoards(b)
       setLoadError(false)
-      setDirectoryUnavailable(false)
+      setDirectoryUnavailable(!listing.complete && b.length === 0)
       setShareMap(map)
       setResolved(true)
       refreshInvitations()
