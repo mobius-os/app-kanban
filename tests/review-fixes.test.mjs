@@ -280,6 +280,7 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(focusSource, /event\.key !== 'Tab'/)
   assert.match(focusSource, /if \(!isTopmost\(\)\) return/)
   assert.match(focusSource, /opener\.focus\(\)/)
+  assert.match(focusSource, /if \(!dialog\?\.contains\(document\.activeElement\)\) \{/, 'preserve autofocus in new-card editor instead of blurring it to mobile Done')
   assert.match(themeSource, /\.kb-position-actions \.kb-btn[^}]*min-height: 44px/s)
   assert.match(themeSource, /\.kb-status-seg button \{[^}]*min-height: 44px/s)
   assert.match(themeSource, /\.kb-col-reorder \.kb-col-action \{ width: 44px; height: 44px; \}/)
