@@ -55,6 +55,10 @@ export async function loadShareMap() {
   return normalizeShareMap(await store()?.get('shared.json'))
 }
 
+export function shareMapConflictDelay(attempt) {
+  return Math.min(25 * 2 ** attempt, 400)
+}
+
 function normalizeShareMap(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { byBoard: {} }
   if (!value.byBoard || typeof value.byBoard !== 'object' || Array.isArray(value.byBoard)) {
@@ -75,7 +79,10 @@ async function mutateShareMap(op, s = store()) {
         : { ifNoneMatch: true })
       return next
     } catch (error) {
-      if (error?.code === 'conflict') continue
+      if (error?.code === 'conflict') {
+        await new Promise(resolve => setTimeout(resolve, shareMapConflictDelay(attempt)))
+        continue
+      }
       throw error
     }
   }

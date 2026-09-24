@@ -118,8 +118,26 @@ export default function App({ appId, token }) {
         setResolved(true)
       }
     })()
-    const t = setInterval(() => setOnline(window.mobius?.online !== false), 3000)
-    return () => clearInterval(t)
+    let firstOnlineStatus = true
+    const unsubscribeOnline = typeof window.mobius?.onOnlineChange === 'function'
+      ? window.mobius.onOnlineChange((next) => {
+          setOnline(next)
+          if (firstOnlineStatus) { firstOnlineStatus = false; return }
+          if (next) refresh()
+        })
+      : null
+    let t = null
+    if (!unsubscribeOnline) {
+      t = setInterval(() => {
+        const next = window.mobius?.online !== false
+        setOnline(next)
+        if (next) refresh()
+      }, 3000)
+    }
+    return () => {
+      try { unsubscribeOnline?.() } catch {}
+      if (t) clearInterval(t)
+    }
   }, [refresh, refreshInvitations, loadAttempt])
 
   useEffect(() => {

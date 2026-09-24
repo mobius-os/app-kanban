@@ -18,11 +18,16 @@ import {
   resolveMemberHandles,
   shareBoard,
   sharedBoardPollDelay,
+  shareMapConflictDelay,
 } from '../sync.js'
 
 test('an actively viewed shared board polls quickly and relaxes when idle', () => {
   assert.equal(sharedBoardPollDelay(10_000, 20_000), 1000)
   assert.equal(sharedBoardPollDelay(1_000, 20_000), 3000)
+})
+
+test('share-map conflict retries yield progressively before the bounded cap', () => {
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map(shareMapConflictDelay), [25, 50, 100, 200, 400, 400])
 })
 
 test('shared image operations stay scoped to the board host and object', async () => {
