@@ -8,6 +8,7 @@ const app = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const board = readFileSync(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
 
 test('startup keeps a visible app-owned loading state until boards resolve', () => {
+  assert.match(app, /import \{[^}]*listBoardsWithStatus[^}]*\} from '\.\/storage\.js'/)
   assert.match(app, /function LoadingBoards\(\)/)
   assert.match(app, /role="status"/)
   assert.match(app, /Loading boards…/)
