@@ -3,6 +3,7 @@ import { CSS } from './theme.js'
 import { listBoards, listBoardsWithStatus, includeSharedBoards, createBoard, deleteBoard, loadUi, migrateLegacy, saveLastBoardId, seedFirstBoard } from './storage.js'
 import { configureSync, recoverMemberships, loadShareMap, listInvitations, acceptInvitation, joinWithInvite, declineInvitation, leaveBoard, deleteSharedObject, removeShareEntry } from './sync.js'
 import { sharingFromBoards } from './publication.js'
+import { createLatestRequestGuard } from './request-guard.js'
 import Home from './ui/Home.jsx'
 import Board from './ui/Board.jsx'
 
@@ -33,6 +34,8 @@ export default function App({ appId, token }) {
   const boardEntryDestinationRef = useRef(null)
   const navigationIntentRef = useRef(0)
   const readySignalled = useRef(false)
+  const boardRequestGuardRef = useRef(null)
+  if (!boardRequestGuardRef.current) boardRequestGuardRef.current = createLatestRequestGuard()
 
   configureSync(token, appId)
 
@@ -49,10 +52,13 @@ export default function App({ appId, token }) {
   }, [])
 
   const refresh = useCallback(async () => {
+    const isCurrent = boardRequestGuardRef.current.begin()
     try {
       const [listing, loadedMap] = await Promise.all([listBoardsWithStatus(), loadShareMap()])
+      if (!isCurrent()) return null
       if (!listing.complete) {
         setDirectoryUnavailable(listing.boards.length === 0)
+        setResolved(true)
         return null
       }
       const cached = listing.boards
@@ -62,6 +68,7 @@ export default function App({ appId, token }) {
       setLoadError(false)
       setDirectoryUnavailable(false)
       setShareMap(map)
+      setResolved(true)
       refreshInvitations()
       if (!readySignalled.current) {
         readySignalled.current = true
@@ -69,20 +76,25 @@ export default function App({ appId, token }) {
       }
       return b
     } catch (e) {
+      if (!isCurrent()) return null
       setLoadError(true)
+      setResolved(true)
       window.mobius?.signal?.('error', { message: String(e?.message || e), source: 'list' })
       return null
     }
   }, [refreshInvitations])
 
   useEffect(() => {
+    const isCurrent = boardRequestGuardRef.current.begin()
     ;(async () => {
       try {
         await migrateLegacy()
+        if (!isCurrent()) return
         try { await recoverMemberships() } catch(error) {
           window.mobius?.signal?.('error', {source:'membership-recovery',message:String(error?.message || error)})
         }
         let [boardListing, map, ui] = await Promise.all([listBoardsWithStatus(), loadShareMap(), loadUi()])
+        if (!isCurrent()) return
         let b = boardListing.boards
         map = sharingFromBoards(b, map)
         b = includeSharedBoards(b, map)
@@ -91,7 +103,9 @@ export default function App({ appId, token }) {
         // or cached offline empty result may be missing boards created elsewhere.
         if (b.length === 0 && boardListing.complete && boardListing.source === 'server') {
           await seedFirstBoard()
+          if (!isCurrent()) return
           b = await listBoards()
+          if (!isCurrent()) return
         }
         setBoards(b)
         setLoadError(false)
@@ -109,29 +123,30 @@ export default function App({ appId, token }) {
           window.mobius?.signal?.('app_ready', { item_count: b.length })
         }
       } catch (e) {
+        if (!isCurrent()) return
         setLoadError(true)
         setDirectoryUnavailable(window.mobius?.online === false && boards === null)
         window.mobius?.signal?.('error', { message: String(e?.message || e), source: 'initial-load' })
       } finally {
         // The loading root remains the only rendered view until the launch
         // destination has been decided, preventing a home-gallery flash.
-        setResolved(true)
+        if (isCurrent()) setResolved(true)
       }
     })()
-    let firstOnlineStatus = true
+    let wasOnline = window.mobius?.online !== false
+    const updateOnlineStatus = (next) => {
+      setOnline(next)
+      if (next && !wasOnline) refresh()
+      wasOnline = next
+    }
     const unsubscribeOnline = typeof window.mobius?.onOnlineChange === 'function'
-      ? window.mobius.onOnlineChange((next) => {
-          setOnline(next)
-          if (firstOnlineStatus) { firstOnlineStatus = false; return }
-          if (next) refresh()
-        })
+      ? window.mobius.onOnlineChange(updateOnlineStatus)
       : null
     let t = null
     if (!unsubscribeOnline) {
       t = setInterval(() => {
         const next = window.mobius?.online !== false
-        setOnline(next)
-        if (next) refresh()
+        updateOnlineStatus(next)
       }, 3000)
     }
     return () => {
