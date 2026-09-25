@@ -91,8 +91,9 @@ function validatePatch(patch) {
 function exactTitle(value) {
   return typeof value === 'string' ? value.trim() : ''
 }
-function validPrUrl(value) {
-  if (typeof value !== 'string' || !value.trim()) return false
+function validLink(value) {
+  if (value === '') return true
+  if (typeof value !== 'string') return false
   try {
     const url = new URL(value)
     return ['http:', 'https:'].includes(url.protocol)
@@ -103,9 +104,11 @@ function validPrUrl(value) {
 async function completeMatchingCard(data) {
   const title = exactTitle(data?.title)
   const summary = typeof data?.summary === 'string' ? data.summary.trim() : ''
-  const prUrl = typeof data?.prUrl === 'string' ? data.prUrl.trim() : ''
-  if (!title || !summary || summary.includes('\n') || !validPrUrl(prUrl)) {
-    throw new Error('title, a one-line summary, and a valid http(s) prUrl are required.')
+  // `prUrl` is the original name of `link`; an older copy of the guide may send it.
+  const rawLink = data?.link ?? data?.prUrl ?? ''
+  const link = typeof rawLink === 'string' ? rawLink.trim() : rawLink
+  if (!title || !summary || summary.includes('\n') || !validLink(link)) {
+    throw new Error('title and a one-line summary are required; link, when given, must be a valid http(s) URL.')
   }
   const boards = await repository.list()
   const unavailable = boards.filter(board => board.status === 'unavailable')
@@ -122,9 +125,9 @@ async function completeMatchingCard(data) {
   if (matches.length === 0) throw new Error(`No Kanban card exactly matches “${title}”.`)
   if (matches.length > 1) throw new Error(`More than one Kanban card exactly matches “${title}”; use unique card titles before completing it automatically.`)
   const match = matches[0]
-  const alreadySaved = hasCardCompletion(match.card.notes, prUrl)
+  const alreadySaved = hasCardCompletion(match.card.notes, link, summary)
   const saved = await repository.mutate(match.board.id, {
-    type: 'complete-card', cardId: match.card.id, expectedTitle: title, summary, prUrl,
+    type: 'complete-card', cardId: match.card.id, expectedTitle: title, summary, link,
   })
   return { status: alreadySaved ? 'already-saved' : 'saved', boardId: match.board.id,
     cardId: match.card.id, card: saved.doc.cards[match.card.id] }

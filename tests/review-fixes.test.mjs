@@ -69,6 +69,27 @@ test('checklist text edits apply and trim through the shared operation', () => {
   assert.equal(doc.cards.a.checklist[0].text, 'New text')
 })
 
+test('card completion accepts any link, or none, without duplicating notes', () => {
+  const doc = boardDoc()
+  doc.columns.push({ id: 'done', name: 'Done', color: null, cardIds: [] })
+  doc.cards.b = { id: 'b', title: 'B', notes: '', label: 'none', due: '', checklist: [], assignee: '' }
+  doc.columns[0].cardIds.push('b')
+  const booking = { type: 'complete-card', cardId: 'a', summary: 'Booked the table', link: 'https://example.com/booking/42' }
+  applyBoardOp(doc, booking)
+  applyBoardOp(doc, booking)
+  assert.equal(doc.cards.a.notes.match(/^Link: https:\/\/example\.com\/booking\/42$/gmu).length, 1)
+  assert.doesNotMatch(doc.cards.a.notes, /^PR:/mu)
+  assert.equal(hasCardCompletion(doc.cards.a.notes, booking.link), true)
+
+  const plain = { type: 'complete-card', cardId: 'b', summary: 'Sent the invitations' }
+  applyBoardOp(doc, plain)
+  applyBoardOp(doc, plain)
+  assert.equal(doc.cards.b.notes, '✅ Done — Sent the invitations')
+  assert.equal(hasCardCompletion(doc.cards.b.notes, '', plain.summary), true)
+  assert.equal(hasCardCompletion(doc.cards.b.notes, '', 'Something else'), false)
+  assert.deepEqual(doc.columns.at(-1).cardIds, ['a', 'b'])
+})
+
 test('card completion preserves fresh notes, uses an exact marker, and moves atomically', () => {
   const doc = boardDoc()
   doc.columns.push({ id: 'done', name: 'Done', color: null, cardIds: [] })

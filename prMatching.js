@@ -29,7 +29,7 @@ const coverage = (left, right) => {
 }
 
 const cardMatchText = card => [card?.title, ...(Array.isArray(card?.checklist) ? card.checklist.map(item => item?.text) : [])].filter(Boolean).join('\n')
-const cardIntentText = card => [cardMatchText(card), String(card?.notes || '').replace(/^✅ Done —.*\nPR: https?:\/\/\S+$/gmu, '')].filter(Boolean).join('\n')
+const cardIntentText = card => [cardMatchText(card), String(card?.notes || '').replace(/^✅ Done —.*\n(?:PR|Link): https?:\/\/\S+$/gmu, '')].filter(Boolean).join('\n')
 
 const pullRepositoryName = pull => {
   try { return new URL(pull?.repository_url || pull?.html_url || '').pathname.split('/').filter(Boolean).at(-1)?.replace(/^app-/u, '').toLocaleLowerCase() || '' } catch { return '' }
