@@ -9,11 +9,23 @@ function insertBefore(ids, itemId, beforeId) {
   return next
 }
 
-export function hasCardCompletion(notes, prUrl) {
-  const marker = `PR: ${prUrl}`
+// A completion note is `✅ Done — <summary>` plus an optional link line. GitHub
+// pull requests keep the historical `PR:` label; any other link uses `Link:`.
+function completionLinkLine(link) {
+  let pull = false
+  try {
+    const url = new URL(link)
+    pull = url.hostname === 'github.com' && /^\/[^/]+\/[^/]+\/pull\/\d+\/?$/u.test(url.pathname)
+  } catch {}
+  return `${pull ? 'PR' : 'Link'}: ${link}`
+}
+
+export function hasCardCompletion(notes, link, summary = '') {
+  const markers = link ? [`PR: ${link}`, `Link: ${link}`] : []
   return String(notes || '').split(/\n{2,}/u).some(block => {
     const lines = block.split('\n')
-    return lines[0]?.startsWith('✅ Done — ') && lines.includes(marker)
+    if (!lines[0]?.startsWith('✅ Done — ')) return false
+    return link ? markers.some(marker => lines.includes(marker)) : lines[0] === `✅ Done — ${summary}`
   })
 }
 
@@ -104,9 +116,11 @@ export function applyBoardOp(board, op) {
     }
     case 'complete-card': {
       const card = board.cards[op.cardId]
-      if (!card || typeof op.summary !== 'string' || !op.summary || typeof op.prUrl !== 'string') return board
-      if (!hasCardCompletion(card.notes, op.prUrl)) {
-        const completion = `✅ Done — ${op.summary}\nPR: ${op.prUrl}`
+      // `link` is optional; `prUrl` is the same field under its original name.
+      const link = op.link ?? op.prUrl ?? ''
+      if (!card || typeof op.summary !== 'string' || !op.summary || typeof link !== 'string') return board
+      if (!hasCardCompletion(card.notes, link, op.summary)) {
+        const completion = [`✅ Done — ${op.summary}`, ...(link ? [completionLinkLine(link)] : [])].join('\n')
         card.notes = [String(card.notes || '').trim(), completion].filter(Boolean).join('\n\n')
       }
       const done = board.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')

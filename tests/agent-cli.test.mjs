@@ -114,7 +114,7 @@ test('CLI writes private and shared boards through their authority using JSON an
     assert.equal((await run('sync-open-prs', undefined, '--dry-run')).matched.length, 2,
       'the UI handle representation matches the connected GitHub owner')
 
-    const completion = { title: 'Fixture card', summary: 'Shipped the exact task', prUrl: 'https://github.com/mobius-os/app-kanban/pull/19' }
+    const completion = { title: 'Fixture card', summary: 'Shipped the exact task', link: 'https://github.com/mobius-os/app-kanban/pull/19' }
     assert.equal((await run('complete-matching-card', completion)).status, 'saved')
     assert.match(local.cards.stable.notes, /Shipped the exact task/)
     assert.deepEqual(local.columns[1].cardIds, ['stable'])
@@ -125,6 +125,11 @@ test('CLI writes private and shared boards through their authority using JSON an
     assert.equal((await run('complete-matching-card', completion)).status, 'already-saved')
     assert.deepEqual(local.columns[1].cardIds, ['stable'])
     assert.equal(local.cards.stable.notes.match(/pull\/19/g).length, 1)
+    assert.match(local.cards.stable.notes, /^PR: https:\/\/github\.com\/mobius-os\/app-kanban\/pull\/19$/mu)
+    const { link, ...legacyCompletion } = completion
+    assert.equal((await run('complete-matching-card', { ...legacyCompletion, prUrl: link })).status, 'already-saved',
+      'the original prUrl input name is still accepted')
+    await assert.rejects(run('complete-matching-card', { ...completion, link: 'not a url' }), /link, when given, must be a valid http\(s\) URL/)
     await assert.rejects(run('complete-matching-card', { ...completion, title: 'Similar card' }), /No Kanban card exactly matches/)
 
     hiddenUnavailable = true
