@@ -346,6 +346,37 @@ export async function deleteSharedAsset(entry, assetId, request = fetch) {
   ))
 }
 
+// Card details live beside the shared board on its host (collaboration/service.py): the
+// full text of a long description, its version, and the card's activity. A
+// host running an older Kanban rejects these requests; callers treat that as
+// "not available on this board yet", never as a failed board edit.
+const cardUrl = (entry, cardId) => `${API}/${encodeURIComponent(entry.host)}/${entry.oid}/cards/${encodeURIComponent(cardId)}`
+
+export async function readSharedCard(entry, cardId, request = fetch) {
+  independent(entry)
+  return _json(await request(cardUrl(entry, cardId), { headers: _auth }))
+}
+
+// `{status: 'ok', notes_version, version, card}` or `{status: 'conflict', notes, notes_version}`.
+export async function writeSharedNotes(entry, cardId, notes, expectedVersion, request = fetch) {
+  independent(entry)
+  return _json(await request(`${cardUrl(entry, cardId)}/notes`, {
+    method: 'PUT', headers: _auth, body: JSON.stringify({ notes, expected_version: expectedVersion }),
+  }))
+}
+
+export async function appendSharedActivity(entry, cardId, entries, request = fetch) {
+  independent(entry)
+  const result = await _json(await request(`${cardUrl(entry, cardId)}/activity`, {
+    method: 'POST', headers: _auth, body: JSON.stringify({ entries }),
+  }))
+  return Array.isArray(result.activity) ? result.activity : []
+}
+
+export function cardDetailsUnsupported(error) {
+  return ['invalid-operation', 'route-missing'].includes(error?.code)
+}
+
 // A board the owner is actively using should feel collaborative; an idle one
 // can relax to the former cadence without creating a permanent fast poll.
 export function sharedBoardPollDelay(lastInteractionAt, now = Date.now()) {
@@ -493,7 +524,10 @@ export async function pushSharedOp(entry, op, onError, request = fetch, confirme
         state = rememberSharedState(null, entry, res)
         continue
       }
-      return { doc: next, version: res.version }
+      // The host may move long descriptions out of the board while writing
+      // (collaboration/service.py settle_cards); it then returns its copy, which
+      // must replace ours or the next write would resend text it refuses.
+      return { doc: (res.doc && normalizeBoard(res.doc)) || next, version: res.version }
     } catch (e) {
       onError?.(e)
       return null

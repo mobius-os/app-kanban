@@ -63,8 +63,8 @@ try {
   // The repository still requires authority confirmation for every shared write.
   console.error('Membership discovery unavailable; using recorded board authorities.')
 }
-const repository = createBoardRepository({ storage, request })
-const [command, boardId] = process.argv.slice(2)
+const repository = createBoardRepository({ storage, request, via: 'agent' })
+const [command, boardId, cardIdArg] = process.argv.slice(2)
 async function input() {
   let raw = ''
   for await (const chunk of process.stdin) raw += chunk
@@ -125,7 +125,11 @@ async function completeMatchingCard(data) {
   if (matches.length === 0) throw new Error(`No Kanban card exactly matches “${title}”.`)
   if (matches.length > 1) throw new Error(`More than one Kanban card exactly matches “${title}”; use unique card titles before completing it automatically.`)
   const match = matches[0]
-  const alreadySaved = hasCardCompletion(match.card.notes, link, summary)
+  // A long shared description keeps only a preview on the board.
+  const fullNotes = Number.isInteger(match.card.notesLength)
+    ? (await repository.readCard(match.board.id, match.card.id)).notes ?? match.card.notes
+    : match.card.notes
+  const alreadySaved = hasCardCompletion(fullNotes, link, summary)
   const saved = await repository.mutate(match.board.id, {
     type: 'complete-card', cardId: match.card.id, expectedTitle: title, summary, link,
   })
@@ -193,6 +197,15 @@ try {
   let result
   if (command === 'list') result = await repository.list()
   else if (command === 'read' && validId(boardId)) result = await repository.read(boardId)
+  else if (command === 'read-card' && validId(boardId) && validId(cardIdArg)) {
+    const { doc } = await repository.read(boardId)
+    const card = doc.cards[cardIdArg]
+    if (!card) throw new Error('Card was not found on this board.')
+    const details = await repository.readCard(boardId, cardIdArg)
+    const { notesLength, ...rest } = card
+    result = { boardId, card: { ...rest, notes: details.notes ?? card.notes }, notesVersion: details.notesVersion,
+      activity: details.activity, cardDetails: details.status }
+  }
   else if (command === 'set-checklist-item' && validId(boardId)) {
     const data = await input()
     if (!data || typeof data !== 'object' || Array.isArray(data) || !validId(data.cardId) || !validId(data.itemId) || typeof data.done !== 'boolean') {
@@ -225,7 +238,9 @@ try {
       const fields = ['title', 'notes', 'label', 'due', 'assignee', 'assigneeHost', 'pullRequestUrl', 'pullRequestUrls']
       if (Object.keys(data.patch).some(key => !fields.includes(key))) throw new Error('Patch must contain editable card fields only.')
       validatePatch(data.patch)
-      op = { type: command, cardId: data.cardId, patch: data.patch }
+      if (data.notesVersion !== undefined && !Number.isInteger(data.notesVersion)) throw new Error('notesVersion must be the whole number read-card returned.')
+      op = { type: command, cardId: data.cardId, patch: data.patch,
+        ...(Number.isInteger(data.notesVersion) ? { notesVersion: data.notesVersion } : {}) }
     } else {
       if (!validId(data.cardId) || !validId(data.toColumnId)
         || (data.beforeCardId != null && !validId(data.beforeCardId))) throw new Error('cardId and toColumnId are required, with an optional safe beforeCardId.')
@@ -239,7 +254,7 @@ try {
     result = await completeMatchingCard(await input())
   } else if (command === 'sync-open-prs') {
     result = await syncOpenPrs(process.argv.includes('--dry-run'))
-  } else throw new Error('Usage: kanban.mjs list | read BOARD_ID | add-card/update-card/move-card/set-checklist-item BOARD_ID < input.json | complete-matching-card < input.json | sync-open-prs [--dry-run]')
+  } else throw new Error('Usage: kanban.mjs list | read BOARD_ID | read-card BOARD_ID CARD_ID | add-card/update-card/move-card/set-checklist-item BOARD_ID < input.json | complete-matching-card < input.json | sync-open-prs [--dry-run]')
   console.log(JSON.stringify(result, null, 2))
 } catch (error) {
   console.error(JSON.stringify({ status: 'not-confirmed', error: error.message }))

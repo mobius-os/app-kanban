@@ -44,7 +44,9 @@ const boardDoc = () => ({
 test('a shared snapshot received during a canceled drag renders after the next version-only poll', async () => {
   // Exercise the Board effect itself, with only its IO and timers substituted.
   const source = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
-  const effect = source.slice(source.indexOf('  // Shared boards: poll'), source.indexOf('  const mutate = useCallback'))
+  const start = source.indexOf('  // Shared boards: poll')
+  const end = '}, [share, boardId, loadAttempt, publishAvailability])'
+  const effect = source.slice(start, source.indexOf(end, start) + end.length)
   const polls = [
     { version: 1, doc: boardDoc() },
     { version: 2, doc: { ...boardDoc(), title: 'Collaborator edit' } },
@@ -310,48 +312,58 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   const appSource = await readFile(new URL('../index.jsx', import.meta.url), 'utf8')
   const focusSource = await readFile(new URL('../ui/modalFocus.js', import.meta.url), 'utf8')
   const themeSource = await readFile(new URL('../theme.js', import.meta.url), 'utf8')
+  const partsSource = await readFile(new URL('../ui/CardParts.jsx', import.meta.url), 'utf8')
   assert.match(boardSource, /if \(!boardAccess\(entry, onlineRef\.current\)\.canWrite\) return false/)
   const sheetSource = boardSource.slice(boardSource.indexOf('className="kb-card-toolbar"'))
   const inOrder = markers => markers.every((marker, index) => {
     const at = sheetSource.indexOf(marker)
     return at >= 0 && (index === 0 || sheetSource.indexOf(markers[index - 1]) < at)
   })
-  assert.match(sheetSource, /<span className="kb-card-toolbar-title">New card<\/span>/,
-    'every opened card shows the New card heading')
-  assert.ok(inOrder(['<LabelPicker', '<AssigneePicker', 'kb-card-toolbar-done']),
-    'the card header reads label, assignee, then Done')
-  assert.ok(inOrder(['<CardNotesEditor', '<ChecklistEditor', 'className="kb-attach-drop', 'aria-label="Card due date"', '<PullRequestReferences']),
-    'card sections read notes, checklist, attachments, due date, then linked pull requests')
+  const heading = sheetSource.slice(0, sheetSource.indexOf('<CardTitleEditor'))
+  assert.match(heading, /isDraftCard \|\| !openCardColumn\s*\? <span className="kb-card-toolbar-title">New card<\/span>/,
+    'only a card that is still being created is headed New card')
+  assert.match(heading, /<StatusPill columns=\{board\.columns\} columnId=\{openCardColumn\.id\}/,
+    'a saved card is headed by a status control showing the list it sits in')
+  assert.equal(heading.match(/>New card</g).length, 1, 'New card is never the unconditional heading')
+  assert.ok(inOrder(['<StatusPill', 'kb-card-close', '<CardTitleEditor', '<AssigneePicker', '<LabelChip', '<DueChip']),
+    'the card header reads status then close; the details row reads assignee, label, then due date')
+  assert.ok(inOrder(['<DescriptionSection', '<AttachmentsSection', '<ChecklistSection', '<PullRequestSection', '<CardActivity', 'kb-card-danger-zone']),
+    'card sections read description, attachments, checklist, pull request, activity, then delete')
   assert.equal(sheetSource.match(/<AssigneePicker/g).length, 1, 'one assignee control for every screen size')
-  assert.equal(sheetSource.match(/aria-label="Card due date"/g).length, 1, 'one due-date control for every screen size')
+  assert.equal(sheetSource.match(/<DueChip/g).length, 1, 'one due-date control for every screen size')
+  assert.equal(sheetSource.match(/<StatusPill/g).length, 1, 'one status control for every screen size')
   assert.match(boardSource, /className="kb-card-danger-zone"/)
   assert.match(boardSource, /className="kb-title-display kb-editable-field"/)
-  assert.match(boardSource, /<LinkifiedText text=\{card\.notes\} \/>/)
-  assert.match(boardSource, /contentEditable="plaintext-only"/)
-  assert.match(boardSource, /role="textbox"[\s\S]*tabIndex=\{0\}/)
-  assert.match(boardSource, /document\.activeElement === editorRef\.current[\s\S]*if \(!isFocused && !dirtyRef\.current\) renderText\(savedText\)/)
-  assert.match(boardSource, /label="Card notes"[\s\S]*links/)
+  assert.match(partsSource, /<LinkifiedText text=\{text\} \/>/)
+  assert.match(partsSource, /contentEditable="plaintext-only"/)
+  assert.match(partsSource, /role="textbox"[\s\S]*tabIndex=\{0\}/)
+  assert.match(partsSource, /document\.activeElement === editorRef\.current[\s\S]*if \(!isFocused && !dirtyRef\.current\) renderText\(savedText\)/)
+  assert.match(partsSource, /label="Card description"[\s\S]*links/)
   assert.match(boardSource, /className="kb-card-open"[^\n]*aria-label=/)
-  assert.match(boardSource, /event\.key !== 'Escape'[\s\S]*onCancel\?\.\(\)/)
+  assert.match(partsSource, /event\.key !== 'Escape'[\s\S]*onCancel\?\.\(\)/)
   assert.match(themeSource, /\.kb-notes-display \{[^}]*flex: 0 0 auto;[^}]*max-height: none/)
-  assert.match(boardSource, /data-modal-inline-editor/)
+  assert.match(partsSource, /data-modal-inline-editor/)
   assert.match(boardSource, /setDraftCard\(\{ boardId, columnId: colId, card \}\)/)
   assert.match(boardSource, /if \(!isDraftCard\) return updateCard/)
   assert.doesNotMatch(boardSource, /onCancel=\{\(\) => \{ mutate\(\{ type: 'delete-card'/)
   assert.match(boardSource, /className="kb-btn kb-delete-card"/)
-  assert.match(boardSource, /className="kb-btn kb-btn-primary kb-card-toolbar-done"/)
+  assert.match(boardSource, /className="kb-iconbtn kb-card-close" aria-label="Close card"/)
+  assert.doesNotMatch(heading, />Done</, 'closing a card is not labelled like the Done list')
   assert.doesNotMatch(boardSource, /kb-card-more-heading/)
   assert.doesNotMatch(boardSource, /<h3>Position<\/h3>/, 'cards reorder by drag and drop, not a Position section')
-  assert.match(boardSource, /role="radiogroup"/)
-  assert.match(boardSource, /role="radio" aria-checked=/)
+  assert.match(partsSource, /role="menuitemradio"\s*aria-checked=\{column\.id === columnId\}/)
   assert.match(boardSource, /function AssigneePicker/)
   assert.match(boardSource, />Assign to me</)
   assert.match(boardSource, /placeholder=\{share \? 'Search people…' : 'Search or enter a name…'\}/)
   assert.doesNotMatch(boardSource, /<select/)
   assert.match(boardSource, /<BoardPresence members=\{displayMembers\}/)
   assert.match(boardSource, /await onRefreshMembers\?\.\(\)/)
-  assert.match(boardSource, /kb-card-notes/)
-  assert.match(boardSource, /Add attachment/)
+  // Board cards read like the open card: title, the start of the description, one attachment, then details.
+  const tile = boardSource.slice(boardSource.indexOf('function Card('), boardSource.indexOf('function memberRecords('))
+  assert.ok(['className="kb-card-title"', 'className="kb-card-notes"', '<CardTileAttachment', 'className="kb-card-meta"']
+    .every((marker, index, markers) => tile.indexOf(marker) > (index ? tile.indexOf(markers[index - 1]) : -1)),
+    'a board card reads title, description, attachment, then the details row')
+  assert.match(partsSource, /Add attachment/)
   assert.match(boardSource, /onPaste=\{attachFromPaste\}/)
   assert.match(boardSource, /consumeAttachmentPaste/)
   assert.match(boardSource, /MAX_CARD_ATTACHMENTS/)
@@ -365,8 +377,8 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(focusSource, /if \(!isTopmost\(\)\) return/)
   assert.match(focusSource, /opener\.focus\(\)/)
   assert.match(focusSource, /if \(!dialog\?\.contains\(document\.activeElement\)\) \{/, 'preserve autofocus in new-card editor instead of blurring it to mobile Done')
-  assert.match(themeSource, /\.kb-status-seg button \{[^}]*min-height: 44px/s)
-  assert.match(themeSource, /\.kb-col-reorder \.kb-col-action \{ width: 44px; height: 44px; \}/)
+  assert.match(themeSource, /\.kb-status-pill \{[^}]*min-height: 44px/s)
+  assert.match(themeSource, /\.kb-menu-trigger \{ width: 44px; height: 44px; \}/, 'the list menu keeps a 44px touch target on phones')
   assert.match(themeSource, /\.kb-input, \.kb-col-name \{ font-size: 16px; \}/)
   assert.match(themeSource, /\.kb-swatches \{ flex-wrap: nowrap; gap: 4px; overflow-x: auto;/)
   assert.match(themeSource, /\.kb-sheet \{[^}]*top: max\(8px, env\(safe-area-inset-top\)\)/s)
@@ -378,24 +390,26 @@ test('card-title links open directly and pull-request status stays informational
   const boardSource = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
   const themeSource = await readFile(new URL('../theme.js', import.meta.url), 'utf8')
   const storageSource = await readFile(new URL('../storage.js', import.meta.url), 'utf8')
-  assert.match(boardSource, /className="kb-card-title"><LinkifiedText text=\{card\.title\}/)
+  // The title area may start with the "changed" dot; the title itself stays a linkified title.
+  assert.match(boardSource, /className="kb-card-title">[^]{0,200}?<LinkifiedText text=\{card\.title\}/)
   assert.match(boardSource, /if \(!e\.target\.closest\('a'\)\) onDragStart/)
   assert.match(boardSource, /pullRequestStatus\(response\.status/)
-  assert.match(boardSource, /kb-pr-status/)
+  const partsSource = await readFile(new URL('../ui/CardParts.jsx', import.meta.url), 'utf8')
+  assert.match(partsSource, /kb-pr-status/)
   assert.match(boardSource, /setPullStatusRefresh/)
-  assert.match(boardSource, /function PullRequestReferences/)
+  assert.match(partsSource, /function PullRequestSection/)
   assert.match(boardSource, /type: 'edit-pull-request'/)
-  assert.match(boardSource, /Add pull request/)
+  assert.match(partsSource, /Add pull request/)
   assert.match(storageSource, /pullRequestUrls/)
   assert.doesNotMatch(boardSource, /moveCard\(card\.id, done\.id, null\)/)
-  assert.match(themeSource, /\.kb-pr-reference/)
+  assert.match(themeSource, /\.kb-pr-line/)
 })
 
 test('new cards expose details before a title and keep draft edits in the eventual add', async () => {
   const source = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
   const sheet = source.slice(source.indexOf('className="kb-card-toolbar"'))
   const draftGate = sheet.indexOf('{!isDraftCard && <>')
-  for (const field of ['<CardNotesEditor', '<ChecklistEditor', 'className="kb-attach-drop', 'aria-label="Card due date"', '<PullRequestReferences']) {
+  for (const field of ['<DueChip', '<DescriptionSection', '<ChecklistSection', '<PullRequestSection', '<AttachmentsSection']) {
     assert.ok(sheet.indexOf(field) < draftGate, field + ' is visible for drafts')
   }
   assert.match(source, /applyBoardOp\(doc, operation\)/)

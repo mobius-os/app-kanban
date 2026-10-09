@@ -41,3 +41,10 @@ test('pull request status never shows a missing GitHub connection or private PR 
   }
   for (const status of [0, 401, 403, 404]) assert.equal(pullRequestStatus(status).tone, 'unknown')
 })
+
+test('a pull request status carries its GitHub title so the card can name it without a second request', () => {
+  assert.equal(pullRequestStatus(200, { state: 'open', title: '  Render app-owned blocks in chat  ' }).title, 'Render app-owned blocks in chat')
+  assert.equal(pullRequestStatus(200, { state: 'closed', merged_at: '2026-09-01T00:00:00Z', title: 'Ship it' }).title, 'Ship it')
+  assert.equal('title' in pullRequestStatus(200, { state: 'open' }), false, 'no title means the card falls back to repo and number')
+  assert.equal('title' in pullRequestStatus(404), false)
+})

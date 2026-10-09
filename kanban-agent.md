@@ -18,7 +18,15 @@ uses the current turn's credentials internally; never print them.
    healthy boards remain usable. Do not treat that entry as a missing/private
    board or invent its columns. Retry `read BOARD_ID` when its authority is
    reachable. Failure to list the board directory still fails the command.
-2. `read BOARD_ID` returns the authoritative board, including its cards.
+2. `read BOARD_ID` returns the authoritative board, including its cards. On a
+   shared board a long description stays beside the board: such a card has
+   `notesLength` and only a preview in `notes`. `read-card BOARD_ID CARD_ID`
+   returns that card with its full description, its `notesVersion`, and its
+   activity (who changed what, when). To change such a description, start
+   from the `read-card` text and send that `notesVersion` with `update-card`;
+   an edit without it, or after someone else changed the text, is refused so
+   a preview never replaces the full description. Edits made through this
+   helper are recorded as the agent's.
 3. Choose the intended board/column from those results, not guessed filenames.
    If several boards genuinely match, ask rather than silently picking the first.
 4. Send one operation as JSON on stdin. Generate arbitrary text with a JSON
@@ -29,10 +37,14 @@ uses the current turn's credentials internally; never print them.
 Commands and stdin shapes:
 
 - `add-card BOARD_ID`: `{"columnId":"...","title":"...","notes":"...","id":"optional-stable-id"}`
-- `update-card BOARD_ID`: `{"cardId":"...","patch":{"title":"...","notes":"..."}}`
+- `update-card BOARD_ID`: `{"cardId":"...","patch":{"title":"...","notes":"..."},"notesVersion":3}`
+  (`notesVersion` only when changing the notes of a card that has `notesLength`)
   Other editable fields: label, due, assignee, assigneeHost, and
   `pullRequestUrls` (the card's full list of linked GitHub pull request URLs;
   read the card first and send the whole list, since it replaces the old one).
+  `label` is a colour: none, red, amber, green, blue, purple or pink. A board's
+  `labelNames` (shown by `read`) says what each colour means there, such as
+  red = Urgent; choose the colour by that meaning.
 - `move-card BOARD_ID`: `{"cardId":"...","toColumnId":"...","beforeCardId":null}`
 
 ## Marking a finished task done
@@ -46,7 +58,10 @@ When you finish a task whose exact title matches one Kanban card, use
 request, shared document, booking, or receipt. The command appends
 `✅ Done — <summary>` and the link to that card's notes, then moves it to the
 column named **Done** when that column exists. A GitHub pull request link is
-also added to the card's linked pull requests, so its live status shows there. It refuses to guess when zero or
+also added to the card's linked pull requests, so its live status shows there.
+On a shared board a description cannot grow past 16,000 characters; when the
+completion line would not fit, the card still moves and its activity records
+the completion instead. It refuses to guess when zero or
 multiple card titles match, and it does not duplicate a completion already on
 the card. An unavailable recorded board or a title changed before the fresh
 write also blocks automatic completion. A missing card or ambiguous title is a

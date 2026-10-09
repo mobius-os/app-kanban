@@ -2,6 +2,8 @@
 // lets local-offline edits survive a reload and be replayed against a fresh CAS
 // base instead of trusting the runtime's blind offline write queue.
 import { parsePullRequestUrl } from './prMatching.js'
+import { applyAssignment } from './assignment.js'
+import { COLUMN_COLOR_KEYS, isDoneColumn, MAX_LABEL_NAME_CHARS, normalizeLabelNames } from './domain.js'
 
 function insertBefore(ids, itemId, beforeId) {
   const next = (Array.isArray(ids) ? ids : []).filter(id => id !== itemId)
@@ -23,6 +25,17 @@ export function hasCardCompletion(notes, link, summary = '') {
     if (!lines[0]?.startsWith('✅ Done — ')) return false
     return link ? markers.some(marker => lines.includes(marker)) : lines[0] === `✅ Done — ${summary}`
   })
+}
+
+// A long description on a shared board lives beside the board (activity.js);
+// the card keeps a preview plus `notesLength`. Board operations never edit
+// such a description: the repository saves it on its own, version-checked.
+export const hasExternalNotes = card => Number.isInteger(card?.notesLength)
+
+export function completeCardNotes(notes, { summary, link = '' }) {
+  if (hasCardCompletion(notes, link, summary)) return String(notes || '')
+  const completion = [`✅ Done — ${summary}`, ...(link ? [completionLinkLine(link)] : [])].join('\n')
+  return [String(notes || '').trim(), completion].filter(Boolean).join('\n\n')
 }
 
 export function cardPullUrls(card) {
@@ -49,7 +62,8 @@ export function applyBoardOp(board, op) {
       const card = board.cards[op.cardId]
       if (card && op.patch && typeof op.patch === 'object') {
         const previousUrls = cardPullUrls(card)
-        Object.assign(card, op.patch)
+        const { notes, notesLength, ...rest } = op.patch
+        Object.assign(card, hasExternalNotes(card) ? rest : { ...rest, ...(notes === undefined ? {} : { notes }) })
         if (Array.isArray(op.patch.pullRequestUrls)) {
           card.pullRequestUrls = cardPullUrls({ pullRequestUrls: op.patch.pullRequestUrls })
           card.pullRequestUrl = card.pullRequestUrls[0] || ''
@@ -58,6 +72,11 @@ export function applyBoardOp(board, op) {
           card.pullRequestUrl = card.pullRequestUrls[0] || ''
         }
       }
+      return board
+    }
+    case 'assign-card': {
+      const card = board.cards[op.cardId]
+      if (card) applyAssignment(card, op)
       return board
     }
     case 'edit-pull-request': {
@@ -115,17 +134,14 @@ export function applyBoardOp(board, op) {
       // `link` is optional; `prUrl` is the same field under its original name.
       const link = op.link ?? op.prUrl ?? ''
       if (!card || typeof op.summary !== 'string' || !op.summary || typeof link !== 'string') return board
-      if (!hasCardCompletion(card.notes, link, op.summary)) {
-        const completion = [`✅ Done — ${op.summary}`, ...(link ? [completionLinkLine(link)] : [])].join('\n')
-        card.notes = [String(card.notes || '').trim(), completion].filter(Boolean).join('\n\n')
-      }
+      if (!hasExternalNotes(card)) card.notes = completeCardNotes(card.notes, { summary: op.summary, link })
       // A finished pull request is also a linked pull request, so the card
       // shows its live status like any PR added by hand.
       if (parsePullRequestUrl(link)) {
         card.pullRequestUrls = cardPullUrls({ pullRequestUrls: [...cardPullUrls(card), link] })
         card.pullRequestUrl = card.pullRequestUrls[0]
       }
-      const done = board.columns.find(column => String(column.name || '').trim().toLocaleLowerCase() === 'done')
+      const done = board.columns.find(isDoneColumn)
       if (done && !done.cardIds.includes(op.cardId)) {
         board.columns.forEach(column => { column.cardIds = column.cardIds.filter(id => id !== op.cardId) })
         done.cardIds.push(op.cardId)
@@ -136,6 +152,12 @@ export function applyBoardOp(board, op) {
       if (op.column?.id && !board.columns.some(column => column.id === op.column.id)) {
         board.columns.push(structuredClone(op.column))
       }
+      return board
+    }
+    case 'recolor-column': {
+      // `null` is the uncoloured (grey) list; anything else must be a known key.
+      const column = board.columns.find(item => item.id === op.columnId)
+      if (column && (op.color === null || COLUMN_COLOR_KEYS.includes(op.color))) column.color = op.color
       return board
     }
     case 'rename-column': {
@@ -161,6 +183,17 @@ export function applyBoardOp(board, op) {
     case 'rename-board':
       if (op.title) board.title = op.title
       return board
+    // One colour at a time, so two people naming different labels never
+    // overwrite each other. An empty name removes it.
+    case 'name-label': {
+      if (!COLUMN_COLOR_KEYS.includes(op.color)) return board
+      const names = normalizeLabelNames(board.labelNames)
+      const name = String(op.name ?? '').trim().slice(0, MAX_LABEL_NAME_CHARS)
+      if (name) names[op.color] = name
+      else delete names[op.color]
+      board.labelNames = names
+      return board
+    }
     default:
       return board
   }

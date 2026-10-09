@@ -2,10 +2,20 @@
 
 A clean, mobile-first kanban board for Möbius.
 
-- Lists with counts, inline rename, and safe delete confirmation.
-- Cards with titles, notes, and color labels.
-- Drag and drop between lists (long-press on touch, drag on desktop), plus
-  visible "Move to" controls in the card sheet for accessibility.
+- Lists with counts, inline rename, safe delete confirmation, and a list menu
+  to fold a list into a slim strip (remembered per person) or move it; on
+  desktop a list can also be dragged by its header.
+- Cards on the board show the full title, the first two lines of the
+  description, the first picture or file, and a details row (label, due date,
+  checklist, pull requests, attachment count, assignee).
+- Drag and drop between lists (long-press on touch, drag on desktop), plus a
+  status control at the top of the card sheet for accessibility.
+- A card sheet with assignee, label and due-date chips, short previews of long
+  notes, checklists and attachments, and an Activity history of who changed
+  what and when.
+- Long notes and activity on shared boards are stored beside the board on its
+  host, so the board document stays small; edits to the same notes are
+  version-checked instead of silently overwritten.
 - Local boards work offline and sync when you reconnect. Shared boards keep
   their last copy available offline and become editable again after reconnecting.
 - Concurrent-edit safe: every change merges through compare-and-swap writes,

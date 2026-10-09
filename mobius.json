@@ -31,8 +31,10 @@
   },
   "source_files": [
     "boardRepository.js",
+    "activity.js",
     "attachments.js",
     "domain.js",
+    "assignment.js",
     "operations.js",
     "pendingOps.js",
     "storage.js",
@@ -43,6 +45,7 @@
     "ui/modalFocus.js",
     "ui/Home.jsx",
     "ui/Board.jsx",
+    "ui/CardParts.jsx",
     "prMatching.js",
     "scripts/kanban.mjs",
     "kanban-agent.md",

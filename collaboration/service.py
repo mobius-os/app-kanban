@@ -16,6 +16,7 @@ import re
 import secrets
 import time
 import uuid
+from datetime import datetime
 from urllib.parse import quote, unquote
 
 from .store import Store
@@ -29,6 +30,22 @@ SECRET = re.compile(r'^[A-Za-z0-9_-]{32,128}$')
 ASSET = re.compile(r'^[A-Za-z0-9_-]{1,80}$')
 MAX_DOC = 256 * 1024
 MAX_ASSET = 5 * 1024 * 1024
+# Card details live beside the board in one 'card' record per card, because
+# the board document is capped (MAX_DOC) and resent whole on every edit. A long
+# description keeps only a preview in the document; activity is never in it.
+# Keep these in step with activity.js.
+NOTES_PREVIEW_CHARS = 400
+MAX_NOTES_CHARS = 16000
+MAX_ACTIVITY_PER_CARD = 100
+MAX_ACTIVITY_TEXT = 300
+MAX_ACTIVITY_APPEND = 40
+ACTIVITY_TYPES = frozenset((
+    'created', 'completed', 'renamed', 'notes', 'moved', 'label', 'due',
+    'checklist-added', 'checklist-removed', 'checklist-checked', 'checklist-unchecked', 'checklist-edited',
+    'attachment-added', 'attachment-removed', 'pr-added', 'pr-removed', 'pr-changed',
+))
+ACTIVITY_ID = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
+CARD_ID = re.compile(r'^[A-Za-z0-9_-]{1,80}$')
 PRESENCE_TTL = 12
 # Members poll every 1-3 s. Persisting `seen` only once it is this old keeps
 # every polling member inside PRESENCE_TTL while most polls write nothing. It
@@ -61,9 +78,58 @@ def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def document(doc):
+def activity_time(value):
+    if not isinstance(value, str) or len(value) > 40:
+        fail(400, 'invalid-activity', 'Activity time is invalid.')
+    try:
+        stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        fail(400, 'invalid-activity', 'Activity time is invalid.')
+    if stamp.tzinfo is None:
+        fail(400, 'invalid-activity', 'Activity time needs a timezone.')
+    return stamp.timestamp()
+
+
+def activity_entries(raw, actor):
+    """Validate client entries and stamp the author the host authenticated."""
+    if not isinstance(raw, list) or not raw or len(raw) > MAX_ACTIVITY_APPEND:
+        fail(400, 'invalid-activity', 'Activity must be a short, non-empty list.')
+    entries = []
+    for item in raw:
+        if not isinstance(item, dict) or item.get('type') not in ACTIVITY_TYPES:
+            fail(400, 'invalid-activity', 'Unknown activity type.')
+        entry = {'id': check(item.get('id'), ACTIVITY_ID, 'activity id'), 'at': item.get('at'),
+                 'type': item['type'], 'by': {'host': actor['host'], 'name': actor.get('name') or actor['host']}}
+        activity_time(entry['at'])
+        for key in ('from', 'to', 'text'):
+            if key in item:
+                if not isinstance(item[key], str): fail(400, 'invalid-activity', 'Activity text is invalid.')
+                entry[key] = item[key].strip()[:MAX_ACTIVITY_TEXT]
+        if item.get('via') == 'agent': entry['via'] = 'agent'
+        entries.append(entry)
+    return entries
+
+
+def merge_activity(existing, incoming):
+    merged = {}
+    for entry in [*existing, *incoming]:
+        merged.setdefault(entry['id'], entry)
+    ordered = sorted(merged.values(), key=lambda entry: (activity_time(entry['at']), entry['id']))
+    return ordered[-MAX_ACTIVITY_PER_CARD:]
+
+
+def notes_preview(notes):
+    return notes if len(notes) <= NOTES_PREVIEW_CHARS else notes[:NOTES_PREVIEW_CHARS - 1].rstrip() + '…'
+
+
+def board_shape(doc):
     if not isinstance(doc, dict) or not isinstance(doc.get('columns'), list) or not isinstance(doc.get('cards'), dict):
         fail(400, 'invalid-board', 'A board must contain columns and cards.')
+    return doc
+
+
+def document(doc):
+    board_shape(doc)
     try:
         raw = json.dumps(doc, allow_nan=False).encode()
     except (ValueError, TypeError):
@@ -149,7 +215,7 @@ class Service:
             fail(409,'invitation-pending','Accept the invitation before using this board.')
         if self.presence_changes(member, self.claimed_name(body)):
             return None
-        return self.operation(row,op,body)
+        return self.operation(row,op,body,{'host':member['host'],'name':member.get('name')})
 
     def state(self, row, since=-1):
         result = {'status':'ok', 'version':row['version'], 'object':self.public(row)}
@@ -391,32 +457,126 @@ class Service:
                 row['members'].pop(mid)
                 self.store.put('board',oid,row)
                 return {'status':'left'}
-            if op not in ('state','write','asset-read','asset-write','asset-delete'):
+            if op not in ('state','write','asset-read','asset-write','asset-delete','card-read','notes-write','activity-append'):
                 fail(400,'invalid-operation','Unsupported board operation.')
-            if op in ('write','asset-write','asset-delete') and member['role'] != 'editor':
+            if op in ('write','asset-write','asset-delete','notes-write','activity-append') and member['role'] != 'editor':
                 fail(403,'read-only','This board member is a viewer.')
             changes = self.presence_changes(member, self.claimed_name(body))
             member.update(changes)
-            result = self.operation(row,op,body)
+            result = self.operation(row,op,body,{'host':member['host'],'name':member.get('name')})
             if changes or op not in READ_ONLY_OPS:
                 self.store.put('board',oid,row)
             return result
 
-    def operation(self, row, op, body):
+    def card_record(self, row, card_id):
+        return self.store.get('card',row['id']+'/'+card_id) or {
+            'board_id':row['id'],'card_id':card_id,'notes':None,'notes_version':0,'activity':[]}
+
+    def settle_cards(self, row, doc):
+        """Keep the incoming document's descriptions consistent with the card records.
+
+        Long descriptions move out of the document (this also migrates boards
+        written before card records existed). Returns True when the incoming
+        document changed, so the writer adopts the host's copy instead of
+        keeping full text the board no longer carries.
+
+        A writer may still send the full text it held before the move; that is
+        the same description, not an edit. Any other change to a moved-out
+        preview comes from an older Kanban that never saw the full text, and
+        accepting it would truncate the description.
+        """
+        changed_doc = False
+        previous = row['doc'].get('cards',{})
+        for card_id in set(previous) - set(doc['cards']):
+            if isinstance(card_id,str): self.store.delete('card',row['id']+'/'+card_id)
+        for card_id, card in doc['cards'].items():
+            if not isinstance(card,dict) or not isinstance(card_id,str) or not CARD_ID.fullmatch(card_id): continue
+            before = previous.get(card_id) if isinstance(previous.get(card_id),dict) else {}
+            notes = card.get('notes') if isinstance(card.get('notes'),str) else ''
+            if isinstance(before.get('notesLength'),int):
+                if notes != before.get('notes'):
+                    if notes != self.card_record(row,card_id)['notes']:
+                        # 'read-only' is the refusal an older Kanban already treats as
+                        # final: it reverts the edit or keeps it for recovery, instead
+                        # of retrying forever and holding back its later edits.
+                        fail(403,'read-only',"This card's description is stored separately. Update Kanban to edit it.")
+                    card['notes'] = before['notes']; changed_doc = True
+                if card.get('notesLength') != before['notesLength']:
+                    card['notesLength'] = before['notesLength']; changed_doc = True
+                continue
+            if 'notesLength' in card:
+                card.pop('notesLength'); changed_doc = True
+            changed = notes != (before.get('notes') if isinstance(before.get('notes'),str) else '')
+            if not changed and len(notes) <= NOTES_PREVIEW_CHARS: continue
+            record = self.card_record(row,card_id)
+            if changed: record['notes_version'] += 1
+            if len(notes) > NOTES_PREVIEW_CHARS:
+                record['notes'] = notes
+                card['notes'] = notes_preview(notes); card['notesLength'] = len(notes)
+                changed_doc = True
+            self.store.put('card',row['id']+'/'+card_id,record)
+        return changed_doc
+
+    def card_operation(self, row, op, body, actor):
+        card_id = check(body.get('card_id'),CARD_ID,'card id')
+        key = row['id']+'/'+card_id
+        record = self.card_record(row,card_id)
+        card = row['doc'].get('cards',{}).get(card_id)
+        external = isinstance(card,dict) and isinstance(card.get('notesLength'),int)
+        current_notes = record['notes'] if external else (card.get('notes') if isinstance(card,dict) and isinstance(card.get('notes'),str) else '')
+        if op == 'card-read':
+            # `external` tells a writer that the board only shows a preview, so an
+            # edit must name the version it started from (boardRepository.js).
+            return {'status':'ok','notes':current_notes if isinstance(card,dict) else None,
+                'notes_version':record['notes_version'],'external':external,'activity':record['activity']}
+        if not isinstance(card,dict): fail(404,'card-missing','Card not found.')
+        if op == 'activity-append':
+            record['activity'] = merge_activity(record['activity'], activity_entries(body.get('entries'), actor))
+            self.store.put('card',key,record)
+            return {'status':'ok','activity':record['activity']}
+        notes, expected = body.get('notes'), body.get('expected_version')
+        if not isinstance(notes,str): fail(400,'invalid-notes','A description must be text.')
+        if type(expected) is not int or expected < 0: fail(400,'invalid-version','Expected version must be a whole number.')
+        if expected != record['notes_version']:
+            return {'status':'conflict','notes':current_notes,'notes_version':record['notes_version']}
+        if notes == current_notes:
+            return {'status':'ok','notes_version':record['notes_version'],'version':row['version'],'card':card}
+        # Older descriptions may already be longer (moved out by settle_cards);
+        # they stay editable as long as an edit does not make them longer.
+        if len(notes) > MAX_NOTES_CHARS and len(notes) > len(current_notes):
+            fail(413,'notes-too-long',f'A description can be at most {MAX_NOTES_CHARS} characters.')
+        record['notes_version'] += 1
+        if len(notes) > NOTES_PREVIEW_CHARS:
+            record['notes'] = notes
+            card['notes'] = notes_preview(notes); card['notesLength'] = len(notes)
+        else:
+            record['notes'] = None
+            card['notes'] = notes; card.pop('notesLength',None)
+        document(row['doc'])
+        row['version'] += 1
+        self.store.put('card',key,record)
+        return {'status':'ok','notes_version':record['notes_version'],'version':row['version'],'card':card}
+
+    def operation(self, row, op, body, actor):
         if op == 'state':
             since = body.get('since_version',-1)
             if type(since) is not int: fail(400,'invalid-version','Version must be an integer.')
             return self.state(row,since)
+        if op in ('card-read','notes-write','activity-append'):
+            return self.card_operation(row,op,body,actor)
         if op == 'write':
-            doc = document(body.get('doc'))
+            doc = board_shape(body.get('doc'))
             expected = body.get('expected_version')
             if type(expected) is not int or expected < 1:
                 fail(400,'invalid-version','Expected version must be a positive integer.')
             if expected != row['version']:
                 return {'status':'conflict','version':row['version'],'doc':row['doc']}
+            settled = self.settle_cards(row,doc)
+            document(doc)
             row['doc']=doc; row['version']+=1
             row['label']=str(doc.get('title') or row['label'])[:120]
-            return {'status':'ok','version':row['version']}
+            # Only a document the host changed is sent back; otherwise the writer's copy is exact.
+            return {'status':'ok','version':row['version'],**({'doc':doc} if settled else {})}
         aid = check(body.get('asset_id'),ASSET,'asset id')
         key = row['id']+'/'+aid
         if op == 'asset-read':
@@ -447,12 +607,12 @@ class Service:
             if op in READ_ONLY_OPS:
                 row = self.board(oid)
                 if not self.presence_changes(row['members'][self.host], self.owner_name):
-                    return self.operation(row,op,body)
+                    return self.operation(row,op,body,{'host':self.host,'name':self.owner_name})
             with self.store.transaction():
                 row = self.board(oid)
                 changes = self.presence_changes(row['members'][self.host], self.owner_name)
                 row['members'][self.host].update(changes)
-                result = self.operation(row,op,body)
+                result = self.operation(row,op,body,{'host':self.host,'name':self.owner_name})
                 if changes or op not in READ_ONLY_OPS:
                     self.store.put('board',oid,row)
                 return result
@@ -546,6 +706,8 @@ class Service:
                         self.store.delete('board',oid)
                         for asset in self.store.list('asset'):
                             if asset['board_id']==oid: self.store.delete('asset',oid+'/'+asset['id'])
+                        for record in self.store.list('card'):
+                            if record['board_id']==oid: self.store.delete('card',oid+'/'+record['card_id'])
                     result={'status':'deleted'}
                 elif len(p)==3 and p[2]=='leave' and method=='POST':
                     host,oid=p[:2]; key=check(host,HOST,'host')+'/'+check(oid,ID,'board id')
@@ -561,6 +723,10 @@ class Service:
                         try: body={'since_version':int(query_value('since_version',-1))}
                         except (ValueError,TypeError): fail(400,'invalid-version','Invalid version.')
                     result=await self.state_operation(p[0],p[1],'state' if method=='GET' else 'write',body)
+                elif len(p)==4 and p[2]=='cards' and method=='GET':
+                    result=await self.state_operation(p[0],p[1],'card-read',{'card_id':p[3]})
+                elif len(p)==5 and p[2]=='cards' and (p[4],method) in (('notes','PUT'),('activity','POST')):
+                    result=await self.state_operation(p[0],p[1],'notes-write' if p[4]=='notes' else 'activity-append',{**body,'card_id':p[3]})
                 elif len(p)==4 and p[2]=='assets' and method in ('GET','PUT','DELETE'):
                     result=await self.state_operation(p[0],p[1],{'GET':'asset-read','PUT':'asset-write','DELETE':'asset-delete'}[method],{**body,'asset_id':p[3]})
                 else: fail(404,'route-missing','No such Kanban route.')

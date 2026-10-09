@@ -24,6 +24,27 @@ export const invitationKey = invitation => `${invitation.host}:${invitation.id}`
 
 export const COLUMN_COLOR_KEYS = ['red', 'amber', 'green', 'blue', 'purple', 'pink']
 
+// A board can name its label colours ("red" = "Urgent"). Names live on the
+// board, so everyone sharing it reads the same meaning; a colour without a
+// name still works as a plain colour.
+export const MAX_LABEL_NAME_CHARS = 24
+
+export function normalizeLabelNames(value) {
+  const names = {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return names
+  for (const color of COLUMN_COLOR_KEYS) {
+    const name = typeof value[color] === 'string' ? value[color].trim().slice(0, MAX_LABEL_NAME_CHARS) : ''
+    if (name) names[color] = name
+  }
+  return names
+}
+
+// What a label is called in menus and filters: its board name, else its colour.
+export function labelDisplayName(color, labelNames) {
+  const name = normalizeLabelNames(labelNames)[color]
+  return name || (color ? color.charAt(0).toLocaleUpperCase() + color.slice(1) : '')
+}
+
 export function defaultColumnColor(index) {
   if (index === 0) return null
   if (index === 1) return 'blue'
@@ -67,6 +88,24 @@ export function dueDateStatus(due, today = new Date()) {
   if (due < current) return 'overdue'
   if (due === current) return 'today'
   return 'upcoming'
+}
+
+// A short, readable name for a link: the site plus the last part of the
+// address ("abseil.io/…/ch19.html"), or "repo#123" for GitHub pull requests
+// and issues. The full address stays in the link and its tooltip.
+export function shortLinkText(href) {
+  let url
+  try { url = new URL(href) } catch { return href }
+  const host = url.hostname.replace(/^www\./u, '')
+  const segments = url.pathname.split('/').filter(Boolean)
+  if (host === 'github.com' && ['pull', 'issues'].includes(segments[2]) && /^\d+$/u.test(segments[3] || '')) {
+    return `${segments[1]}#${segments[3]}`
+  }
+  if (!segments.length) return host
+  let last = segments[segments.length - 1]
+  try { last = decodeURIComponent(last) } catch { /* keep the raw segment */ }
+  if (last.length > 28) last = `${last.slice(0, 27)}…`
+  return segments.length === 1 ? `${host}/${last}` : `${host}/…/${last}`
 }
 
 // Cards use compact, date-only copy. Working in UTC after validating the ISO
@@ -121,6 +160,60 @@ export function assigneeAvatar(name) {
 
 const safeChecklist = checklist => Array.isArray(checklist) ? checklist : []
 
+// The list named "Done" holds finished work: completing a card moves it there
+// (operations.js complete-card), and it starts folded for each person until
+// they open it.
+export function isDoneColumn(column) {
+  return String(column?.name || '').trim().toLocaleLowerCase() === 'done'
+}
+
+// `folded` are lists this person folded; `opened` are lists they opened that
+// would otherwise start folded. Both are personal, never shared.
+export function listIsFolded(column, { folded, opened }) {
+  return folded.has(column.id) || (isDoneColumn(column) && !opened.has(column.id))
+}
+
+// "Changed since you looked": each card is reduced to a short fingerprint of
+// what a person sees on it (its list, title, description, label, due date,
+// person, checklist, pull requests and attachments). A card whose fingerprint
+// differs from the one remembered when you last saw it has changed.
+function fingerprintHash(text) {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+export function cardFingerprint(card, columnId) {
+  return fingerprintHash(JSON.stringify([
+    columnId || '', card?.title || '', card?.notes || '', card?.notesLength ?? null, card?.notesVersion ?? null,
+    card?.label || 'none', card?.due || '', card?.assignee || '', card?.assigneeHost || '',
+    (card?.checklist || []).map(item => [item?.id, item?.text, item?.done === true]),
+    card?.pullRequestUrls || [], (card?.attachments || []).map(item => item?.id),
+  ]))
+}
+
+// Fingerprints of every card on the board, keyed by card id.
+export function boardFingerprints(board) {
+  const prints = {}
+  for (const column of board?.columns || []) {
+    for (const id of column.cardIds || []) {
+      if (board.cards?.[id]) prints[id] = cardFingerprint(board.cards[id], column.id)
+    }
+  }
+  return prints
+}
+
+// Cards that are new or different since `seen` was remembered. Without a
+// remembered state nothing counts as changed: the first visit is the baseline.
+export function changedCardIds(board, seen) {
+  if (!seen || typeof seen !== 'object') return new Set()
+  const prints = boardFingerprints(board)
+  return new Set(Object.keys(prints).filter(id => seen[id] !== prints[id]))
+}
+
 export function checklistProgress(checklist) {
   const items = safeChecklist(checklist)
   const total = items.length
@@ -144,11 +237,16 @@ export function deleteChecklistItem(checklist, itemId) {
   return safeChecklist(checklist).filter(item => !item || item.id !== itemId)
 }
 
-export function cardMatchesFilters(card, text = '', labels = []) {
+// `assigneeLabel` is the name the board shows for the card's owner (for example
+// a verified @handle), so text search finds people the way they appear.
+export function cardMatchesFilters(card, text = '', labels = [], assigneeLabel = '') {
   if (!card || typeof card !== 'object') return false
   const query = String(text || '').trim().toLocaleLowerCase()
   if (query) {
-    const haystack = `${typeof card.title === 'string' ? card.title : ''}\n${typeof card.notes === 'string' ? card.notes : ''}`.toLocaleLowerCase()
+    const haystack = [card.title, card.notes, card.assignee, assigneeLabel]
+      .filter(value => typeof value === 'string' && value)
+      .join('\n')
+      .toLocaleLowerCase()
     if (!haystack.includes(query)) return false
   }
   const activeLabels = Array.isArray(labels) ? labels : []
@@ -190,4 +288,57 @@ export function cardAssigneeLabel(card, members = []) {
   if (name.startsWith('@')) return name
   if (saved.startsWith('@')) return saved
   return name || saved
+}
+
+// A shared board's host refuses a document larger than this (MAX_DOC in
+// collaboration/service.py), and every edit resends the whole document.
+export const SHARED_BOARD_LIMIT_BYTES = 256 * 1024
+// From this share of the limit the board warns that it is nearly full.
+export const BOARD_NEARLY_FULL_SHARE = 0.95
+
+// The size the host measures: Python's json.dumps defaults, i.e. ", " and
+// ": " separators and every non-ASCII character escaped as \uXXXX (two
+// escapes for characters outside the Basic Multilingual Plane).
+export function hostDocumentBytes(value) {
+  if (value === null || value === undefined) return 4
+  if (typeof value === 'boolean') return value ? 4 : 5
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value).length : 4
+  if (typeof value === 'string') {
+    let bytes = 2
+    for (const char of value) {
+      const code = char.codePointAt(0)
+      if (code > 0xffff) bytes += 12
+      else if (code > 0x7e) bytes += 6
+      else if (code === 0x22 || code === 0x5c || code === 0x08 || code === 0x0c || code === 0x0a || code === 0x0d || code === 0x09) bytes += 2
+      else if (code < 0x20) bytes += 6
+      else bytes += 1
+    }
+    return bytes
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) return 2
+    return 2 + value.reduce((sum, item) => sum + hostDocumentBytes(item), 0) + (value.length - 1) * 2
+  }
+  const entries = Object.entries(value).filter(([, item]) => item !== undefined)
+  if (!entries.length) return 2
+  return 2 + entries.reduce((sum, [key, item]) => sum + hostDocumentBytes(key) + 2 + hostDocumentBytes(item), 0) + (entries.length - 1) * 2
+}
+
+// A shared board's host also stores at most this many attachment files, and
+// this many bytes of them (collaboration/service.py, asset-write).
+export const SHARED_BOARD_FILE_LIMIT = 100
+export const SHARED_BOARD_FILE_BYTES = 100 * 1024 * 1024
+
+// Text and files fill up separately; whichever is closer to its limit decides.
+export function boardCapacity(doc) {
+  const bytes = hostDocumentBytes(doc)
+  const files = Object.values(doc?.cards || {}).flatMap(card => (Array.isArray(card?.attachments) ? card.attachments : []))
+  const fileBytes = files.reduce((sum, file) => sum + (Number.isFinite(file?.size) ? file.size : 0), 0)
+  const share = bytes / SHARED_BOARD_LIMIT_BYTES
+  const fileShare = Math.max(files.length / SHARED_BOARD_FILE_LIMIT, fileBytes / SHARED_BOARD_FILE_BYTES)
+  return {
+    bytes, limit: SHARED_BOARD_LIMIT_BYTES, share, nearlyFull: share >= BOARD_NEARLY_FULL_SHARE,
+    files: files.length, fileLimit: SHARED_BOARD_FILE_LIMIT, fileBytes, fileShare,
+    filesNearlyFull: fileShare >= BOARD_NEARLY_FULL_SHARE,
+  }
 }

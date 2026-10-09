@@ -9,6 +9,7 @@ test('CLI writes private and shared boards through their authority using JSON an
   ], cards: {} })
   let local = makeBoard(), remote = makeBoard(), version = 1, shared = true
   let cacheWrites = 0, sharedWrites = 0, serviceUnavailable = false, hiddenUnavailable = false
+  const activityWrites = {}
   const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json')
     if (req.headers.authorization !== 'Bearer fixture') { res.writeHead(401); res.end('{}'); return }
@@ -20,6 +21,16 @@ test('CLI writes private and shared boards through their authority using JSON an
     }
     if (serviceUnavailable && req.url.startsWith('/api/apps/1/service/')) {
       res.writeHead(503); return send({detail:'Service unavailable'})
+    }
+    if (req.url.startsWith('/api/apps/1/service/boards/peer.example/obj/cards/')) {
+      // The fixture host runs an older Kanban without card details.
+      res.writeHead(400); return send({ protocol: 'kanban/1', code: 'invalid-operation', detail: 'Unsupported board operation.' })
+    }
+    if (req.url.startsWith('/api/storage/apps/1/activity/')) {
+      if (req.method === 'PUT') { activityWrites[req.url] = JSON.parse(body); res.writeHead(204); res.end(); return }
+      if (!activityWrites[req.url]) { res.writeHead(404); return send({}) }
+      res.setHeader('ETag', '"activity"')
+      return send(activityWrites[req.url])
     }
     if (req.url === '/api/apps/1/service/boards/resume-joins') return send({results:[]})
     if (req.url === '/api/apps/1/service/boards') return send({hosted:[],joined:[]})
