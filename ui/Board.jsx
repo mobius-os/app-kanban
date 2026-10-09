@@ -1016,8 +1016,8 @@ export default memo(function Board({
   const dragRef = useRef(null)
   const rectsRef = useRef(null)
   const confirmedSharedRef = useRef(null)
-  // The board object the shared poll last rendered; lets an unchanged poll
-  // skip a full re-render when nothing else has replaced the board since.
+  // The confirmed snapshot and board object last rendered by polling. A newer
+  // confirmation may arrive while a drag suppresses rendering.
   const pollRenderedRef = useRef(null)
   const availabilityRef = useRef(availability)
   const shareRef = useRef(share)
@@ -1295,16 +1295,15 @@ export default memo(function Board({
             if (confirmed !== previous) {
               window.mobius?.storage?.set(boardPath(boardId), confirmed.doc).catch(() => {})
             }
-            // Even an unchanged poll can reveal a document received while a
-            // drag/write temporarily suppressed rendering, so only skip when the
-            // board on screen is exactly this poll's earlier render.
-            const unchanged = confirmed === previous
+            // A version-only response is safe to skip only if this confirmed
+            // snapshot, not merely the old board object, reached the screen.
+            const unchanged = confirmed === pollRenderedRef.current?.confirmed
               && pendingEntriesRef.current.length === 0
-              && boardRef.current === pollRenderedRef.current
+              && boardRef.current === pollRenderedRef.current.board
             if (!unchanged && pendingRef.current === 0 && !replayingRef.current && !dragRef.current) {
               const rendered = applyPendingBoardOps(confirmed.doc, pendingEntriesRef.current)
               boardRef.current = rendered
-              pollRenderedRef.current = rendered
+              pollRenderedRef.current = { confirmed, board: rendered }
               setBoard(rendered)
             }
             if (state.object) {

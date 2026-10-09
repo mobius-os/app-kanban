@@ -6,13 +6,14 @@ import { readFile } from 'node:fs/promises'
 import { boardAccess } from '../domain.js'
 import { applyBoardOp, cardMoveAnchor, hasCardCompletion } from '../operations.js'
 import {
+  applyPendingBoardOps,
   enqueuePendingBoardOp,
   readPendingBoardOps,
   readRecoveredBoardOps,
   replayPendingBoardOps,
 } from '../pendingOps.js'
 import { casMutate } from '../storage.js'
-import { cacheSubscriptionIsAuthoritative, rememberSharedState } from '../sync.js'
+import { acceptSharedPoll, cacheSubscriptionIsAuthoritative, rememberSharedState } from '../sync.js'
 import { createBoardRepository, replayOutcomeForBoardError } from '../boardRepository.js'
 
 function memoryStorage() {
@@ -38,6 +39,60 @@ const boardDoc = () => ({
   cards: {
     a: { id: 'a', title: 'A', notes: '', label: 'none', due: '', checklist: [], assignee: '' },
   },
+})
+
+test('a shared snapshot received during a canceled drag renders after the next version-only poll', async () => {
+  // Exercise the Board effect itself, with only its IO and timers substituted.
+  const source = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
+  const effect = source.slice(source.indexOf('  // Shared boards: poll'), source.indexOf('  const mutate = useCallback'))
+  const polls = [
+    { version: 1, doc: boardDoc() },
+    { version: 2, doc: { ...boardDoc(), title: 'Collaborator edit' } },
+    { version: 2 },
+  ]
+  const timers = []
+  const rendered = []
+  const share = { host: 'peer.example', oid: 'board', transport: 'kanban/1' }
+  const boardRef = { current: null }
+  const dragRef = { current: null }
+  let cleanup
+  const values = {
+    useEffect: callback => { cleanup = callback() }, share, boardId: 'board', loadAttempt: 0,
+    publishAvailability() {}, lastInteractionAtRef: { current: 0 },
+    confirmedSharedRef: { current: null }, pollRenderedRef: { current: null },
+    pendingEntriesRef: { current: [] }, pendingRef: { current: 0 },
+    replayingRef: { current: false }, dragRef, boardRef,
+    window: { mobius: { storage: { set: async () => {} } } },
+    boardPath: () => 'boards/board.json',
+    appVisible: () => true, onAppVisibilityChange: () => () => {},
+    pullShared: async () => polls.shift(), acceptSharedPoll, applyPendingBoardOps,
+    createSharedRefreshLifecycle: () => ({
+      shouldContinue: () => true,
+      refresh: async ({ pull, integrate }) => integrate(await pull()),
+    }),
+    sharedBoardPollDelay: () => 1,
+    setTimeout: callback => { timers.push(callback); return timers.length },
+    clearTimeout: () => {},
+    setBoard: value => { boardRef.current = value; rendered.push(value.title) },
+    setMembers: () => {}, setSyncNote: () => {}, memberRecords: () => null,
+  }
+  Function(...Object.keys(values), effect)(...Object.values(values))
+  const nextPoll = async () => {
+    await new Promise(resolve => setImmediate(resolve))
+    const timer = timers.shift()
+    assert.ok(timer, 'poll scheduled')
+    timer()
+    await new Promise(resolve => setImmediate(resolve))
+  }
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(rendered, ['Board'])
+  dragRef.current = { cardId: 'a' }
+  await nextPoll()
+  assert.deepEqual(rendered, ['Board'], 'drag suppresses rendering without losing confirmation')
+  dragRef.current = null // pointer canceled or dropped outside: no board mutation
+  await nextPoll()
+  assert.deepEqual(rendered, ['Board', 'Collaborator edit'])
+  cleanup?.()
 })
 
 test.afterEach(() => { delete globalThis.window })
