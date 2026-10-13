@@ -21,3 +21,10 @@ Backups on the host cannot contain unsent edits held only by a collaborator.
 Keep their old app data and queues until rejoined; never delete and reinstall.
 Actual cross-host propagation, presence, old-worker drain and frozen-backup
 readback remain deployment checks, not claims made by the isolated tests.
+
+## Returning boards to Kanban 0.6
+
+`whole_boards.py` reverses the 0.7 storage upgrade (README: "Storage upgrade in
+0.7"). Stop the service and copy `collaboration.sqlite3` first; by default it
+rebuilds each board from its current pieces, keeping edits made since the
+upgrade, and `--from-backup` restores the documents saved at the upgrade.

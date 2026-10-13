@@ -9,6 +9,7 @@ test('CLI writes private and shared boards through their authority using JSON an
   ], cards: {} })
   let local = makeBoard(), remote = makeBoard(), version = 1, shared = true
   let cacheWrites = 0, sharedWrites = 0, serviceUnavailable = false, hiddenUnavailable = false
+  const activityWrites = {}
   const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json')
     if (req.headers.authorization !== 'Bearer fixture') { res.writeHead(401); res.end('{}'); return }
@@ -20,6 +21,16 @@ test('CLI writes private and shared boards through their authority using JSON an
     }
     if (serviceUnavailable && req.url.startsWith('/api/apps/1/service/')) {
       res.writeHead(503); return send({detail:'Service unavailable'})
+    }
+    if (req.url.startsWith('/api/apps/1/service/boards/peer.example/obj/cards/')) {
+      // The fixture host runs an older Kanban without card details.
+      res.writeHead(400); return send({ protocol: 'kanban/1', code: 'invalid-operation', detail: 'Unsupported board operation.' })
+    }
+    if (req.url.startsWith('/api/storage/apps/1/activity/')) {
+      if (req.method === 'PUT') { activityWrites[req.url] = JSON.parse(body); res.writeHead(204); res.end(); return }
+      if (!activityWrites[req.url]) { res.writeHead(404); return send({}) }
+      res.setHeader('ETag', '"activity"')
+      return send(activityWrites[req.url])
     }
     if (req.url === '/api/apps/1/service/boards/resume-joins') return send({results:[]})
     if (req.url === '/api/apps/1/service/boards') return send({hosted:[],joined:[]})
@@ -40,6 +51,11 @@ test('CLI writes private and shared boards through their authority using JSON an
       if (req.method === 'PUT') { cacheWrites++; local = JSON.parse(body); res.writeHead(204); res.end(); return }
       res.setHeader('ETag', '"local"')
       return send(local)
+    }
+    if (req.url === '/api/apps/1/service/boards/peer.example/obj/changes') {
+      // A host from before boards were stored in pieces (see older-host.mjs).
+      res.writeHead(400, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ protocol: 'kanban/1', code: 'invalid-operation', detail: 'Unsupported board operation.' }))
     }
     if (req.url.startsWith('/api/apps/1/service/boards/peer.example/obj/state')) {
       if (req.method === 'PUT') {
@@ -76,11 +92,12 @@ test('CLI writes private and shared boards through their authority using JSON an
     await run('move-card', { type: 'delete-card', cardId: 'stable', toColumnId: 'done' })
     assert.ok(remote.cards.stable)
     assert.deepEqual(remote.columns[1].cardIds, ['stable'])
-    assert.equal(sharedWrites, 4)
+    // The repeated add changed nothing, so it sent nothing.
+    assert.equal(sharedWrites, 3)
     await assert.rejects(run('update-card', { cardId: 'stable', patch: { notes: { unsafe: true } } }), /notes must be a string/)
     await assert.rejects(run('add-card', { id: '__proto__', columnId: 'todo', title: 'Unsafe' }), /safe non-empty string/)
     await assert.rejects(run('read', undefined, '../../2/boards/private'), /Usage/)
-    assert.equal(sharedWrites, 4)
+    assert.equal(sharedWrites, 3)
     const priorCacheWrites = cacheWrites
     serviceUnavailable = true
     await assert.rejects(run('update-card', {cardId:'stable', patch:{notes:'Unconfirmed'}}), /Service unavailable/)
@@ -88,7 +105,7 @@ test('CLI writes private and shared boards through their authority using JSON an
     shared = false; local = makeBoard(); cacheWrites = 0
     assert.equal((await run('add-card', input)).authority, 'private')
     assert.equal(cacheWrites, 1)
-    assert.equal(sharedWrites, 4)
+    assert.equal(sharedWrites, 3)
 
     local.cards.stable.assignee = 'Me'
     const dryRun = await run('sync-open-prs', undefined, '--dry-run')

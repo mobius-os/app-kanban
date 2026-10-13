@@ -2,7 +2,7 @@
 
 import { deleteSharedAsset, getSharedAsset, putSharedAsset } from './sync.js'
 
-export const MAX_CARD_ATTACHMENTS = 8
+export { MAX_CARD_ATTACHMENTS } from './domain.js'
 export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_EDGE = 1920
 const FALLBACK_MIME = 'application/octet-stream'
@@ -51,8 +51,8 @@ export const normalizeAttachmentMime = file => {
 
 export const isPreviewImage = attachment => PREVIEW_IMAGE_MIMES.has(attachment?.mime)
 
-export const attachmentPath = (boardId, id, mime) =>
-  `attachments/${boardId}/${id}.${extensionForMime(mime)}`
+export const attachmentPrefix = boardId => `attachments/${boardId}/`
+export const attachmentPath = (boardId, id, mime) => `${attachmentPrefix(boardId)}${id}.${extensionForMime(mime)}`
 
 export function filesFromClipboard(clipboardData) {
   const files = [...(clipboardData?.files || [])]
@@ -148,6 +148,9 @@ export async function loadCardAttachment({ share, attachment }) {
   return blobToDataUrl(blob)
 }
 
+// Discards an upload that never became part of a card (its card edit was
+// refused). A file a card attached is deleted with the edit that removes it
+// (boardRepository.mutate; on a shared board, its host).
 export async function deleteCardAttachment({ share, attachment }) {
   if (share) return deleteSharedAsset(share, attachment.id)
   if (attachment.path) await window.mobius.storage.remove(attachment.path)

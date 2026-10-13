@@ -9,6 +9,14 @@ const recoveryPrefixFor = boardId => `recovered-board-ops/${safeBoardId(boardId)
 const recoveryAcknowledgementPrefixFor = boardId => `recovery-acknowledgements/${safeBoardId(boardId)}/`
 const legacyKeyFor = boardId => `kanban:pending-board-ops:v1:${safeBoardId(boardId)}`
 
+// Everything this app queues or keeps for recovery about one board.
+export const boardQueuePrefixes = boardId =>
+  [prefixFor(boardId), recoveryPrefixFor(boardId), recoveryAcknowledgementPrefixFor(boardId)]
+
+export function forgetLegacyQueue(boardId) {
+  try { globalThis.window?.localStorage?.removeItem(legacyKeyFor(boardId)) } catch {}
+}
+
 async function migrateLegacyQueue(boardId, storage) {
   let legacy = null
   try { legacy = globalThis.window?.localStorage || null } catch { return }

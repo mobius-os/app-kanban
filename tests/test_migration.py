@@ -192,7 +192,7 @@ def write(host:str,oid:str):
         self.assertEqual((await self.call(self.host,'boards'))['body']['hosted'],[])
         activate(self.host,self.authority,OID)
         row=self.host.board(OID)
-        self.assertEqual(row['doc'],DOC);self.assertEqual(row['version'],199)
+        self.assertEqual(self.host.board_document(row),DOC);self.assertEqual(row['version'],199)
         self.assertEqual(list(row['members']),['host.example'])
         self.assertEqual(row['invites'],{})
         self.assertEqual(base64.b64decode(self.host.store.get('asset',OID+'/asset-one')['data']),b'exact fixture bytes')

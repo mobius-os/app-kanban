@@ -72,7 +72,10 @@ function Fixture() {
       </header>
       <div className="kb-card-sheet kb-sheet" role="dialog" aria-label="Card details">
         <div className="kb-card-toolbar">
-          <span className="kb-card-toolbar-title">New card</span>
+          <span className="kb-card-toolbar-title kb-card-toolbar-list">
+            <span className="kb-col-status" aria-hidden="true" style={{ background: 'var(--kb-label-blue)' }} />
+            <span className="kb-card-toolbar-list-name">In progress</span>
+          </span>
           <LabelPicker label={card.label} canWrite={!readonly} onChange={label => updateCard({ label })} />
           <AssigneePicker card={card} canWrite={!readonly} members={people} share={{}} iconOnly onUpdate={updateCard} />
           <button className="kb-btn kb-btn-primary kb-card-toolbar-done" onClick={() => {}}>Done</button>

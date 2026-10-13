@@ -1,4 +1,5 @@
 import { configureSync as configureFixture } from '../sync.js'
+import { asOlderHost } from './older-host.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -175,11 +176,11 @@ test('shared CAS retries against the newest document and preserves concurrent fi
     { status: 'conflict', version: 2, doc: { v: 1, title: 'other', columns: [], cards: {}, future: 'kept' } },
     { status: 'ok', version: 3 },
   ]
-  globalThis.fetch = async (_url, options = {}) => {
+  globalThis.fetch = asOlderHost(async (_url, options = {}) => {
     const reply = replies.shift()
     if (options.method === 'PUT') puts.push(JSON.parse(options.body))
     return new Response(JSON.stringify(reply), { status: 200, headers: { 'content-type': 'application/json' } })
-  }
+  })
 
   const landed = await pushSharedOp(
     { transport: 'kanban/1', host: 'peer.example', oid: 'object' },

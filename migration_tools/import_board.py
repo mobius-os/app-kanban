@@ -62,9 +62,10 @@ def stage(service, authority, oid, local_id):
                 seen.add(aid)
                 service.store.put('asset',oid+'/'+aid,{'id':aid,'board_id':oid,'mime':EXT_MIME[ext],
                     'data':asset['data'],'bytes':len(raw)})
-            row={'id':oid,'local_id':local_id,'label':obj.get('label','Board'),'doc':doc,'version':obj['version'],
+            row={'id':oid,'local_id':local_id,'label':obj.get('label','Board'),'version':obj['version'],
                  'members':members,'invites':{},'staged':True,
                  'handoff':{'from':'common/0','transition':archive['transition'],'digest':sha}}
+            service.write_board_pieces(row,doc)
             service.store.put('board',oid,row)
             service.store.put('migration',oid,{'phase':'staged','digest':sha,'local_id':local_id,'reinvite_count':len(old_members)-1})
             return {'id':oid,'digest':sha,'reinvite_count':len(old_members)-1}

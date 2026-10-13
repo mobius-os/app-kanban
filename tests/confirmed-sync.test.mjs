@@ -1,4 +1,5 @@
 import { configureSync as configureFixture } from '../sync.js'
+import { asOlderHost } from './older-host.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { rememberSharedState, pushSharedOp, listInvitations } from '../sync.js'
@@ -12,11 +13,11 @@ test('a confirmed snapshot makes an uncontended edit one version-checked request
   const before = confirmed()
   const calls = []
   const saved = await pushSharedOp(entry, value => { value.title = 'Edited' }, null,
-    async (url, options) => {
+    asOlderHost(async (url, options) => {
       calls.push(options.method)
       assert.equal(JSON.parse(options.body).expected_version, 3)
       return Response.json({ status: 'ok', version: 4 })
-    }, before)
+    }), before)
   assert.deepEqual(calls, ['PUT'])
   assert.equal(saved.doc.title, 'Edited')
   assert.equal(before.doc.title, 'Board')
@@ -25,26 +26,27 @@ test('a confirmed snapshot makes an uncontended edit one version-checked request
 test('conflicts rebase on the returned authority without a redundant read', async () => {
   const calls = []
   const saved = await pushSharedOp(entry, value => { value.title = 'Edited' }, null,
-    async (url, options) => {
+    asOlderHost(async (url, options) => {
       calls.push(options.method)
       if (calls.length === 1) return Response.json({ status: 'conflict', version: 8, doc: { ...doc(), extra: 'keep' } })
       const body = JSON.parse(options.body)
       assert.equal(body.expected_version, 8)
       assert.equal(body.doc.extra, 'keep')
       return Response.json({ status: 'ok', version: 9 })
-    }, confirmed())
+    }), confirmed())
   assert.deepEqual(calls, ['PUT', 'PUT'])
   assert.equal(saved.doc.extra, 'keep')
 })
 
 test('optimistic or another host snapshot cannot bypass an authoritative read', async () => {
   for (const seed of [{ doc: doc(), version: 3 }, { ...confirmed(), transport: 'kanban/1', host: 'other.example' }]) {
+    configureFixture('fixture', 1)
     const calls = []
-    await pushSharedOp(entry, value => value, null, async (url, options = {}) => {
+    await pushSharedOp(entry, value => { value.title = 'Edited' }, null, asOlderHost(async (url, options = {}) => {
       calls.push(options.method || 'GET')
       return Response.json(options.method === 'PUT'
         ? { status: 'ok', version: 4 } : { status: 'ok', version: 3, doc: doc() })
-    }, seed)
+    }), seed)
     assert.deepEqual(calls, ['GET', 'PUT'])
   }
 })
@@ -54,11 +56,11 @@ test('a stale snapshot cannot falsely declare a newly created card missing', asy
   const saved = await pushSharedOp(entry, value => {
     if (!value.cards.new) throw new Error('Card missing')
     value.cards.new.title = 'Edited'
-  }, null, async (url, options = {}) => {
+  }, null, asOlderHost(async (url, options = {}) => {
     calls.push(options.method || 'GET')
     return Response.json(options.method === 'PUT' ? { status: 'ok', version: 5 }
       : { status: 'ok', version: 4, doc: { ...doc(), cards: { new: { title: 'New' } } } })
-  }, confirmed())
+  }), confirmed())
   assert.deepEqual(calls, ['GET', 'PUT'])
   assert.equal(saved.doc.cards.new.title, 'Edited')
 })

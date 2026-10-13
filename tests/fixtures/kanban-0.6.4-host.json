@@ -1,0 +1,84 @@
+{
+ "source": "Records written by Kanban 0.6.4 (mobius-os/app-kanban main 26b2337) for a hosted board with one joined member, an attachment and a 1200-character description.",
+ "host": "a.example",
+ "board": "f7aa0bca5f0948f28025b79cbd034bea",
+ "records": [
+  {
+   "kind": "asset",
+   "id": "f7aa0bca5f0948f28025b79cbd034bea/file1",
+   "body": {
+    "id": "file1",
+    "board_id": "f7aa0bca5f0948f28025b79cbd034bea",
+    "mime": "text/plain",
+    "data": "aGVsbG8=",
+    "bytes": 5
+   }
+  },
+  {
+   "kind": "board",
+   "id": "f7aa0bca5f0948f28025b79cbd034bea",
+   "body": {
+    "id": "f7aa0bca5f0948f28025b79cbd034bea",
+    "local_id": null,
+    "label": "Release plan",
+    "doc": {
+     "v": 1,
+     "title": "Release plan",
+     "columns": [
+      {
+       "id": "todo",
+       "name": "To do",
+       "cardIds": [
+        "short",
+        "long"
+       ]
+      },
+      {
+       "id": "done",
+       "name": "Done",
+       "cardIds": [
+        "plain"
+       ]
+      }
+     ],
+     "cards": {
+      "short": {
+       "id": "short",
+       "title": "Short notes, edited by B",
+       "notes": "Fits on the board"
+      },
+      "long": {
+       "id": "long",
+       "title": "Long notes",
+       "notes": "A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. A long description. ",
+       "label": "red"
+      },
+      "plain": {
+       "id": "plain",
+       "title": "No notes",
+       "notes": ""
+      }
+     }
+    },
+    "version": 2,
+    "members": {
+     "a.example": {
+      "host": "a.example",
+      "name": "A",
+      "role": "editor",
+      "host_owner": true,
+      "seen": 1760000000.0
+     },
+     "bceea3ad3bce4938b0a3e68929da2809": {
+      "host": "b.example",
+      "name": "B",
+      "role": "editor",
+      "credential_hash": "188ae87b229a54e29a7da7077b0433877384dfe23b86a798a3ffd00be163f9c9",
+      "seen": 1760000000.0
+     }
+    },
+    "invites": {}
+   }
+  }
+ ]
+}

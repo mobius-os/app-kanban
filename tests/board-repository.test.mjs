@@ -1,4 +1,5 @@
 import { configureSync as configureFixture } from '../sync.js'
+import { asOlderHost } from './older-host.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createBoardRepository, isDiscardableBoardError, isRetryableBoardError } from '../boardRepository.js'
@@ -11,18 +12,22 @@ function fixture(shared = false) {
   let version = 1
   let writes = 0
   const entry = { transport: 'kanban/1', host: 'peer.example', oid: 'object', role: 'editor' }
+  const files = {}
   const storage = {
     async getWithVersion(path) {
-      return path === 'shared.json'
-        ? { value: { byBoard: shared ? { b: entry } : {} }, version: 'map' }
-        : { value: structuredClone(local), version: 'local' }
+      if (path === 'shared.json') return { value: { byBoard: shared ? { b: entry } : {} }, version: 'map' }
+      if (path.startsWith('activity/')) return { value: files[path] ?? null, version: files[path] ? 'activity' : null }
+      return { value: structuredClone(local), version: 'local' }
     },
-    async durableWrite(path, doc) { local = structuredClone(doc); writes++ },
+    async durableWrite(path, doc) {
+      if (path.startsWith('activity/')) { files[path] = structuredClone(doc); return }
+      local = structuredClone(doc); writes++
+    },
     async set(path, doc) { local = structuredClone(doc) },
     async list() { return [{ name: 'b.json' }] },
   }
   let conflict = false
-  const request = async (path, options = {}) => {
+  const request = asOlderHost(async (path, options = {}) => {
     if (options.method === 'PUT') {
       const body = JSON.parse(options.body)
       if (conflict) {
@@ -37,8 +42,8 @@ function fixture(shared = false) {
       return Response.json({ status: 'ok', version: ++version })
     }
     return Response.json({ doc: remote, version })
-  }
-  return { storage, request, entry, local: () => local, remote: () => remote,
+  })
+  return { storage, request, entry, files, local: () => local, remote: () => remote,
     writes: () => writes, conflict: () => { conflict = true } }
 }
 

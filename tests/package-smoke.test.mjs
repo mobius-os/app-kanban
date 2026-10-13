@@ -26,3 +26,22 @@ test('manifest package includes the CLI pull-request matching import', () => {
     rmSync(packageRoot, { recursive: true, force: true })
   }
 })
+
+// An install from the app store fetches only `source_files`, so every module
+// the app reaches from its entry (or the agent helper) must be listed there.
+test('every module the app imports is listed in the manifest', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../mobius.json', import.meta.url)))
+  const listed = new Set(manifest.source_files)
+  const seen = new Set()
+  const queue = [manifest.entry, 'scripts/kanban.mjs']
+  while (queue.length) {
+    const path = queue.shift()
+    if (seen.has(path)) continue
+    seen.add(path)
+    assert.ok(path === manifest.entry || listed.has(path), `${path} is imported but missing from source_files`)
+    const source = readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
+    for (const [, spec] of source.matchAll(/(?:^|\n)\s*(?:import|export)\s[^'"]*?from\s+['"](\.{1,2}\/[^'"]+)['"]/gu)) {
+      queue.push(join(dirname(path), spec).replaceAll('\\', '/'))
+    }
+  }
+})

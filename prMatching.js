@@ -15,12 +15,16 @@ export function parsePullRequestUrl(value) {
 // it must degrade honestly: only a successful read describes the PR. Every other
 // answer explains why this Möbius cannot see it in a neutral tone, so a missing
 // connection or a private repository never looks like a closed pull request.
+// The status reply already carries the pull request's title, so the card can
+// name each pull request without a second request.
 export function pullRequestStatus(httpStatus, pull) {
   if (httpStatus === 200) {
-    if (pull?.merged_at) return { label: 'Merged', tone: 'merged' }
-    if (pull?.draft) return { label: 'Draft', tone: 'draft' }
-    if (pull?.state === 'open') return { label: 'Open', tone: 'open' }
-    if (pull?.state === 'closed') return { label: 'Closed', tone: 'closed' }
+    const title = typeof pull?.title === 'string' ? pull.title.trim() : ''
+    const named = status => (title ? { ...status, title } : status)
+    if (pull?.merged_at) return named({ label: 'Merged', tone: 'merged' })
+    if (pull?.draft) return named({ label: 'Draft', tone: 'draft' })
+    if (pull?.state === 'open') return named({ label: 'Open', tone: 'open' })
+    if (pull?.state === 'closed') return named({ label: 'Closed', tone: 'closed' })
   }
   if (httpStatus === 401) return { label: 'Connect GitHub', tone: 'unknown', hint: 'Connect GitHub in Möbius Settings to see pull request status.' }
   if (httpStatus === 404) return { label: 'Not visible', tone: 'unknown', hint: 'Your GitHub connection can’t see this pull request. It may be private or deleted.' }

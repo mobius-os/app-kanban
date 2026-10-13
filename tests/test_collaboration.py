@@ -286,7 +286,7 @@ class Collaboration(unittest.IsolatedAsyncioTestCase):
         await self.call(self.a,'PUT',f'boards/a.example/{oid}/state',{'doc':{**DOC,'title':'Later shared edit'},'expected_version':1})
         retry=await self.call(self.a,'POST','boards',body)
         self.assertEqual(retry['version'],2)
-        self.assertEqual(self.a.board(oid)['doc']['title'],'Later shared edit')
+        self.assertEqual(self.a.board_document(self.a.board(oid))['title'],'Later shared edit')
         await self.call(self.a,'POST','boards',{**body,'local_id':'another-private-board'},status=409)
 
     async def test_saved_join_is_recoverable_without_the_browser_invitation(self):
