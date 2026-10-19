@@ -362,6 +362,14 @@ export function applyBoardPieces(doc, pieces) {
 
 const hasPieces = pieces => Object.keys(pieces.cards).length > 0 || 'columns' in pieces || 'meta' in pieces
 
+// The host keeps a card's activity only when the save carries that card. A
+// move changes only the lists, so the moved card travels unchanged with it.
+function withDescribedCards(pieces, activity, doc) {
+  const missing = Object.keys(activity || {}).filter(id => !Object.hasOwn(pieces.cards, id) && doc.cards[id])
+  if (!missing.length) return pieces
+  return { ...pieces, cards: { ...pieces.cards, ...Object.fromEntries(missing.map(id => [id, doc.cards[id]])) } }
+}
+
 // The newest board each host confirmed to this instance: {version, doc}. Only
 // host replies update it; it is never the optimistic UI or an offline copy.
 const confirmedCopies = new Map()
@@ -639,7 +647,7 @@ export async function pushSharedOp(entry, op, onError, request = fetch, confirme
       const activity = describe?.() || null
       if (!wholeBoardHosts.has(entry.host)) {
         try {
-          res = await savePieces(entry, pieces, state.version, request, activity)
+          res = await savePieces(entry, withDescribedCards(pieces, activity, next), state.version, request, activity)
         } catch (error) {
           if (!olderHostRefused(error)) throw error
           wholeBoardHosts.add(entry.host)

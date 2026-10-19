@@ -68,6 +68,7 @@ function finalHostRefusal(error) {
     case 'board-missing': return boardError('Board no longer exists.', 'missing-board')
     case 'card-missing': return boardError('Card no longer exists.', 'missing-card')
     case 'notes-too-long': return boardError(error.message, 'notes-too-long')
+    case 'invalid-activity': return boardError('The board host refused this change.', 'invalid-activity')
     default: return error
   }
 }

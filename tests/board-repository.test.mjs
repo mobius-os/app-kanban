@@ -105,6 +105,14 @@ test('authoritative revocation overrides a stale local editor role', async () =>
   assert.equal(f.local().cards.new, undefined)
   assert.equal(f.writes(), 0)
 })
+test('a host refusing an edit\'s history sets the edit aside instead of retrying forever', async () => {
+  const f = fixture(true)
+  f.request = async () => Response.json({ protocol: 'kanban/1', code: 'invalid-activity',
+    detail: 'Activity must name the cards this save changes.' }, { status: 400 })
+  const error = await createBoardRepository(f).mutate('b', op).catch(value => value)
+  assert.equal(error.code, 'invalid-activity')
+  assert.equal(isDiscardableBoardError(error), true)
+})
 test('sharing lookup failure never becomes a private-board edit', async () => {
   const f = fixture()
   f.storage.getWithVersion = async () => { throw new Error('Unavailable') }
