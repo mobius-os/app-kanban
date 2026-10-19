@@ -292,6 +292,15 @@ class CardDetails(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(e['from'], e['to']) for e in saved['activity']['c1']], [('To do', 'Done')])
         self.assertEqual(saved['activity']['c2'][0]['to'], 'To do')
 
+    async def test_a_plain_move_keeps_its_history_when_the_card_travels_with_it(self):
+        await self.write(self.a, {**board(), 'columns': [{'id': 'todo', 'name': 'To do', 'cardIds': ['c1']},
+                                                         {'id': 'done', 'name': 'Done', 'cardIds': []}]})
+        state = await self.call(self.a, 'GET', f'{self.base}/state')
+        columns = [{'id': 'todo', 'name': 'To do', 'cardIds': ['c2']}, {'id': 'done', 'name': 'Done', 'cardIds': ['c1']}]
+        saved = await self.save_pieces({'c1': state['doc']['cards']['c1']},
+                                       {'c1': [entry('m1', type='moved')]}, columns=columns)
+        self.assertEqual([(e['type'], e['from'], e['to']) for e in saved['activity']['c1']], [('moved', 'To do', 'Done')])
+
     async def test_an_assignment_line_cannot_claim_an_earlier_event(self):
         state = await self.call(self.a, 'GET', f'{self.base}/state')
         old_event = {'id': 'ev-old', 'at': '2026-10-01T00:00:00Z', 'from': {'label': '', 'host': ''}, 'to': {'label': 'Ana', 'host': ''}}

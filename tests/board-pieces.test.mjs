@@ -15,6 +15,7 @@ function piecesHost() {
   let version = 1
   const log = []   // [{version, cards: [ids], columns, meta}]
   const calls = []
+  const saves = []   // each POST /changes body, as sent
   const since = from => {
     const touched = log.filter(e => e.version > from)
     const cards = new Set(touched.flatMap(e => e.cards))
@@ -29,6 +30,7 @@ function piecesHost() {
     calls.push(`${method} ${path}`)
     if (method === 'POST' && path === '/changes') {
       const { pieces, expected_version: expected } = JSON.parse(options.body)
+      saves.push(JSON.parse(options.body))
       const touched = new Set(log.filter(e => e.version > expected)
         .flatMap(e => [...e.cards.map(id => `card:${id}`), ...(e.columns ? ['columns'] : []), ...(e.meta ? ['meta'] : [])]))
       const mine = [...Object.keys(pieces.cards).map(id => `card:${id}`), ...('columns' in pieces ? ['columns'] : []), ...('meta' in pieces ? ['meta'] : [])]
@@ -48,7 +50,7 @@ function piecesHost() {
     version++
     log.push({ version, cards: [id], columns: false, meta: false })
   }
-  return { request, calls, otherWriter, doc: () => doc, version: () => version }
+  return { request, calls, saves, otherWriter, doc: () => doc, version: () => version }
 }
 
 test('applying the changed pieces to the old board gives the new board', () => {
@@ -60,6 +62,17 @@ test('applying the changed pieces to the old board gives the new board', () => {
   assert.equal(pieces.cards.c2, null)
   assert.deepEqual(applyBoardPieces(before, pieces), after)
   assert.deepEqual(changedPieces(before, board()), { cards: {} })
+})
+
+test('a move carries the moved card so the host keeps its history', async () => {
+  const host = piecesHost()
+  const moved = { c1: [{ id: 'm1', type: 'moved' }] }
+  await pushSharedOp(entry, doc => { doc.columns[0].cardIds = ['c2', 'c1'] }, null, host.request, null, () => moved)
+  assert.deepEqual(Object.keys(host.saves.at(-1).pieces.cards), ['c1'])
+  assert.equal(host.saves.at(-1).pieces.cards.c1.title, 'c1')
+  assert.deepEqual(host.saves.at(-1).activity, moved)
+  await pushSharedOp(entry, doc => { doc.columns[0].cardIds = ['c1', 'c2'] }, null, host.request)
+  assert.deepEqual(host.saves.at(-1).pieces.cards, {})
 })
 
 test('an edit sends only the card it changed, never the whole board', async () => {
