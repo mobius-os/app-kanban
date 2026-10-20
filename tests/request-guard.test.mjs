@@ -88,8 +88,10 @@ test('App queues reconnect refresh until startup finishes and restores its desti
   assert.match(startup, /const recovery = recoverMemberships\(\)\.catch/)
   assert.doesNotMatch(startup, /await recoverMemberships\(\)/)
   assert.ok(startup.indexOf('const recovery = recoverMemberships()') < startup.indexOf('await migrateLegacy()'))
-  assert.match(startup, /if \(directory\.boards\.length === 0 \|\| lastBoardMissing\) \{[\s\S]*if \(await recovery\) directory = await readDirectory\(\)/)
+  assert.match(startup, /if \(directory\.boards\.length === 0 \|\| lastBoardMissing\) \{[\s\S]*const recovered = await recovery[\s\S]*if \(recovered\) directory = await readBoardDirectory\(\)/)
   assert.match(startup, /recovery\.then\(changed => \{ if \(changed\) void refresh\(\) \}\)/)
+  assert.match(startup, /else if \(ui\.lastBoardId && recoveryCompleted && boardListing\.complete && boardListing\.source === 'server'\) \{[\s\S]*saveLastBoardId\(null\)/,
+    'a saved board that is confirmed gone is forgotten instead of slowing every later launch')
   assert.ok(startup.indexOf('await recovery') < startup.indexOf('seedFirstBoard()'),
     'an empty instance is seeded only after recovery had its chance to restore memberships')
   assert.match(startup, /setOpenId\(ui\.lastBoardId\)/)

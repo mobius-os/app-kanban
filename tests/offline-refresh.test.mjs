@@ -11,6 +11,10 @@ const app = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
 const start = app.indexOf('  const refresh = useCallback(')
 const end = app.indexOf('\n  useEffect(', start)
 assert.ok(start >= 0 && end > start)
+const helperStart = app.indexOf('async function readBoardDirectory()')
+const helperEnd = app.indexOf('\n}\n', helperStart) + 2
+assert.ok(helperStart >= 0 && helperEnd > helperStart)
+const source = `${app.slice(helperStart, helperEnd)}\n${app.slice(start, end)}\nrefresh`
 
 function harness(listing, shared = { byBoard: {} }) {
   const state = { boards: [{ id: 'old' }], loadError: true }
@@ -31,7 +35,7 @@ function harness(listing, shared = { byBoard: {} }) {
   for (const key of ['boards', 'loadError', 'directoryUnavailable', 'shareMap', 'resolved']) {
     context[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value }
   }
-  return { state, refresh: runInNewContext(`${app.slice(start, end)}\nrefresh`, context) }
+  return { state, refresh: runInNewContext(source, context) }
 }
 
 for (const source of ['derived', 'legacy-cache']) {
