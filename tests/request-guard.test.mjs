@@ -82,8 +82,16 @@ test('App queues reconnect refresh until startup finishes and restores its desti
   const app = readFileSync(new URL('../index.jsx', import.meta.url), 'utf8')
   const startup = app.slice(app.indexOf('  useEffect(() => {\n    const isCurrent = boardLoadCoordinatorRef.current.beginStartup()'), app.indexOf('  useEffect(() => {\n    const check ='))
   assert.match(startup, /await migrateLegacy\(\)/)
-  assert.match(startup, /await recoverMemberships\(\)/)
   assert.match(startup, /loadUi\(\)/)
+  // Recovery starts with the listing instead of ahead of it, and blocks the
+  // launch only when no board or the saved board is missing from the listing.
+  assert.match(startup, /const recovery = recoverMemberships\(\)\.catch/)
+  assert.doesNotMatch(startup, /await recoverMemberships\(\)/)
+  assert.ok(startup.indexOf('const recovery = recoverMemberships()') < startup.indexOf('await migrateLegacy()'))
+  assert.match(startup, /if \(directory\.boards\.length === 0 \|\| lastBoardMissing\) \{[\s\S]*if \(await recovery\) directory = await readDirectory\(\)/)
+  assert.match(startup, /recovery\.then\(changed => \{ if \(changed\) void refresh\(\) \}\)/)
+  assert.ok(startup.indexOf('await recovery') < startup.indexOf('seedFirstBoard()'),
+    'an empty instance is seeded only after recovery had its chance to restore memberships')
   assert.match(startup, /setOpenId\(ui\.lastBoardId\)/)
   assert.match(startup, /finishStartup\(\)\) void refresh\(\)/)
   assert.ok(startup.indexOf('setOpenId(ui.lastBoardId)') < startup.indexOf('finishStartup()'))

@@ -153,6 +153,16 @@ test('last-board persistence is serialized and the last requested id wins', asyn
   assert.equal(stored.future, 'kept')
 })
 
+test('reopening the already saved board does not rewrite ui storage', async () => {
+  let writes = 0
+  globalThis.window = { mobius: { storage: {
+    async getWithVersion() { return { value: { lastBoardId: 'same', future: 'kept' }, version: 'u1' } },
+    async durableWrite() { writes += 1 },
+  } } }
+  assert.deepEqual(await saveLastBoardId('same'), { lastBoardId: 'same', future: 'kept' })
+  assert.equal(writes, 0)
+})
+
 test('CAS mutation reapplies an operation to the freshest board after conflict', async () => {
   const reads = [
     { value: { v: 1, title: 'stale', columns: [], cards: {} }, version: 'v1' },

@@ -75,6 +75,28 @@ test('completed join is rediscovered without overwriting another or legacy autho
   assert.equal(calls.length,2)
 })
 
+test('recovery that finds only already-saved memberships writes nothing and reports no change',async()=>{
+  const f=fixture()
+  const hosted={oid:'remote',host:'me.example',role:'editor',hosted:true,transport:'kanban/1',version:3,label:'Board'}
+  f.files['shared.json']={byBoard:{b:hosted}}
+  const request=async url=>Response.json(url.endsWith('/resume-joins')?{results:[]}:{joined:[],hosted:[
+    {id:'remote',local_id:'b',host:'me.example',transport:'kanban/1',version:3,label:'Board'},
+  ]})
+  assert.equal(await recoverMemberships(f.storage,request),false)
+  assert.deepEqual(f.writes,[])
+})
+
+test('recovery reports a change when it saves a newer membership',async()=>{
+  const f=fixture()
+  f.files['shared.json']={byBoard:{b:{oid:'remote',host:'me.example',role:'editor',hosted:true,transport:'kanban/1',version:3,label:'Board'}}}
+  const request=async url=>Response.json(url.endsWith('/resume-joins')?{results:[]}:{joined:[],hosted:[
+    {id:'remote',local_id:'b',host:'me.example',transport:'kanban/1',version:4,label:'Board'},
+  ]})
+  assert.equal(await recoverMemberships(f.storage,request),true)
+  assert.deepEqual(f.writes,['shared.json'])
+  assert.equal(f.files['shared.json'].byBoard.b.version,4)
+})
+
 test('discovery renders a fenced publication even when the share index save failed',()=>{
   const map=sharingFromBoards([{id:'b',publication:pointer}],{byBoard:{}})
   assert.deepEqual(map.byBoard.b,pointer)

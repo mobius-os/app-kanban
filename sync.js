@@ -85,17 +85,21 @@ function normalizeShareMap(value) {
   return value
 }
 
+// Resolves true when the map was written, false when `op` left an existing map
+// unchanged: rewriting identical sharing details is a needless durable write.
 async function mutateShareMap(op, s = store()) {
   if (!s) throw new Error('App storage is unavailable.')
   for (let attempt = 0; attempt < 6; attempt++) {
     const { value, version } = await s.getWithVersion('shared.json')
-    const next = structuredClone(normalizeShareMap(value))
+    const current = normalizeShareMap(value)
+    const next = structuredClone(current)
     op(next)
+    if (version && JSON.stringify(next) === JSON.stringify(current)) return false
     try {
       await s.durableWrite('shared.json', next, version
         ? { ifMatch: version }
         : { ifNoneMatch: true })
-      return next
+      return true
     } catch (error) {
       if (error?.code === 'conflict') {
         await new Promise(resolve => setTimeout(resolve, shareMapConflictDelay(attempt)))
@@ -162,13 +166,15 @@ function attachMembership(map, id, entry) {
   return keys[0]
 }
 
+// Resolves true when recovery changed the saved sharing details, so a caller
+// that already listed boards knows whether that listing needs refreshing.
 export async function recoverMemberships(storage = store(), request = fetch) {
   await _json(await request(`${API}/resume-joins`, { method: 'POST', headers: _auth }))
   const listing = await _json(await request(API, { headers: _auth }))
   const additions = [...(listing.joined || []).map(m => ({ id:m.id, entry:{oid:m.id,host:m.host,role:m.role,member_id:m.member_id,transport:m.transport,label:m.label} })),
     ...(listing.hosted || []).filter(m=>m.local_id).map(m=>({id:m.local_id,entry:{oid:m.id,host:m.host,role:'editor',hosted:true,transport:m.transport,version:m.version,label:m.label}}))]
-  if (!additions.length) return
-  await mutateShareMap(map => {
+  if (!additions.length) return false
+  return mutateShareMap(map => {
     for (const {id,entry} of additions) attachMembership(map, id, entry)
   }, storage)
 }
