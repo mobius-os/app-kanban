@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { configureSync, shareBoard, recoverMemberships, selfCollaborator, groupCollaborators } from '../sync.js'
+import { configureSync, shareBoard, recoverMemberships, removeShareEntry, selfCollaborator, groupCollaborators } from '../sync.js'
 import { PUBLICATION, fencePublication, sharingFromBoards } from '../publication.js'
 import { createBoardRepository, isDiscardableBoardError } from '../boardRepository.js'
 const doc=()=>({v:1,title:'Fixture',columns:[],cards:{}})
@@ -75,26 +75,45 @@ test('completed join is rediscovered without overwriting another or legacy autho
   assert.equal(calls.length,2)
 })
 
-test('recovery that finds only already-saved memberships writes nothing and reports no change',async()=>{
+test('recovery writes nothing for an actively edited hosted board whose version bumped',async()=>{
   const f=fixture()
-  const hosted={oid:'remote',host:'me.example',role:'editor',hosted:true,transport:'kanban/1',version:3,label:'Board'}
+  // A hosted board the owner actively edits: its saved entry carries no version,
+  // and the host reports a newer one each launch. Recovery must not churn on it.
+  const hosted={oid:'remote',host:'me.example',role:'editor',hosted:true,transport:'kanban/1',label:'Board'}
   f.files['shared.json']={byBoard:{b:hosted}}
   const request=async url=>Response.json(url.endsWith('/resume-joins')?{results:[]}:{joined:[],hosted:[
-    {id:'remote',local_id:'b',host:'me.example',transport:'kanban/1',version:3,label:'Board'},
+    {id:'remote',local_id:'b',host:'me.example',transport:'kanban/1',version:5,label:'Board'},
   ]})
   assert.equal(await recoverMemberships(f.storage,request),false)
   assert.deepEqual(f.writes,[])
 })
 
-test('recovery reports a change when it saves a newer membership',async()=>{
+test('recovery reports a change when it saves a newly discovered membership',async()=>{
   const f=fixture()
-  f.files['shared.json']={byBoard:{b:{oid:'remote',host:'me.example',role:'editor',hosted:true,transport:'kanban/1',version:3,label:'Board'}}}
-  const request=async url=>Response.json(url.endsWith('/resume-joins')?{results:[]}:{joined:[],hosted:[
-    {id:'remote',local_id:'b',host:'me.example',transport:'kanban/1',version:4,label:'Board'},
-  ]})
+  f.files['shared.json']={byBoard:{}}
+  const request=async url=>Response.json(url.endsWith('/resume-joins')?{results:[]}:{joined:[
+    {id:'joined',host:'peer.example',role:'editor',member_id:'m1',transport:'kanban/1',label:'Joined'},
+  ],hosted:[]})
   assert.equal(await recoverMemberships(f.storage,request),true)
   assert.deepEqual(f.writes,['shared.json'])
-  assert.equal(f.files['shared.json'].byBoard.b.version,4)
+  assert.equal(f.files['shared.json'].byBoard.joined.host,'peer.example')
+})
+
+test('a delete racing an in-flight recovery is not undone by a late re-attach',async()=>{
+  const f=fixture()
+  f.files['shared.json']={byBoard:{b:{oid:'remote',host:'me.example',role:'editor',hosted:true,transport:'kanban/1',label:'Board'}}}
+  let release
+  const gate=new Promise(r=>{release=r})
+  const request=async url=>{
+    if(url.endsWith('/resume-joins'))return Response.json({results:[]})
+    await gate // hold recovery's share-map write until the delete is queued behind it
+    return Response.json({joined:[],hosted:[{id:'remote',local_id:'b',host:'me.example',transport:'kanban/1',version:9,label:'Board'}]})
+  }
+  const recovery=recoverMemberships(f.storage,request)
+  const removal=removeShareEntry('b')
+  release()
+  await Promise.all([recovery,removal])
+  assert.equal(f.files['shared.json'].byBoard.b,undefined)
 })
 
 test('discovery renders a fenced publication even when the share index save failed',()=>{
