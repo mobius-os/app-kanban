@@ -62,6 +62,16 @@ test('on a phone a person who is the card’s only detail sits beside the title'
   assert.match(phoneRules, /\.kb-col \{ flex: 0 0 auto; width: calc\(100vw - 32px\); max-width: none;/, 'one list fills the screen, without the next one peeking in')
 })
 
+test('the purple ring around your avatar fits inside the clipped details row, and the photo fills the avatar', () => {
+  const meta = CSS.match(/\.kb-card-meta \{([^}]*)\}/)[1]
+  const room = Number(meta.match(/padding: (\d+(?:\.\d+)?)px/)?.[1] ?? 0)
+  const ring = CSS.match(/\.kb-card\.is-mine \.kb-avatar \{ box-shadow: ([^;]+);/)[1]
+  const reach = Math.max(...[...ring.matchAll(/0 0 0 (\d+(?:\.\d+)?)px/g)].map(match => Number(match[1])))
+  assert.ok(reach <= room, `the ring reaches ${reach}px past the avatar but the row only leaves ${room}px`)
+  assert.match(meta, /overflow: hidden/, 'long chips stay clipped inside the card')
+  assert.match(meta, new RegExp(`margin: -${room}px`), 'the padding is cancelled, so cards keep their size')
+  assert.match(CSS, /\.kb-avatar \{[^}]*border: 0;/s, 'the card avatar drops the larger avatars’ border')
+})
 test('quiet arrows appear at the board edges only while lists lie beyond them, and move the board by one list', () => {
   assert.match(board, /const after = scroller\.scrollLeft \+ scroller\.clientWidth < scroller\.scrollWidth - 4/)
   assert.match(board, /new ResizeObserver\(onScroll\)/, 'folding a list or resizing the window updates the arrows')

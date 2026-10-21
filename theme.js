@@ -342,7 +342,9 @@ export const CSS = `
   .kb-card-file-badge { flex: 0 0 auto; padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); font-size: 10px; font-weight: 750; letter-spacing: 0.02em; }
   .kb-card-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .kb-card-title a { position: relative; z-index: 2; pointer-events: auto; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
-  .kb-card-meta { min-width: 0; min-height: 22px; display: flex; align-items: center; gap: 9px; overflow: hidden; }
+  /* The clip keeps long chips inside the card; its 4px padding, cancelled by the
+     negative margin, leaves room for the "your card" avatar ring without moving anything. */
+  .kb-card-meta { min-width: 0; min-height: 30px; margin: -4px; padding: 4px; display: flex; align-items: center; gap: 9px; overflow: hidden; }
   .kb-card-count { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .kb-card-count > svg { width: 13px; height: 13px; }
   .kb-card-count.is-complete { color: var(--kb-success); }
@@ -355,6 +357,7 @@ export const CSS = `
     width: 22px;
     height: 22px;
     flex: 0 0 22px;
+    border: 0;
     border-radius: 999px;
     display: inline-flex;
     align-items: center;
