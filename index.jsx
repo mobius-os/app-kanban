@@ -18,6 +18,14 @@ function sameInvitations(left, right) {
   return left === right || JSON.stringify(left) === JSON.stringify(right)
 }
 
+// Boards plus the sharing details that make joined boards discoverable even
+// before their local copy exists.
+async function readBoardDirectory() {
+  const [listing, loadedMap] = await Promise.all([listBoardsWithStatus(), loadShareMap()])
+  const map = sharingFromBoards(listing.boards, loadedMap)
+  return { listing, map, boards: includeSharedBoards(listing.boards, map) }
+}
+
 function useAppVisible() {
   const [visible, setVisible] = useState(appVisible)
   useEffect(() => {
@@ -76,11 +84,8 @@ export default function App({ appId, token }) {
     const isCurrent = boardLoadCoordinatorRef.current.beginRefresh()
     if (!isCurrent) return null
     try {
-      const [listing, loadedMap] = await Promise.all([listBoardsWithStatus(), loadShareMap()])
+      const { listing, map, boards: b } = await readBoardDirectory()
       if (!isCurrent()) return null
-      const cached = listing.boards
-      const map = sharingFromBoards(cached, loadedMap)
-      const b = includeSharedBoards(cached, map)
       setBoards(b)
       setLoadError(false)
       setDirectoryUnavailable(!listing.complete && b.length === 0)
@@ -102,18 +107,38 @@ export default function App({ appId, token }) {
 
   useEffect(() => {
     const isCurrent = boardLoadCoordinatorRef.current.beginStartup()
+    // Membership recovery asks the sharing service about joins and hosted
+    // boards that never reached the local share map. Saved boards and sharing
+    // details already describe the usual launch, so recovery runs alongside
+    // the listing and blocks only when the launch cannot be decided without it.
+    // It resolves true when it changed the share map, false when it completed
+    // without a change, and null when it could not run.
+    const recovery = recoverMemberships().catch(error => {
+      window.mobius?.signal?.('error', {source:'membership-recovery',message:String(error?.message || error)})
+      return null
+    })
     ;(async () => {
       try {
         await migrateLegacy()
         if (!isCurrent()) return
-        try { await recoverMemberships() } catch(error) {
-          window.mobius?.signal?.('error', {source:'membership-recovery',message:String(error?.message || error)})
-        }
-        let [boardListing, map, ui] = await Promise.all([listBoardsWithStatus(), loadShareMap(), loadUi()])
+        let [directory, ui] = await Promise.all([readBoardDirectory(), loadUi()])
         if (!isCurrent()) return
-        let b = boardListing.boards
-        map = sharingFromBoards(b, map)
-        b = includeSharedBoards(b, map)
+        const lastBoardMissing = Boolean(ui.lastBoardId) && !directory.boards.some(board => board.id === ui.lastBoardId)
+        let recoveryCompleted = false
+        if (directory.boards.length === 0 || lastBoardMissing) {
+          // A recovered membership may be the board to reopen, or the reason
+          // this instance is not actually empty and must not be seeded.
+          const recovered = await recovery
+          recoveryCompleted = recovered !== null
+          if (recovered) directory = await readBoardDirectory()
+          if (!isCurrent()) return
+        } else {
+          // refresh() is queued behind this startup and guarded by the same
+          // coordinator, so a late recovery cannot overwrite a newer listing.
+          recovery.then(changed => { if (changed) void refresh() })
+        }
+        const { listing: boardListing, map } = directory
+        let b = directory.boards
         setDirectoryUnavailable(!boardListing.complete && b.length === 0)
         // Seed only after a current server-authoritative empty listing. A cold
         // or cached offline empty result may be missing boards created elsewhere.
@@ -132,6 +157,10 @@ export default function App({ appId, token }) {
           setOpenId(ui.lastBoardId)
           boardEntryDestinationRef.current = ui.lastBoardId
           saveLastBoardId(ui.lastBoardId).catch(() => {})
+        } else if (ui.lastBoardId && recoveryCompleted && boardListing.complete && boardListing.source === 'server') {
+          // The saved board is gone (deleted or left elsewhere). Forget it so
+          // later launches do not wait on recovery looking for it again.
+          saveLastBoardId(null).catch(() => {})
         }
         if (!readySignalled.current) {
           readySignalled.current = true

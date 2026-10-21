@@ -85,17 +85,21 @@ function normalizeShareMap(value) {
   return value
 }
 
+// Resolves true when the map was written, false when `op` left an existing map
+// unchanged: rewriting identical sharing details is a needless durable write.
 async function mutateShareMap(op, s = store()) {
   if (!s) throw new Error('App storage is unavailable.')
   for (let attempt = 0; attempt < 6; attempt++) {
     const { value, version } = await s.getWithVersion('shared.json')
-    const next = structuredClone(normalizeShareMap(value))
+    const current = normalizeShareMap(value)
+    const next = structuredClone(current)
     op(next)
+    if (version && JSON.stringify(next) === JSON.stringify(current)) return false
     try {
       await s.durableWrite('shared.json', next, version
         ? { ifMatch: version }
         : { ifNoneMatch: true })
-      return next
+      return true
     } catch (error) {
       if (error?.code === 'conflict') {
         await new Promise(resolve => setTimeout(resolve, shareMapConflictDelay(attempt)))
@@ -112,6 +116,10 @@ async function saveShareEntry(boardId, entry) {
 }
 
 export async function removeShareEntry(boardId) {
+  // Let any in-flight launch recovery finish first. Recovery reads the service
+  // listing up front, so a removal that slipped in before its share-map write
+  // would be undone by a re-attach of the entry we are removing.
+  if (recoveryInFlight) await recoveryInFlight
   await mutateShareMap(map => { delete map.byBoard[boardId] })
 }
 
@@ -162,15 +170,32 @@ function attachMembership(map, id, entry) {
   return keys[0]
 }
 
-export async function recoverMemberships(storage = store(), request = fetch) {
-  await _json(await request(`${API}/resume-joins`, { method: 'POST', headers: _auth }))
-  const listing = await _json(await request(API, { headers: _auth }))
-  const additions = [...(listing.joined || []).map(m => ({ id:m.id, entry:{oid:m.id,host:m.host,role:m.role,member_id:m.member_id,transport:m.transport,label:m.label} })),
-    ...(listing.hosted || []).filter(m=>m.local_id).map(m=>({id:m.local_id,entry:{oid:m.id,host:m.host,role:'editor',hosted:true,transport:m.transport,version:m.version,label:m.label}}))]
-  if (!additions.length) return
-  await mutateShareMap(map => {
-    for (const {id,entry} of additions) attachMembership(map, id, entry)
-  }, storage)
+// A launch runs recovery in the background; a racing delete/leave waits on this
+// so its removal lands after recovery instead of being re-attached (see
+// removeShareEntry).
+let recoveryInFlight = null
+
+// Resolves true when recovery changed the saved sharing details, so a caller
+// that already listed boards knows whether that listing needs refreshing. The
+// share-map entry.version is deliberately left out: nothing reads it (pulls
+// always ask from -1 and sync tracks its own state.version), while a hosted
+// board's version bumps on every host edit — carrying it here would rewrite
+// shared.json on the next launch of any board the owner actively hosts.
+export function recoverMemberships(storage = store(), request = fetch) {
+  const run = (async () => {
+    await _json(await request(`${API}/resume-joins`, { method: 'POST', headers: _auth }))
+    const listing = await _json(await request(API, { headers: _auth }))
+    const additions = [...(listing.joined || []).map(m => ({ id:m.id, entry:{oid:m.id,host:m.host,role:m.role,member_id:m.member_id,transport:m.transport,label:m.label} })),
+      ...(listing.hosted || []).filter(m=>m.local_id).map(m=>({id:m.local_id,entry:{oid:m.id,host:m.host,role:'editor',hosted:true,transport:m.transport,label:m.label}}))]
+    if (!additions.length) return false
+    return mutateShareMap(map => {
+      for (const {id,entry} of additions) attachMembership(map, id, entry)
+    }, storage)
+  })()
+  const settled = run.then(() => {}, () => {})
+  recoveryInFlight = settled
+  settled.finally(() => { if (recoveryInFlight === settled) recoveryInFlight = null })
+  return run
 }
 
 export async function createInvite(oid, role, address) {

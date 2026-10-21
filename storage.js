@@ -100,6 +100,8 @@ async function writeLatestLastBoardId() {
     const { value, version } = await s.getWithVersion('ui.json')
     const next = structuredClone(normalizeUi(value))
     const requested = lastRequestedBoardId
+    // Reopening the saved board is the common launch; rewriting it is needless.
+    if (version && next.lastBoardId === requested) return next
     next.lastBoardId = requested
     try {
       await s.durableWrite('ui.json', next, version
