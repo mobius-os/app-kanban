@@ -4,11 +4,11 @@
 // Activity folded to one line each.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Calendar, Check, ChevronDown, ChevronLeft, DotsHorizontal, Paperclip, Pencil, Plus, PullRequestClosed, PullRequestDraft, PullRequestMerged, PullRequestOpen, Reload, Trash } from '@openai/apps-sdk-ui/components/Icon'
+import { Calendar, Check, ChevronDown, ChevronLeft, Copy, DotsHorizontal, Paperclip, Pencil, Plus, PullRequestClosed, PullRequestDraft, PullRequestMerged, PullRequestOpen, Reload, Trash } from '@openai/apps-sdk-ui/components/Icon'
 import { useModalFocus } from './modalFocus.js'
 import { describeAssignmentEvent, restorableAssignment } from '../assignment.js'
 import { isPreviewImage, loadCardAttachment, MAX_CARD_ATTACHMENTS } from '../attachments.js'
-import { checklistProgress, dueDateStatus, formatDueDate, labelDisplayName, labelsInOrder, MAX_LABEL_NAME_CHARS, shortLinkText } from '../domain.js'
+import { cardClipboardText, checklistProgress, dueDateStatus, formatDueDate, labelDisplayName, labelsInOrder, MAX_LABEL_NAME_CHARS, shortLinkText } from '../domain.js'
 import { cardPullUrls } from '../operations.js'
 import { parsePullRequestUrl } from '../prMatching.js'
 
@@ -446,6 +446,41 @@ export function DueChip({ due, canWrite, onChange }) {
       {due && <><div className="kb-menu-separator" /><button type="button" role="menuitem" className="kb-menu-danger" onClick={() => choose('')}>Remove due date</button></>}
     </div>)}
   </div>
+}
+
+// ---- copy the card for pasting into a chat ----
+
+const COPY_FEEDBACK_MS = 1600
+const COPY_FEEDBACK_TEXT = { copied: 'Copied', failed: "Couldn't copy" }
+
+// Copying changes nothing, so viewers get the button too. `ready` stays false
+// while a shared card's full description is loading; copying then would hand
+// over the shortened preview.
+export function CopyCardButton({ title, notes, ready }) {
+  const [result, setResult] = useState('')
+  useEffect(() => {
+    if (!result) return undefined
+    const timer = setTimeout(() => setResult(''), COPY_FEEDBACK_MS)
+    return () => clearTimeout(timer)
+  }, [result])
+  const copy = async () => {
+    const copied = await window.mobius?.clipboard?.writeText(cardClipboardText(title, notes))
+    setResult(copied ? 'copied' : 'failed')
+  }
+  const tone = result ? ` is-${result}` : ''
+  return <span className="kb-copy-card">
+    <button
+      type="button"
+      className={`kb-copy-card-btn${tone}`}
+      aria-label="Copy title and description"
+      title={ready ? 'Copy title and description, formatted for pasting into a chat' : 'Loading the full description…'}
+      disabled={!ready}
+      onClick={copy}
+    >
+      {result === 'copied' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+    </button>
+    <span className={`kb-copy-card-note${tone}`} role="status" aria-live="polite">{COPY_FEEDBACK_TEXT[result] || ''}</span>
+  </span>
 }
 
 // ---- description ----

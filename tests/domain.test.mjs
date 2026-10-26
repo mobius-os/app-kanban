@@ -9,6 +9,7 @@ import {
   assigneeHue,
   assigneeInitials,
   boardAccess,
+  cardClipboardText,
   cardMatchesFilters,
   checklistProgress,
   shortLinkText,
@@ -262,4 +263,23 @@ test('label choices list named labels first, unnamed colours after, and no label
   assert.deepEqual(labelsInOrder(colors, names), ['red', 'amber', 'blue', 'green', 'purple', 'pink', 'none'])
   assert.deepEqual(labelsInOrder(colors, {}), ['red', 'amber', 'green', 'blue', 'purple', 'pink', 'none'], 'with no names, colour order stays')
   assert.deepEqual(colors[0], 'none', 'the input is not reordered in place')
+})
+
+test('copied card text is framed by drawn lines, never by underlines that turn text into headings', () => {
+  assert.equal(
+    cardClipboardText('Clean up Contribute', 'First paragraph.\n\nRelated: another card.'),
+    '---\n\n**Kanban card**\n\n---\n\n**Title:** Clean up Contribute\n**Description:** First paragraph.\n\nRelated: another card.\n\n---',
+  )
+})
+
+test('a copied description that opens with a list starts below its label so the list stays a list', () => {
+  assert.match(
+    cardClipboardText('Benchmark memory', '- How does it scale?\n- What does it cost?'),
+    /\*\*Description:\*\*\n- How does it scale\?\n- What does it cost\?\n\n---$/u,
+  )
+})
+
+test('copied card text says when the description or title is empty instead of looking cut off', () => {
+  assert.match(cardClipboardText('  Ship it  ', '   '), /\*\*Title:\*\* Ship it\n\*\*Description:\*\* \(no description\)\n/u)
+  assert.match(cardClipboardText('', 'Notes'), /\*\*Title:\*\* \(no title\)/u)
 })

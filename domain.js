@@ -101,6 +101,21 @@ export function dueDateStatus(due, today = new Date()) {
   return 'upcoming'
 }
 
+// A list, heading, quote, code block or table only renders as one at the start
+// of a line, so a description opening with one starts below its label.
+const STARTS_WITH_MARKDOWN_BLOCK = /^(?:[-*+]\s|\d+[.)]\s|#{1,6}\s|>|```|~~~|\|)/u
+
+// The card as Markdown for pasting into a chat: a line above the bold
+// "Kanban card" label, one under it, and one closing the card. Each `---`
+// needs an empty line before it: directly under text it turns that text into
+// a heading instead of drawing a line.
+export function cardClipboardText(title, notes) {
+  const shownTitle = String(title || '').trim() || '(no title)'
+  const shownNotes = String(notes || '').trim() || '(no description)'
+  const beforeNotes = STARTS_WITH_MARKDOWN_BLOCK.test(shownNotes) ? '\n' : ' '
+  return `---\n\n**Kanban card**\n\n---\n\n**Title:** ${shownTitle}\n**Description:**${beforeNotes}${shownNotes}\n\n---`
+}
+
 // A short, readable name for a link: the site plus the last part of the
 // address ("abseil.io/…/ch19.html"), or "repo#123" for GitHub pull requests
 // and issues. The full address stays in the link and its tooltip.

@@ -17,6 +17,8 @@ A clean, mobile-first kanban board for Möbius.
   keeps only entries that match what the edit changed, and writes titles, lists,
   labels, due dates and assignees from the card itself. A description save
   records only that the description changed, or a completion whose line it adds.
+- A copy button on the card sheet puts the card's title and full description on
+  the clipboard as Markdown, ready to paste into a chat.
 - Deleting a card or a list deletes its files and activity; removing a file from
   a card deletes the file. Files are added and removed one at a time, by id,
   against the card as it is when the edit lands, so two people changing a
