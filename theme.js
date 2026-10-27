@@ -1455,6 +1455,22 @@ export const CSS = `
   .kb-chip-swatch { width: 11px; height: 11px; flex: 0 0 11px; border-radius: 3px; }
   .kb-due-chip.is-overdue { color: var(--kb-danger); border-color: color-mix(in srgb, var(--kb-danger) 45%, var(--border)); }
   .kb-due-chip.is-soon { color: var(--kb-warning); border-color: color-mix(in srgb, var(--kb-warning) 45%, var(--border)); }
+  .kb-copy-card { display: inline-flex; align-items: center; }
+  .kb-copy-card-btn { width: 36px; height: 36px; flex: 0 0 36px; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease; }
+  .kb-copy-card-btn > svg { width: 15px; height: 15px; }
+  .kb-copy-card-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .kb-copy-card-btn:disabled { opacity: 0.45; cursor: default; }
+  .kb-copy-card-btn.is-copied { color: var(--kb-success); border-color: color-mix(in srgb, var(--kb-success) 45%, var(--border)); }
+  .kb-copy-card-btn.is-failed { color: var(--kb-danger); border-color: color-mix(in srgb, var(--kb-danger) 45%, var(--border)); }
+  .kb-copy-card-note { font: 600 12.5px/1 var(--font); white-space: nowrap; }
+  .kb-copy-card-note:not(:empty) { margin-left: 8px; }
+  .kb-copy-card-note.is-copied { color: var(--kb-success); }
+  .kb-copy-card-note.is-failed { color: var(--kb-danger); }
+  @keyframes kb-copy-pop { from { transform: scale(0.6); opacity: 0; } }
+  @media (hover: hover) and (pointer: fine) {
+    .kb-copy-card-btn:not(:disabled):not(.is-copied):not(.is-failed):hover { color: var(--text); border-color: color-mix(in srgb, var(--text) 26%, var(--border)); background: var(--surface-2); }
+  }
+  @media (prefers-reduced-motion: no-preference) { .kb-copy-card-btn.is-copied > svg { animation: kb-copy-pop 0.22s ease-out; } }
   .kb-section { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 14px 0; border-top: 1px solid var(--border); }
   .kb-section-head { min-height: 20px; display: flex; align-items: center; gap: 8px; }
   .kb-section-head h3, .kb-section-line h3, .kb-fold-toggle h3 { margin: 0; color: var(--muted); font-size: 14px; font-weight: 620; letter-spacing: -0.005em; }
@@ -1535,6 +1551,7 @@ export const CSS = `
   @media (max-width: 640px) {
     .kb-card-sheet { width: calc(100% - 16px); padding: 10px 16px max(16px, env(safe-area-inset-bottom)); }
     .kb-detail-chip { height: 40px; min-height: 40px; }
+    .kb-copy-card-btn { width: 40px; height: 40px; flex-basis: 40px; }
     .kb-attachment-tiles { gap: 6px; }
   }
 

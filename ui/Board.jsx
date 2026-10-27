@@ -31,7 +31,7 @@ import {
 import { useModalFocus } from './modalFocus.js'
 import { appVisible, onAppVisibilityChange } from '../visibility.js'
 import {
-  AttachmentImage, AttachmentsSection, CardActivity, CardComments, CardTileAttachment, ChecklistSection, DescriptionSection, DueChip, dueTone,
+  AttachmentImage, AttachmentsSection, CardActivity, CardComments, CardTileAttachment, ChecklistSection, CopyCardButton, DescriptionSection, DueChip, dueTone,
   InlineCardText, LabelChip, LinkifiedText, MenuButton, pressedOutside, PullRequestSection, SaveControl, StatusPill,
 } from './CardParts.jsx'
 import {
@@ -2182,6 +2182,9 @@ export default memo(function Board({
   const closeCard = () => { setOpenCardId(null); setDraftCard(null) }
   const columnColor = column => column?.color ? (LABELS[column.color] || 'var(--muted)') : 'var(--muted)'
   const openDetails = openCard_ && cardDetails?.cardId === openCard_.id ? cardDetails : null
+  // A shared card's long description loads separately; until it has, only a
+  // shortened preview is known, so neither editing nor copying may use it.
+  const openCardFullNotesKnown = !hasExternalNotes(openCard_) || openDetails?.status === 'ok'
   // Activity by someone on a shared board names them as the board shows them;
   // on a private board every entry is this owner's (or their agent's).
   const activityActor = entry => {
@@ -2520,13 +2523,15 @@ export default memo(function Board({
               <LabelChip label={openCard_.label} labels={LABELS} names={board.labelNames} canWrite={access.canWrite}
                 onChange={label => patchOpenCard({ label })} onRename={(color, name) => mutate({ type: 'name-label', color, name })} />
               <DueChip due={openCard_.due} canWrite={access.canWrite} onChange={due => patchOpenCard({ due })} />
+              {!isDraftCard && <CopyCardButton key={openCard_.id} title={openCard_.title}
+                notes={shownNotes(openDetails, openCard_)} ready={openCardFullNotesKnown} />}
             </div>
 
             <DescriptionSection
               cardId={openCard_.id}
               text={shownNotes(openDetails, openCard_)}
               canWrite={access.canWrite}
-              editable={!hasExternalNotes(openCard_) || openDetails?.status === 'ok'}
+              editable={openCardFullNotesKnown}
               loading={hasExternalNotes(openCard_) && (!openDetails || openDetails.status === 'loading')}
               maxLength={share && openDetails?.status === 'ok' ? MAX_NOTES_CHARS : null}
               conflict={notesConflict?.cardId === openCard_.id}

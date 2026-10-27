@@ -17,6 +17,8 @@ A clean, mobile-first kanban board for Möbius.
   keeps only entries that match what the edit changed, and writes titles, lists,
   labels, due dates and assignees from the card itself. A description save
   records only that the description changed, or a completion whose line it adds.
+- A copy button on the card sheet puts the card's title and full description on
+  the clipboard as Markdown, ready to paste into a chat.
 - Comments on every card, folded to one line above Activity like Activity
   itself. They are kept beside the board like a long description: on a shared
   board the host stamps who said what and when, records a matching activity
