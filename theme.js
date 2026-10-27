@@ -1523,9 +1523,10 @@ export const CSS = `
   /* Comments: a bounded window about four short comments tall; it scrolls —
      with no visible scrollbar, like everything here — newest kept in view.
      The edge fades dissolve a half-scrolled comment instead of slicing its
-     avatar at the boundary; the padding keeps fully scrolled rows clear of
-     the fade so the first and last comments read at full strength. */
-  .kb-comments-window { max-height: 272px; margin-top: 8px; padding: 14px 0 10px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 10px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 10px), transparent 100%); }
+     avatar at the boundary, so each fade is a full avatar tall; the matching
+     padding keeps rows at the scroll ends clear of the fade, reading at full
+     strength. */
+  .kb-comments-window { max-height: 300px; margin-top: 8px; padding: 26px 0 22px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); }
   .kb-comment { display: flex; align-items: flex-start; gap: 10px; }
   .kb-comment-avatar { margin-top: 2px; }
   .kb-comment-body { flex: 1 1 auto; min-width: 0; }
