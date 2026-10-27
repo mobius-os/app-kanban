@@ -2168,7 +2168,7 @@ export default memo(function Board({
   const commentAvatar = comment => {
     const host = comment.by?.host || ''
     const member = (host && collaboratorForHost(displayMembers || [], host)) || { host, name: comment.by?.name || 'You' }
-    return <MemberAvatar member={{ ...member, avatar: memberAvatars[host] || '' }} small presence={false} className="kb-comment-avatar" />
+    return <MemberAvatar member={{ ...member, avatar: memberAvatars[host] || '' }} small presence={false} />
   }
   // People the composer can @mention: this board's members, labelled the way
   // the board shows them. memberLabel keeps a handle's @, so the picker strips

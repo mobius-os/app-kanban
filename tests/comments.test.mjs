@@ -180,6 +180,10 @@ test('comments fold above Activity with a bounded window, Enter posts, Shift+Ent
   assert.match(section, /event\.key !== 'Enter' \|\| event\.shiftKey/, 'Enter posts; Shift+Enter makes a new line')
   assert.match(theme, /\.kb-comments-window \{ max-height: \d+px;[^}]*overflow-y: auto/, 'the window is bounded and scrolls')
   assert.doesNotMatch(theme, /\.kb-comments-window[^\n]*scrollbar/, 'the app-wide rule already hides the scrollbar')
+  // The presence stack's overlap margin must not pull comment or picker
+  // avatars outside their (clipping) scroll containers.
+  assert.match(theme, /\.kb-comment > \.kb-member-avatar-small \{ margin: 2px 0 0; \}/)
+  assert.match(theme, /\.kb-mention-option > \.kb-member-avatar-small \{ margin-left: 0; \}/)
   // Another member's comment bumps the card's count, which re-reads the open card.
   assert.match(board, /openCardNotesKey[\s\S]{0,400}commentsCount/)
 })

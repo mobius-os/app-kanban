@@ -1528,7 +1528,9 @@ export const CSS = `
      strength. */
   .kb-comments-window { max-height: 300px; margin-top: 8px; padding: 26px 0 22px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); }
   .kb-comment { display: flex; align-items: flex-start; gap: 10px; }
-  .kb-comment-avatar { margin-top: 2px; }
+  /* Small avatars overlap in the presence stack (margin-left: -6px); in a
+     comment row that pulls them outside the scroll window, which clips them. */
+  .kb-comment > .kb-member-avatar-small { margin: 2px 0 0; }
   .kb-comment-body { flex: 1 1 auto; min-width: 0; }
   .kb-comment-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
   .kb-comment-head strong { font-size: 13.5px; font-weight: 650; }
@@ -1546,6 +1548,7 @@ export const CSS = `
   .kb-mention-menu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 30; min-width: 230px; max-width: 100%; max-height: 280px; overflow-y: auto; overscroll-behavior: contain; padding: 4px; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 32px color-mix(in srgb, var(--text) 14%, transparent); }
   .kb-mention-option { min-height: 44px; padding: 4px 10px; display: flex; align-items: center; gap: 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
   .kb-mention-option.is-active, .kb-mention-option:hover { background: var(--surface-2); }
+  .kb-mention-option > .kb-member-avatar-small { margin-left: 0; }
   .kb-mention-copy { min-width: 0; display: flex; flex-direction: column; }
   .kb-mention-copy strong { overflow: hidden; font-size: 13.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
   .kb-mention-copy small { color: var(--muted); font-size: 12px; }
