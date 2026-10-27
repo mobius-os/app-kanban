@@ -16,11 +16,16 @@
 export const MAX_COMMENT_CHARS = 2000
 export const MAX_COMMENTS_PER_CARD = 200
 
-const ID = /^[A-Za-z0-9_-]{1,64}$/u
+export const COMMENT_ID = /^[A-Za-z0-9_-]{1,64}$/u
 const clip = value => typeof value === 'string' ? value.trim() : ''
 
+// One id per composed comment, allocated before the first attempt and kept
+// through retries until a save is confirmed (boardRepository.addComment).
+export const newCommentId = () =>
+  `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+
 export function normalizeComment(comment) {
-  if (!comment || typeof comment !== 'object' || !ID.test(String(comment.id || ''))) return null
+  if (!comment || typeof comment !== 'object' || !COMMENT_ID.test(String(comment.id || ''))) return null
   if (typeof comment.at !== 'string' || Number.isNaN(Date.parse(comment.at))) return null
   const text = clip(comment.text)
   if (!text) return null
@@ -48,6 +53,23 @@ export function mergeComments(existing, incoming, limit = MAX_COMMENTS_PER_CARD)
 
 export const commentsPrefix = boardId => `comments/${encodeURIComponent(String(boardId))}/`
 export const commentsPath = (boardId, cardId) => `${commentsPrefix(boardId)}${encodeURIComponent(String(cardId))}.json`
+
+// A private board's comments for the cards in `doc`, as `{cardId: [comment]}`,
+// for the publication handoff: sharing moves them onto the host together
+// with the board (sync.js shareBoard), so the thread survives the switch.
+export async function privateBoardComments(storage, boardId, doc) {
+  const items = await storage.list(commentsPrefix(boardId))
+  const byCard = {}
+  await Promise.all((Array.isArray(items) ? items : []).map(async item => {
+    if (!item?.name?.endsWith('.json')) return
+    const cardId = decodeURIComponent(item.name.slice(0, -5))
+    if (!Object.hasOwn(doc.cards || {}, cardId)) return
+    const { value } = await storage.getWithVersion(commentsPath(boardId, cardId))
+    const comments = mergeComments(value?.comments, [])
+    if (comments.length) byCard[cardId] = comments
+  }))
+  return byCard
+}
 
 // ---- @mentions ----
 

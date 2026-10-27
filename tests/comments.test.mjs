@@ -4,7 +4,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createBoardRepository } from '../boardRepository.js'
-import { MAX_COMMENT_CHARS, MAX_COMMENTS_PER_CARD, commentsPath, mentionParts, mentionQuery, mergeComments, normalizeComment } from '../comments.js'
+import { configureSync, shareBoard } from '../sync.js'
+import { MAX_COMMENT_CHARS, MAX_COMMENTS_PER_CARD, commentsPath, mentionParts, mentionQuery, mergeComments, newCommentId, normalizeComment } from '../comments.js'
 import { describeActivity } from '../activity.js'
 
 const comment = (id, at, text = 'Hello', extra = {}) => ({ id, at, text, ...extra })
@@ -153,6 +154,90 @@ test('a shared comment posts to the host and adopts its stamped copy and count',
   assert.equal(result.activity.at(-1).type, 'commented')
 })
 
+// The review's reproduction: the host commits, the reply is lost, the person
+// presses Comment again. The retry carries the same id, so it is answered
+// from the first save instead of becoming a second comment — even when the
+// repository is created afresh for the retry, as the card sheet does.
+test('retrying a comment whose reply was lost saves it once', async () => {
+  const entry = { transport: 'kanban/1', host: 'peer.example', oid: 'object', role: 'editor' }
+  const storage = {
+    async getWithVersion(path) {
+      if (path === 'shared.json') return { value: { byBoard: { b: entry } }, version: 'map' }
+      return { value: null, version: null }
+    },
+    async set() {}, async durableWrite() {}, async list() { return [] },
+  }
+  const thread = []
+  let loseReply = true
+  const request = async (path, options = {}) => {
+    const { id, text } = JSON.parse(options.body)
+    if (!thread.some(comment => comment.id === id)) {
+      thread.push({ id, text, at: new Date(Date.UTC(2026, 9, 9, 8, thread.length)).toISOString(), by: { host: 'b.example', name: 'B' } })
+    }
+    if (loseReply) { loseReply = false; throw new TypeError('network connection lost') }
+    return Response.json({ status: 'ok', comments: thread, version: 2, card: { id: 'c1', commentsCount: thread.length } })
+  }
+  const id = newCommentId()
+  await assert.rejects(createBoardRepository({ storage, request }).addComment('b', 'c1', 'Once only', { id }))
+  const retried = await createBoardRepository({ storage, request }).addComment('b', 'c1', 'Once only', { id })
+  assert.equal(thread.length, 1)
+  assert.equal(retried.comments.length, 1)
+  assert.equal(retried.card.commentsCount, 1)
+})
+
+test('a retried private comment keeps one comment and one activity line', async () => {
+  const f = privateFixture()
+  const repo = createBoardRepository(f)
+  const id = newCommentId()
+  await repo.addComment('b', 'c1', 'Once only', { id })
+  const again = await repo.addComment('b', 'c1', 'Once only', { id })
+  assert.equal(again.comments.length, 1)
+  const details = await repo.readCard('b', 'c1')
+  assert.equal(details.comments.length, 1)
+  assert.equal(details.activity.filter(entry => entry.type === 'commented').length, 1)
+})
+
+test('the composer keeps one id per composed comment until the save is confirmed', async () => {
+  const parts = await readFile(new URL('../ui/CardParts.jsx', import.meta.url), 'utf8')
+  const section = parts.slice(parts.indexOf('export function CardComments'), parts.indexOf('// ---- activity ----'))
+  assert.match(section, /if \(submissionRef\.current\?\.text !== text\) submissionRef\.current = \{ id: newCommentId\(\), text \}/,
+    'the same text retries with the same id; an edited draft is a new comment')
+  assert.ok(section.indexOf('if (saved === false) return') < section.indexOf('submissionRef.current = null'),
+    'a failed attempt keeps the id for the retry')
+})
+
+// The review's second reproduction: comments written while a board was
+// private must reach the host when it is shared, not stay behind locally.
+test('sharing a private board sends its comments with the board', async () => {
+  configureSync('test-token', 1)
+  const files = {
+    'boards/local.json': { v: 1, title: 'Fixture', columns: [{ id: 'todo', name: 'To do', cardIds: ['c1'] }], cards: { c1: { id: 'c1', title: 'Card' } } },
+    [commentsPath('local', 'c1')]: { v: 1, comments: [comment('k1', '2026-10-09T08:00:00Z', 'Written while private')] },
+    // A card no longer on the board brings nothing.
+    [commentsPath('local', 'gone')]: { v: 1, comments: [comment('k2', '2026-10-09T08:00:00Z', 'Orphan')] },
+  }
+  globalThis.window = { mobius: { storage: {
+    async get(path) { return structuredClone(files[path] || null) },
+    async getWithVersion(path) { return { value: structuredClone(files[path] || null), version: files[path] ? 'v1' : null } },
+    async durableWrite(path, value) { files[path] = structuredClone(value) },
+    async list(prefix) { return Object.keys(files).filter(path => path.startsWith(prefix)).map(path => ({ name: path.slice(prefix.length) })) },
+  } } }
+  let published = null
+  globalThis.fetch = async (url, options) => {
+    if (url.endsWith('/health')) return Response.json({ protocol: 'kanban/1', host: 'me.example' })
+    published = JSON.parse(options.body)
+    return Response.json({ id: published.id, host: 'me.example', version: 1 })
+  }
+  try {
+    await shareBoard('local')
+  } finally {
+    delete globalThis.window
+    delete globalThis.fetch
+  }
+  assert.deepEqual(Object.keys(published.comments), ['c1'])
+  assert.deepEqual(published.comments.c1.map(item => [item.id, item.text]), [['k1', 'Written while private']])
+})
+
 test('a host without comments reads as unsupported, never as a failed save', async () => {
   const entry = { transport: 'kanban/1', host: 'peer.example', oid: 'object', role: 'editor' }
   const storage = {
@@ -197,6 +282,8 @@ test('typing @ lists board members above the composer; Enter then picks instead 
   assert.ok(section.indexOf("if (picker)") < section.indexOf("if (event.key !== 'Enter' || event.shiftKey) return"),
     'picker keys are handled before Enter posts')
   assert.match(section, /chooseMention\(candidates\[mentionIndex\]/)
+  // A deployment address is not a name: "@m" must not list someone on mobius-….
+  assert.doesNotMatch(section.slice(section.indexOf('const candidates'), section.indexOf('const picker')), /member\.host/)
   assert.match(section, /CommentText text=\{comment\.text\}/, 'bubbles highlight mentions')
   const board = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
   assert.match(board, /memberLabel\(member\)\.replace\(\/\^@\/u, ''\)/, 'a handle keeps a single @ when inserted')

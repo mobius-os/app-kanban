@@ -11,6 +11,7 @@ function fixture() {
     get:async path=>structuredClone(files[path]??null),
     getWithVersion:async path=>({value:structuredClone(files[path]??null),version:files[path]?'v1':null}),
     durableWrite:async(path,value)=>{writes.push(path); files[path]=structuredClone(value)},
+    list:async prefix=>Object.keys(files).filter(path=>path.startsWith(prefix)).map(path=>({name:path.slice(prefix.length)})),
     set:async()=>assert.fail('must not write a cache'),
   }
   globalThis.window={mobius:{storage}}

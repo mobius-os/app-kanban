@@ -3,7 +3,7 @@
 import { boardPath, normalizeBoard, casMutate, uid } from './storage.js'
 import { deleteSharedAsset, pullShared, pushSharedOp, readSharedCard, writeSharedNotes, postSharedComment, olderHostRefused } from './sync.js'
 import { MAX_NOTES_CHARS, activityPath, cardSnapshot, createActivityEntries, describeCardChange, mergeActivity, operationCardId } from './activity.js'
-import { MAX_COMMENT_CHARS, MAX_COMMENTS_PER_CARD, commentsPath, mergeComments } from './comments.js'
+import { COMMENT_ID, MAX_COMMENT_CHARS, MAX_COMMENTS_PER_CARD, commentsPath, mergeComments, newCommentId } from './comments.js'
 import { PUBLICATION, publicationPending } from './publication.js'
 import { MAX_CARD_ATTACHMENTS, attachmentPrefix } from './attachments.js'
 import { applyBoardOp, completeCardNotes } from './operations.js'
@@ -430,15 +430,20 @@ export function createBoardRepository({ storage, request = globalThis.fetch, via
   // one transaction; `{status: 'unsupported'}` means the board's host runs a
   // Kanban without comments. A private board's comments live in app storage
   // beside its activity.
-  async function addComment(boardId, cardId, text) {
+  // `id` names this one composed comment: a retry after an uncertain failure
+  // must send the same id, so a host that committed the first attempt answers
+  // it again instead of saving a duplicate (collaboration/service.py
+  // write_comment). Callers allocate it once per submission (newCommentId).
+  async function addComment(boardId, cardId, text, { id = newCommentId() } = {}) {
     if (!validId(cardId)) throw boardError('Card id is invalid.', 'invalid-operation')
+    if (!COMMENT_ID.test(String(id))) throw boardError('Comment id is invalid.', 'invalid-comment')
     const body = String(text ?? '').trim()
     if (!body) throw boardError('A comment must have text.', 'invalid-comment')
     if (body.length > MAX_COMMENT_CHARS) {
       throw boardError(`A comment can be at most ${MAX_COMMENT_CHARS.toLocaleString()} characters.`, 'comment-too-long')
     }
     const entry = await authority(boardId)
-    const comment = { id: uid(), text: body }
+    const comment = { id, text: body }
     if (entry) {
       if (entry.role !== 'editor') throw boardError('This shared board is read-only.', 'read-only')
       let result
@@ -455,7 +460,9 @@ export function createBoardRepository({ storage, request = globalThis.fetch, via
     const { value: doc } = await storage.getWithVersion(boardPath(boardId))
     if (!doc?.cards || !Object.hasOwn(doc.cards, cardId)) throw boardError('Card no longer exists.', 'missing-card')
     const stamped = { ...comment, at: new Date().toISOString(), ...(via === 'agent' ? { via: 'agent' } : {}) }
-    const comments = await appendPrivateComment(boardId, cardId, stamped)
+    const { comments, added } = await appendPrivateComment(boardId, cardId, stamped)
+    // A replayed comment already has its activity line.
+    if (!added) return { status: 'saved', comments, activity: null, activityStatus: 'saved' }
     const entries = createActivityEntries([{ type: 'commented', text: body }], { via, makeId: uid })
     let activity = null
     let activityStatus = 'saved'
@@ -467,20 +474,23 @@ export function createBoardRepository({ storage, request = globalThis.fetch, via
     return { status: 'saved', comments, activity, activityStatus }
   }
 
+  // `{comments, added}`: `added` is false when a comment with this id was
+  // already saved (a retry), which leaves the file unchanged.
   async function appendPrivateComment(boardId, cardId, comment) {
     const path = commentsPath(boardId, cardId)
     for (let attempt = 0; attempt < 6; attempt++) {
       const { value, version } = await storage.getWithVersion(path)
       const existing = mergeComments(value?.comments, [])
+      if (existing.some(item => item.id === comment.id)) return { comments: existing, added: false }
       // Refuse at the cap (the host applies the same rule) rather than letting
       // the merge silently drop the oldest comment.
-      if (existing.length >= MAX_COMMENTS_PER_CARD && !existing.some(item => item.id === comment.id)) {
+      if (existing.length >= MAX_COMMENTS_PER_CARD) {
         throw boardError(`A card can hold up to ${MAX_COMMENTS_PER_CARD} comments.`, 'comments-full')
       }
       const merged = mergeComments(existing, [comment])
       try {
         await storage.durableWrite(path, { v: 1, comments: merged }, version ? { ifMatch: version } : { ifNoneMatch: true })
-        return merged
+        return { comments: merged, added: true }
       } catch (error) {
         if (error?.code !== 'conflict') throw error
       }

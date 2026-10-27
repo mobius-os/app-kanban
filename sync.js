@@ -8,6 +8,7 @@
 // conflict re-apply the op to the returned doc and retry.
 
 import { PUBLICATION, fencePublication, publicationPending } from './publication.js'
+import { privateBoardComments } from './comments.js'
 import { normalizeBoard, boardPath, getBoard } from './storage.js'
 
 let API = null
@@ -142,9 +143,12 @@ export async function shareBoard(boardId) {
     // accidental private writes if this discovery write fails.
     await saveShareEntry(boardId, entry)
     const doc = { ...fenced.doc }; delete doc[PUBLICATION]
+    // Comments live beside a private board, not in it: they move to the host
+    // in this same request, or the shared card would open with an empty thread.
+    const comments = await privateBoardComments(store(), boardId, doc)
     const res = await _json(await fetch(API, {
       method: 'POST', headers: _auth,
-      body: JSON.stringify({ id: entry.oid, local_id: boardId, app: 'kanban', kind: 'board', label: doc.title, doc }),
+      body: JSON.stringify({ id: entry.oid, local_id: boardId, app: 'kanban', kind: 'board', label: doc.title, doc, comments }),
     }))
     if (res.id !== entry.oid || res.host !== entry.host) throw new Error('The host returned a different board authority.')
     entry = { ...entry, version: res.version }; delete entry.publishing

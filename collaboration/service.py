@@ -611,6 +611,9 @@ class Service:
             fail(400,'invalid-local-id','Invalid local board identity.')
         row = {'id':oid,'local_id':local_id,'label':str(body.get('label') or doc.get('title') or 'Board')[:120], 'version':1,
                'members':{self.host:{'host':self.host,'name':self.owner_name,'role':'editor','host_owner':True,'seen':self.now()}}, 'invites':{}}
+        comments = self.published_comments(body.get('comments'), doc)
+        for card_id, items in comments.items():
+            doc['cards'][card_id]['commentsCount'] = len(items)
         with self.store.transaction():
             existing = self.store.get('board',oid)
             if existing:
@@ -620,8 +623,56 @@ class Service:
                     fail(409,'board-id-conflict','This identity already names another board.')
                 return {'id':oid,'host':self.host,'version':existing['version'],'transport':PROTOCOL}
             self.write_board_pieces(row, doc)
+            # A published private board's comments land with it, in one transaction.
+            for card_id, items in comments.items():
+                record = self.card_record(row, card_id)
+                record['comments'] = items
+                self.store.put('card', card_key(oid, card_id), record)
             self.store.put('board',oid,row)
         return {'id':oid,'host':self.host,'version':1,'transport':PROTOCOL}
+
+    def published_comments(self, raw, doc):
+        """Validate the comments a private board brings when it is shared.
+
+        They were written on this deployment, by its owner (or the owner's
+        agent), so a comment without an author is the owner's. Each keeps its
+        id, time and text; only cards the board holds can bring comments.
+        """
+        if raw is None: return {}
+        if not isinstance(raw, dict):
+            fail(400, 'invalid-comment', 'Comments must be grouped by card.')
+        owner = {'host': self.host, 'name': self.owner_name}
+        kept = {}
+        for card_id, items in raw.items():
+            if not isinstance(doc['cards'].get(card_id), dict): continue
+            if not isinstance(items, list) or len(items) > MAX_COMMENTS_PER_CARD:
+                fail(413, 'comments-full', f'A card can hold up to {MAX_COMMENTS_PER_CARD} comments.')
+            comments, seen = [], set()
+            for item in items:
+                comment = self.published_comment(item, owner)
+                if comment['id'] not in seen:
+                    seen.add(comment['id']); comments.append(comment)
+            if comments:
+                kept[card_id] = sorted(comments, key=lambda comment: activity_time(comment['at']))
+        return kept
+
+    @staticmethod
+    def published_comment(item, owner):
+        if not isinstance(item, dict):
+            fail(400, 'invalid-comment', 'A comment must be an object.')
+        comment_id = check(item.get('id'), ACTIVITY_ID, 'comment id')
+        activity_time(item.get('at'))
+        text = item.get('text')
+        if not isinstance(text, str) or not text.strip():
+            fail(400, 'invalid-comment', 'A comment must have text.')
+        if len(text.strip()) > MAX_COMMENT_CHARS:
+            fail(413, 'comment-too-long', f'A comment can be at most {MAX_COMMENT_CHARS} characters.')
+        by = item.get('by') if isinstance(item.get('by'), dict) else {}
+        author = {'host': str(by.get('host') or owner['host'])[:MAX_ACTIVITY_TEXT],
+                  'name': str(by.get('name') or owner['name'])[:MAX_ACTIVITY_TEXT]}
+        comment = {'id': comment_id, 'at': item['at'], 'text': text.strip(), 'by': author}
+        if item.get('via') == 'agent': comment['via'] = 'agent'
+        return comment
 
     def mint_invite(self, oid, role, *, target=None, group=None, ttl=INVITE_TTL):
         return self.mint_grants(oid, role, [target], group=group, ttl=ttl)[0]

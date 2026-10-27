@@ -1629,13 +1629,13 @@ export default memo(function Board({
   // A comment goes straight to the card's record (boardRepository.addComment):
   // the host stamps who and when and records the 'commented' activity with it.
   // A failure keeps the text in the composer and says why.
-  const postComment = async text => {
+  const postComment = async (text, id) => {
     const cardId = openCardId
     if (!cardId || !boardRef.current?.cards?.[cardId]) return false
     setCommentPosting(true)
     setCommentError('')
     try {
-      const result = await createBoardRepository({ storage: window.mobius.storage }).addComment(boardId, cardId, text)
+      const result = await createBoardRepository({ storage: window.mobius.storage }).addComment(boardId, cardId, text, { id })
       if (result.status === 'unsupported') {
         updateDetails(cardId, details => ({ ...details, status: 'unsupported' }))
         return false

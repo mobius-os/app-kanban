@@ -9,7 +9,7 @@ import { useModalFocus } from './modalFocus.js'
 import { describeAssignmentEvent, restorableAssignment } from '../assignment.js'
 import { isPreviewImage, loadCardAttachment, MAX_CARD_ATTACHMENTS } from '../attachments.js'
 import { assigneeAvatar, checklistProgress, copyCardToClipboard, dueDateStatus, formatDueDate, labelDisplayName, labelsInOrder, MAX_LABEL_NAME_CHARS, shortLinkText } from '../domain.js'
-import { MAX_COMMENT_CHARS, mentionParts, mentionQuery } from '../comments.js'
+import { MAX_COMMENT_CHARS, mentionParts, mentionQuery, newCommentId } from '../comments.js'
 import { cardPullUrls } from '../operations.js'
 import { parsePullRequestUrl } from '../prMatching.js'
 
@@ -950,21 +950,28 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
     input.style.height = 'auto'
     input.style.height = `${Math.min(input.scrollHeight, 160)}px`
   }
+  // One id per composed comment: a retry of the same text after an uncertain
+  // failure resends that id, so a host that already saved it answers it again
+  // rather than storing a second copy. An edited draft is a new comment.
+  const submissionRef = useRef(null)
   const post = async () => {
     const text = draft.trim()
     if (!text || posting) return
-    const saved = await onPost(text)
+    if (submissionRef.current?.text !== text) submissionRef.current = { id: newCommentId(), text }
+    const saved = await onPost(text, submissionRef.current.id)
     if (saved === false) return
+    submissionRef.current = null
     setDraft('')
     setMention(null)
     requestAnimationFrame(() => { resize(); inputRef.current?.focus() })
   }
-  // Prefix-matched members for the @ being typed; an empty match (or a query
-  // the labels have moved past, such as the space after an inserted mention)
-  // closes the picker.
+  // Members whose handle or any word of whose name starts with the @ being
+  // typed (a deployment address would match unrelated people); an empty match
+  // (such as the space after an inserted mention) closes the picker.
   const query = mention ? mention.query.toLowerCase() : null
   const candidates = query === null ? [] : mentionables.filter(member =>
-    [member.label, member.name, member.host].some(value => value && String(value).toLowerCase().startsWith(query))).slice(0, 6)
+    [member.label, ...String(member.name || '').replace(/^@/u, '').split(/\s+/u)]
+      .some(value => value && value.toLowerCase().startsWith(query))).slice(0, 6)
   const picker = candidates.length > 0
   useEffect(() => { setMentionIndex(0) }, [mention?.start, mention?.query])
   const menuRef = useRef(null)
