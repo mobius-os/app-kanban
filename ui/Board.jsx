@@ -32,10 +32,9 @@ import { useModalFocus } from './modalFocus.js'
 import { appVisible, onAppVisibilityChange } from '../visibility.js'
 import {
   AttachmentImage, AttachmentsSection, CardActivity, CardComments, CardTileAttachment, ChecklistSection, CopyCardButton, DescriptionSection, DueChip, dueTone,
-  InlineCardText, LabelChip, LinkifiedText, MenuButton, pressedOutside, PullRequestSection, SaveControl, StatusPill,
+  InlineCardText, LabelChip, LinkifiedText, MemberAvatar, memberLabel, MenuButton, pressedOutside, PullRequestSection, SaveControl, StatusPill,
 } from './CardParts.jsx'
 import {
-  assigneeAvatar,
   cardAssigneeLabel,
   boardAccess,
   boardCapacity,
@@ -144,43 +143,6 @@ function memberRecords(metadata) {
       active: value.active === true,
     }
   }))
-}
-
-function memberLabel(member) {
-  const handle = String(member?.handle || '').trim().replace(/^@/u, '')
-  if (handle) return `@${handle}`
-  return String(member?.name || member?.host || '').trim()
-}
-
-function MemberAvatar({ member, small = false, className = '', presence = true }) {
-  const label = memberLabel(member) || 'Board member'
-  const avatar = assigneeAvatar(label)
-  const [failed, setFailed] = useState(false)
-  useEffect(() => {
-    setFailed(false)
-  }, [member.avatar])
-
-  const showPhoto = member.avatar && !failed
-  return <span
-    className={`kb-member-avatar${small ? ' kb-member-avatar-small' : ''} ${className}`}
-    style={{
-      background: showPhoto ? 'transparent' : avatar.background,
-      color: avatar.color,
-    }}
-    title={label}
-    role="img"
-    aria-label={label}
-  >
-    {showPhoto ? (
-      <img
-        className="kb-avatar-photo"
-        src={member.avatar}
-        alt=""
-        onError={() => setFailed(true)}
-      />
-    ) : avatar.initials}
-    {presence && member.active && <span className="kb-presence-dot" aria-label="Active now" />}
-  </span>
 }
 
 function BoardPresence({ members, onOpen }) {
@@ -2208,6 +2170,17 @@ export default memo(function Board({
     const member = (host && collaboratorForHost(displayMembers || [], host)) || { host, name: comment.by?.name || 'You' }
     return <MemberAvatar member={{ ...member, avatar: memberAvatars[host] || '' }} small presence={false} className="kb-comment-avatar" />
   }
+  // People the composer can @mention: this board's members, labelled the way
+  // the board shows them. memberLabel keeps a handle's @, so the picker strips
+  // it and an insertion never doubles it. A private board lists no one.
+  const mentionables = (displayMembers || []).map(member => ({
+    key: member.member_id || member.host || memberLabel(member),
+    label: memberLabel(member).replace(/^@/u, ''),
+    name: member.name,
+    host: member.host,
+    handle: member.handle,
+    avatar: memberAvatars[member.host] || '',
+  })).filter(member => member.label)
   const createdLabel = openCard_?.createdAt && !Number.isNaN(Date.parse(openCard_.createdAt))
     ? `Created ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: new Date(openCard_.createdAt).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }).format(new Date(openCard_.createdAt))}`
     : ''
@@ -2595,6 +2568,7 @@ export default memo(function Board({
               avatarFor={commentAvatar}
               isOwn={ownComment}
               onPost={postComment}
+              mentionables={mentionables}
             />
             <CardActivity
               card={openCard_}

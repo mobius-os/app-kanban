@@ -4,7 +4,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createBoardRepository } from '../boardRepository.js'
-import { MAX_COMMENT_CHARS, MAX_COMMENTS_PER_CARD, commentsPath, mergeComments, normalizeComment } from '../comments.js'
+import { MAX_COMMENT_CHARS, MAX_COMMENTS_PER_CARD, commentsPath, mentionParts, mentionQuery, mergeComments, normalizeComment } from '../comments.js'
 import { describeActivity } from '../activity.js'
 
 const comment = (id, at, text = 'Hello', extra = {}) => ({ id, at, text, ...extra })
@@ -33,6 +33,29 @@ test('mergeComments unions by id, oldest first, keeping the newest at the cap', 
 test('a commented activity entry reads as the comment', () => {
   assert.equal(describeActivity({ type: 'commented', text: 'Looks good' }), 'commented: “Looks good”')
   assert.equal(describeActivity({ type: 'commented' }), 'commented')
+})
+
+// ---- @mentions ----
+
+test('an @ completes a mention only at the start of a word, and stops at a newline or second @', () => {
+  assert.deepEqual(mentionQuery('hi @ha', 6), { start: 3, query: 'ha' })
+  assert.deepEqual(mentionQuery('@', 1), { start: 0, query: '' })
+  // The query ends at the caret: text after it never filters the picker.
+  assert.deepEqual(mentionQuery('@ha later', 3), { start: 0, query: 'ha' })
+  assert.equal(mentionQuery('mail me a@b.example', 10), null, 'an email @ is not a mention')
+  assert.equal(mentionQuery('@ha\nnew line', 8), null)
+  assert.equal(mentionQuery('no at here', 5), null)
+})
+
+test('mention text highlights known labels first, longest first, so names with spaces stay whole', () => {
+  const labels = ['Hamza', 'Hamza Dva']
+  assert.deepEqual(mentionParts('ping @Hamza Dva and @hamza now', labels), [
+    { text: 'ping ' }, { mention: '@Hamza Dva' }, { text: ' and ' }, { mention: '@hamza' }, { text: ' now' },
+  ])
+  // Any other @word still reads as a mention; an email address does not.
+  assert.deepEqual(mentionParts('cc @edin at a@b.example', []), [
+    { text: 'cc ' }, { mention: '@edin' }, { text: ' at a@b.example' },
+  ])
 })
 
 // ---- private boards: comments live in app storage beside the activity ----
@@ -159,6 +182,20 @@ test('comments fold above Activity with a bounded window, Enter posts, Shift+Ent
   assert.doesNotMatch(theme, /\.kb-comments-window[^\n]*scrollbar/, 'the app-wide rule already hides the scrollbar')
   // Another member's comment bumps the card's count, which re-reads the open card.
   assert.match(board, /openCardNotesKey[\s\S]{0,400}commentsCount/)
+})
+
+test('typing @ lists board members above the composer; Enter then picks instead of posting', async () => {
+  const parts = await readFile(new URL('../ui/CardParts.jsx', import.meta.url), 'utf8')
+  const section = parts.slice(parts.indexOf('export function CardComments'), parts.indexOf('// ---- activity ----'))
+  assert.match(section, /mentionQuery\(target\.value, target\.selectionStart\)/, 'the picker follows the caret')
+  assert.match(section, /kb-mention-menu/, 'members list in a popover above the field')
+  assert.match(section, /<MemberAvatar member=\{member\} small/, 'the same avatars as the assignee picker')
+  assert.ok(section.indexOf("if (picker)") < section.indexOf("if (event.key !== 'Enter' || event.shiftKey) return"),
+    'picker keys are handled before Enter posts')
+  assert.match(section, /chooseMention\(candidates\[mentionIndex\]/)
+  assert.match(section, /CommentText text=\{comment\.text\}/, 'bubbles highlight mentions')
+  const board = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
+  assert.match(board, /memberLabel\(member\)\.replace\(\/\^@\/u, ''\)/, 'a handle keeps a single @ when inserted')
 })
 
 test('one save control: Save appears for unsaved text, Enter commits by leaving the field', async () => {

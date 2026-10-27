@@ -8,8 +8,8 @@ import { Calendar, Check, ChevronDown, ChevronLeft, Copy, DotsHorizontal, Paperc
 import { useModalFocus } from './modalFocus.js'
 import { describeAssignmentEvent, restorableAssignment } from '../assignment.js'
 import { isPreviewImage, loadCardAttachment, MAX_CARD_ATTACHMENTS } from '../attachments.js'
-import { checklistProgress, copyCardToClipboard, dueDateStatus, formatDueDate, labelDisplayName, labelsInOrder, MAX_LABEL_NAME_CHARS, shortLinkText } from '../domain.js'
-import { MAX_COMMENT_CHARS } from '../comments.js'
+import { assigneeAvatar, checklistProgress, copyCardToClipboard, dueDateStatus, formatDueDate, labelDisplayName, labelsInOrder, MAX_LABEL_NAME_CHARS, shortLinkText } from '../domain.js'
+import { MAX_COMMENT_CHARS, mentionParts, mentionQuery } from '../comments.js'
 import { cardPullUrls } from '../operations.js'
 import { parsePullRequestUrl } from '../prMatching.js'
 
@@ -170,6 +170,43 @@ export function InlineCardText({
 }
 
 // ---- small shared pieces ----
+
+export function memberLabel(member) {
+  const handle = String(member?.handle || '').trim().replace(/^@/u, '')
+  if (handle) return `@${handle}`
+  return String(member?.name || member?.host || '').trim()
+}
+
+export function MemberAvatar({ member, small = false, className = '', presence = true }) {
+  const label = memberLabel(member) || 'Board member'
+  const avatar = assigneeAvatar(label)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    setFailed(false)
+  }, [member.avatar])
+
+  const showPhoto = member.avatar && !failed
+  return <span
+    className={`kb-member-avatar${small ? ' kb-member-avatar-small' : ''} ${className}`}
+    style={{
+      background: showPhoto ? 'transparent' : avatar.background,
+      color: avatar.color,
+    }}
+    title={label}
+    role="img"
+    aria-label={label}
+  >
+    {showPhoto ? (
+      <img
+        className="kb-avatar-photo"
+        src={member.avatar}
+        alt=""
+        onError={() => setFailed(true)}
+      />
+    ) : avatar.initials}
+    {presence && member.active && <span className="kb-presence-dot" aria-label="Active now" />}
+  </span>
+}
 
 // Appears only when loading takes long enough to notice, so a fast load
 // never flickers a spinner.
@@ -875,16 +912,28 @@ export function AttachmentsSection({ boardId, share, attachments, canWrite, isDr
 
 // ---- comments ----
 
+// Mention-aware comment text: a member's label (and any other @word) reads as
+// a highlighted mention; everything else keeps its links.
+function CommentText({ text, labels }) {
+  return mentionParts(text, labels).map((part, index) => part.mention
+    ? <span key={index} className="kb-mention">{part.mention}</span>
+    : <LinkifiedText key={index} text={part.text} />)
+}
+
 // Comments fold to one line above Activity, exactly like Activity. Open, they
 // show a bounded window — about four short comments tall — that scrolls
 // without a visible scrollbar, newest kept in view, with the composer below.
-// Enter posts, Shift+Enter makes a new line.
-export function CardComments({ card, comments, status, canWrite, posting, postError, actorName, avatarFor, isOwn, onPost }) {
+// Enter posts, Shift+Enter makes a new line; typing @ lists the board's
+// members (`mentionables`) and Enter/Tab or a click inserts the picked name.
+export function CardComments({ card, comments, status, canWrite, posting, postError, actorName, avatarFor, isOwn, onPost, mentionables = [] }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
+  // The @ the composer is completing: {start, query}, null when none.
+  const [mention, setMention] = useState(null)
+  const [mentionIndex, setMentionIndex] = useState(0)
   const windowRef = useRef(null)
   const inputRef = useRef(null)
-  useEffect(() => { setOpen(false); setDraft('') }, [card.id])
+  useEffect(() => { setOpen(false); setDraft(''); setMention(null) }, [card.id])
   const loading = status === 'loading'
   const count = comments.length || (Number.isInteger(card.commentsCount) && card.commentsCount > 0 ? card.commentsCount : 0)
   const latest = comments[comments.length - 1]
@@ -907,7 +956,58 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
     const saved = await onPost(text)
     if (saved === false) return
     setDraft('')
+    setMention(null)
     requestAnimationFrame(() => { resize(); inputRef.current?.focus() })
+  }
+  // Prefix-matched members for the @ being typed; an empty match (or a query
+  // the labels have moved past, such as the space after an inserted mention)
+  // closes the picker.
+  const query = mention ? mention.query.toLowerCase() : null
+  const candidates = query === null ? [] : mentionables.filter(member =>
+    [member.label, member.name, member.host].some(value => value && String(value).toLowerCase().startsWith(query))).slice(0, 6)
+  const picker = candidates.length > 0
+  useEffect(() => { setMentionIndex(0) }, [mention?.start, mention?.query])
+  const menuRef = useRef(null)
+  // The scrollbar is hidden app-wide, so the arrowed-to member must be
+  // brought into view — a row outside the window would otherwise look absent.
+  useEffect(() => {
+    menuRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
+  }, [mentionIndex, picker])
+  const trackMention = target => setMention(mentionQuery(target.value, target.selectionStart))
+  const chooseMention = member => {
+    const input = inputRef.current
+    if (!input || !mention) return
+    const caret = input.selectionStart
+    const next = `${draft.slice(0, mention.start)}@${member.label} ${draft.slice(caret)}`
+    const position = mention.start + member.label.length + 2
+    setDraft(next)
+    setMention(null)
+    requestAnimationFrame(() => { resize(); input.focus(); input.setSelectionRange(position, position) })
+  }
+  const composerKeys = event => {
+    if (event.isComposing || event.nativeEvent.isComposing) return
+    if (picker) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        setMentionIndex(index => (index + (event.key === 'ArrowDown' ? 1 : candidates.length - 1)) % candidates.length)
+        return
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault()
+        chooseMention(candidates[mentionIndex] || candidates[0])
+        return
+      }
+      if (event.key === 'Escape') {
+        // Close the picker, not the card under it.
+        event.preventDefault()
+        event.stopPropagation()
+        setMention(null)
+        return
+      }
+    }
+    if (event.key !== 'Enter' || event.shiftKey) return
+    event.preventDefault()
+    post()
   }
   const meta = <>
     {count > 0 && <span className="kb-section-count">{count}</span>}
@@ -924,27 +1024,43 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
             <strong>{actorName(comment)}</strong>
             <time dateTime={comment.at}>{formatActivityTime(comment.at)}</time>
           </div>
-          <div className="kb-comment-bubble"><LinkifiedText text={comment.text} /></div>
+          <div className="kb-comment-bubble"><CommentText text={comment.text} labels={mentionables.map(member => member.label)} /></div>
         </div>
       </div>)}
     </div>}
     {canWrite && status !== 'unsupported' && <div className="kb-comment-composer">
-      <textarea
-        ref={inputRef}
-        className="kb-comment-input"
-        rows={1}
-        value={draft}
-        maxLength={MAX_COMMENT_CHARS}
-        placeholder="Write a comment…"
-        aria-label="Write a comment"
-        disabled={posting}
-        onChange={event => { setDraft(event.target.value); resize() }}
-        onKeyDown={event => {
-          if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.nativeEvent.isComposing) return
-          event.preventDefault()
-          post()
-        }}
-      />
+      <div className="kb-comment-field">
+        {picker && <div className="kb-mention-menu" role="listbox" aria-label="Mention someone" ref={menuRef}>
+          {candidates.map((member, index) => <button
+            key={member.key}
+            type="button"
+            role="option"
+            aria-selected={index === mentionIndex}
+            className={`kb-mention-option${index === mentionIndex ? ' is-active' : ''}`}
+            onMouseDown={event => event.preventDefault()}
+            onClick={() => chooseMention(member)}
+          >
+            <MemberAvatar member={member} small presence={false} />
+            <span className="kb-mention-copy">
+              <strong>@{member.label}</strong>
+              {member.name && member.name.replace(/^@/u, '').toLowerCase() !== member.label.toLowerCase() && <small>{member.name}</small>}
+            </span>
+          </button>)}
+        </div>}
+        <textarea
+          ref={inputRef}
+          className="kb-comment-input"
+          rows={1}
+          value={draft}
+          maxLength={MAX_COMMENT_CHARS}
+          placeholder="Write a comment…"
+          aria-label="Write a comment"
+          disabled={posting}
+          onChange={event => { setDraft(event.target.value); trackMention(event.target); resize() }}
+          onSelect={event => trackMention(event.target)}
+          onKeyDown={composerKeys}
+        />
+      </div>
       <button type="button" className="kb-btn kb-btn-primary kb-comment-send" disabled={posting || !draft.trim()} onClick={post}>
         {posting ? 'Posting…' : 'Comment'}
       </button>
