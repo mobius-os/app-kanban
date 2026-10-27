@@ -52,8 +52,12 @@ MAX_NOTES_CHARS = 16000
 MAX_ACTIVITY_PER_CARD = 100
 MAX_ACTIVITY_TEXT = 300
 MAX_ACTIVITY_APPEND = 40
+# Comments live in the card record like a long description; the board card
+# only carries their count. Keep these in step with comments.js.
+MAX_COMMENT_CHARS = 2000
+MAX_COMMENTS_PER_CARD = 200
 ACTIVITY_TYPES = frozenset((
-    'created', 'completed', 'renamed', 'notes', 'moved', 'label', 'due', 'assigned',
+    'created', 'completed', 'renamed', 'notes', 'moved', 'label', 'due', 'assigned', 'commented',
     'checklist-added', 'checklist-removed', 'checklist-checked', 'checklist-unchecked', 'checklist-edited',
     'attachment-added', 'attachment-removed', 'pr-added', 'pr-removed', 'pr-changed',
 ))
@@ -61,7 +65,7 @@ ACTIVITY_ID = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 # The card fields each kind of activity entry describes (see verified_activity).
 ACTIVITY_FIELDS = {
     'renamed': ('title',), 'notes': ('notes', 'notesLength'), 'label': ('label',), 'due': ('due',),
-    'assigned': ('assignee', 'assigneeHost'),
+    'assigned': ('assignee', 'assigneeHost'), 'commented': ('commentsCount',),
     **{kind: ('checklist',) for kind in ('checklist-added', 'checklist-removed', 'checklist-checked',
                                           'checklist-unchecked', 'checklist-edited')},
     'attachment-added': ('attachments',), 'attachment-removed': ('attachments',),
@@ -812,9 +816,9 @@ class Service:
                 row['members'].pop(mid)
                 self.store.put('board',oid,row)
                 return {'status':'left'}
-            if op not in ('state','write','patch','asset-read','asset-write','asset-delete','card-read','notes-write'):
+            if op not in ('state','write','patch','asset-read','asset-write','asset-delete','card-read','notes-write','comment-write'):
                 fail(400,'invalid-operation','Unsupported board operation.')
-            if op in ('write','patch','asset-write','asset-delete','notes-write') and member['role'] != 'editor':
+            if op in ('write','patch','asset-write','asset-delete','notes-write','comment-write') and member['role'] != 'editor':
                 fail(403,'read-only','This board member is a viewer.')
             changes = self.presence_changes(member, self.claimed_name(body))
             member.update(changes)
@@ -827,8 +831,11 @@ class Service:
             return result
 
     def card_record(self, row, card_id):
-        return self.store.get('card',row['id']+'/'+card_id) or {
+        record = self.store.get('card',row['id']+'/'+card_id) or {
             'board_id':row['id'],'card_id':card_id,'notes':None,'notes_version':0,'activity':[]}
+        # Records written before comments existed gain the empty collection.
+        record.setdefault('comments', [])
+        return record
 
     def settle_notes(self, row, cards):
         """Keep the descriptions in changed cards consistent with the card records.
@@ -887,8 +894,11 @@ class Service:
             # `external` tells a writer that the board only shows a preview, so an
             # edit must name the version it started from (boardRepository.js).
             return {'status':'ok','notes':current_notes if isinstance(card,dict) else None,
-                'notes_version':record['notes_version'],'external':external,'activity':record['activity']}
+                'notes_version':record['notes_version'],'external':external,'activity':record['activity'],
+                'comments':record['comments']}
         if not isinstance(card,dict): fail(404,'card-missing','Card not found.')
+        if op == 'comment-write':
+            return self.write_comment(row, key, record, card, card_id, body, actor)
         notes, expected = body.get('notes'), body.get('expected_version')
         if not isinstance(notes,str): fail(400,'invalid-notes','A description must be text.')
         if type(expected) is not int or expected < 0: fail(400,'invalid-version','Expected version must be a whole number.')
@@ -914,6 +924,45 @@ class Service:
         self.store.put('card',key,record)
         return {'status':'ok','notes_version':record['notes_version'],'version':row['version'],'card':card,
                 'activity':record['activity']}
+
+    def write_comment(self, row, key, record, card, card_id, body, actor):
+        """Append one comment to the card's record, like a description save.
+
+        The writer sends only its own id and the text; the host stamps the
+        author, the time and `via` (activity_entries). The board card carries
+        the count, so every member's poll sees that the card changed and the
+        open card re-reads its details. The matching 'commented' activity
+        commits in the same transaction as the comment.
+        """
+        comment_id = check(body.get('id'), ACTIVITY_ID, 'comment id')
+        text = body.get('text')
+        if not isinstance(text, str) or not text.strip():
+            fail(400, 'invalid-comment', 'A comment must have text.')
+        text = text.strip()
+        if len(text) > MAX_COMMENT_CHARS:
+            fail(413, 'comment-too-long', f'A comment can be at most {MAX_COMMENT_CHARS} characters.')
+        existing = next((c for c in record['comments'] if c['id'] == comment_id), None)
+        if existing:
+            # A replayed save: the first attempt landed, answer it again.
+            return {'status': 'ok', 'comment': existing, 'comments': record['comments'],
+                    'version': row['version'], 'card': card, 'activity': record['activity']}
+        if len(record['comments']) >= MAX_COMMENTS_PER_CARD:
+            fail(413, 'comments-full', f'A card can hold up to {MAX_COMMENTS_PER_CARD} comments.')
+        comment = {'id': comment_id, 'at': self.stamp(), 'text': text,
+                   'by': {'host': actor['host'], 'name': actor.get('name') or actor['host']}}
+        if actor.get('via') == 'agent':
+            comment['via'] = 'agent'
+        record['comments'].append(comment)
+        entry = {'id': uuid.uuid4().hex, 'at': comment['at'], 'type': 'commented',
+                 'text': text[:MAX_ACTIVITY_TEXT], 'by': comment['by']}
+        if 'via' in comment:
+            entry['via'] = 'agent'
+        card['commentsCount'] = len(record['comments'])
+        self.commit_pieces(row, {'cards': {card_id: card}})
+        record['activity'] = merge_activity(record['activity'], [entry])
+        self.store.put('card', key, record)
+        return {'status': 'ok', 'comment': comment, 'comments': record['comments'],
+                'version': row['version'], 'card': card, 'activity': record['activity']}
 
     def patch_activity(self, pieces, raw, actor):
         """Validate the activity a piece save describes, before anything is written.
@@ -948,7 +997,7 @@ class Service:
             since = body.get('since_version',-1)
             if type(since) is not int: fail(400,'invalid-version','Version must be an integer.')
             return self.state(row,since,body.get('changes') is True)
-        if op in ('card-read','notes-write'):
+        if op in ('card-read','notes-write','comment-write'):
             return self.card_operation(row,op,body,actor)
         if op == 'patch':
             # A newer Kanban sends only the pieces it changed, with the version it
@@ -1141,6 +1190,8 @@ class Service:
                     result=await self.state_operation(p[0],p[1],'card-read',{'card_id':p[3]},agent=agent)
                 elif len(p)==5 and p[2]=='cards' and p[4]=='notes' and method=='PUT':
                     result=await self.state_operation(p[0],p[1],'notes-write',{**body,'card_id':p[3]},agent=agent)
+                elif len(p)==5 and p[2]=='cards' and p[4]=='comments' and method=='POST':
+                    result=await self.state_operation(p[0],p[1],'comment-write',{**body,'card_id':p[3]},agent=agent)
                 elif len(p)==4 and p[2]=='assets' and method in ('GET','PUT','DELETE'):
                     result=await self.state_operation(p[0],p[1],{'GET':'asset-read','PUT':'asset-write','DELETE':'asset-delete'}[method],{**body,'asset_id':p[3]},agent=agent)
                 else: fail(404,'route-missing','No such Kanban route.')

@@ -9,6 +9,7 @@ import { useModalFocus } from './modalFocus.js'
 import { describeAssignmentEvent, restorableAssignment } from '../assignment.js'
 import { isPreviewImage, loadCardAttachment, MAX_CARD_ATTACHMENTS } from '../attachments.js'
 import { checklistProgress, dueDateStatus, formatDueDate, labelDisplayName, labelsInOrder, MAX_LABEL_NAME_CHARS, shortLinkText } from '../domain.js'
+import { MAX_COMMENT_CHARS } from '../comments.js'
 import { cardPullUrls } from '../operations.js'
 import { parsePullRequestUrl } from '../prMatching.js'
 
@@ -67,10 +68,17 @@ export function InlineCardText({
   onFocus,
   onCommit,
   onCancel,
+  onDirtyChange,
 }) {
   const editorRef = useRef(null)
   const dirtyRef = useRef(false)
   const savedText = value || ''
+
+  const setDirty = dirty => {
+    if (dirtyRef.current === dirty) return
+    dirtyRef.current = dirty
+    onDirtyChange?.(dirty)
+  }
 
   const renderText = useCallback(text => {
     const editor = editorRef.current
@@ -102,21 +110,31 @@ export function InlineCardText({
     const text = event.currentTarget.innerText.replace(/\r\n?/g, '\n')
     if (dirtyRef.current && text !== savedText) {
       const acceptedText = onCommit(text)
+      // A refused text stays in the editor, still unsaved (dirty) on purpose.
       if (acceptedText === false) return
       renderText(acceptedText ?? text)
     } else {
       renderText(savedText)
     }
-    dirtyRef.current = false
+    setDirty(false)
   }
 
-  const cancelOnEscape = event => {
-    if (event.key !== 'Escape' || event.isComposing || event.nativeEvent.isComposing) return
-    event.preventDefault()
-    event.stopPropagation()
-    dirtyRef.current = false
-    renderText(savedText)
-    onCancel?.()
+  const handleKeys = event => {
+    if (event.isComposing || event.nativeEvent.isComposing) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      setDirty(false)
+      renderText(savedText)
+      onCancel?.()
+      return
+    }
+    // Enter saves and leaves the field (the blur commits); Shift+Enter makes a
+    // new line; Cmd/Ctrl+Enter saves too.
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      event.currentTarget.blur()
+    }
   }
 
   const openLink = event => {
@@ -140,12 +158,12 @@ export function InlineCardText({
       data-modal-inline-editor
       spellCheck
       onInput={event => {
-        dirtyRef.current = true
+        setDirty(true)
         event.currentTarget.dataset.empty = event.currentTarget.innerText ? 'false' : 'true'
       }}
       onFocus={onFocus}
       onBlur={commitOnBlur}
-      onKeyDown={cancelOnEscape}
+      onKeyDown={handleKeys}
       onClick={openLink}
     />
   )
@@ -164,16 +182,32 @@ export function DelayedSpinner({ label = 'Loading' }) {
   return visible ? <span className="kb-mini-spinner" role="status" aria-label={label} /> : null
 }
 
-export function SavedIndicator({ tick }) {
-  const [visible, setVisible] = useState(false)
+// One control for every save on the open card, left of the close button.
+// While an editor holds unsaved text (`state` 'dirty') it is a Save button —
+// clicking it moves focus off the editor, and that blur commits, exactly like
+// Enter or clicking anywhere else. While a commit is in flight ('saving') it
+// says so, and each landed save (`tick`) flashes ✓ Saved and fades away.
+export function SaveControl({ state, tick }) {
+  const [flash, setFlash] = useState(false)
   useEffect(() => {
     if (!tick) return undefined
-    setVisible(true)
-    const timer = setTimeout(() => setVisible(false), 1800)
+    setFlash(true)
+    const timer = setTimeout(() => setFlash(false), 1800)
     return () => clearTimeout(timer)
   }, [tick])
-  return <span className={`kb-saved${visible ? ' is-visible' : ''}`} role="status" aria-live="polite">
-    {visible && <><Check aria-hidden="true" /> Saved</>}
+  if (state === 'dirty') {
+    // The press itself blurs the focused editor, which commits; activating by
+    // keyboard blurs it here so the button works without a pointer.
+    return <button type="button" className="kb-btn kb-btn-primary kb-save-btn"
+      onClick={() => document.activeElement?.closest?.('[data-modal-inline-editor]')?.blur()}>
+      Save
+    </button>
+  }
+  if (state === 'saving') {
+    return <span className="kb-saved is-visible kb-saving" role="status" aria-live="polite">Saving…</span>
+  }
+  return <span className={`kb-saved${flash ? ' is-visible' : ''}`} role="status" aria-live="polite">
+    {flash && <><Check aria-hidden="true" /> Saved</>}
   </span>
 }
 
@@ -455,7 +489,7 @@ export function DueChip({ due, canWrite, onChange }) {
 // edit started from the preview would save a truncated text.
 // `maxLength` (shared boards only) refuses a longer text before it is sent;
 // the editor keeps the text and says why, so nothing vanishes unsaved.
-export function DescriptionSection({ cardId, text, canWrite, editable, loading, maxLength, conflict, error, onEditStart, onCommit, onKeepMine, onUseTheirs }) {
+export function DescriptionSection({ cardId, text, canWrite, editable, loading, maxLength, conflict, error, onEditStart, onCommit, onKeepMine, onUseTheirs, onDirtyChange }) {
   const [expanded, setExpanded] = useState(false)
   const [overflows, setOverflows] = useState(false)
   const [refusedLength, setRefusedLength] = useState(0)
@@ -494,6 +528,7 @@ export function DescriptionSection({ cardId, text, canWrite, editable, loading, 
         onFocus={onEditStart}
         onCommit={commit}
         onCancel={() => setRefusedLength(0)}
+        onDirtyChange={onDirtyChange}
       /> : <div className={`kb-notes-display${text ? '' : ' kb-notes-empty'}${clamp}`}>
         {text ? <LinkifiedText text={text} /> : 'Add a description…'}
       </div>}
@@ -801,6 +836,86 @@ export function AttachmentsSection({ boardId, share, attachments, canWrite, isDr
     </div>}
     {errorLine}
   </CardSection>
+}
+
+// ---- comments ----
+
+// Comments fold to one line above Activity, exactly like Activity. Open, they
+// show a bounded window — about four short comments tall — that scrolls
+// without a visible scrollbar, newest kept in view, with the composer below.
+// Enter posts, Shift+Enter makes a new line.
+export function CardComments({ card, comments, status, canWrite, posting, postError, actorName, avatarFor, isOwn, onPost }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState('')
+  const windowRef = useRef(null)
+  const inputRef = useRef(null)
+  useEffect(() => { setOpen(false); setDraft('') }, [card.id])
+  const loading = status === 'loading'
+  const count = comments.length || (Number.isInteger(card.commentsCount) && card.commentsCount > 0 ? card.commentsCount : 0)
+  const latest = comments[comments.length - 1]
+  const summary = latest
+    ? `Last comment ${lowerFirst(formatActivityTime(latest.at))} by ${actorName(latest)}`
+    : loading ? '' : 'No comments yet'
+  useLayoutEffect(() => {
+    const scroller = windowRef.current
+    if (open && scroller) scroller.scrollTop = scroller.scrollHeight
+  }, [open, comments.length])
+  const resize = () => {
+    const input = inputRef.current
+    if (!input) return
+    input.style.height = 'auto'
+    input.style.height = `${Math.min(input.scrollHeight, 160)}px`
+  }
+  const post = async () => {
+    const text = draft.trim()
+    if (!text || posting) return
+    const saved = await onPost(text)
+    if (saved === false) return
+    setDraft('')
+    requestAnimationFrame(() => { resize(); inputRef.current?.focus() })
+  }
+  const meta = <>
+    {count > 0 && <span className="kb-section-count">{count}</span>}
+    {loading && <DelayedSpinner label="Loading comments" />}
+  </>
+  return <FoldingSection title="Comments" meta={meta} summary={summary} open={open} onToggle={() => setOpen(value => !value)} className="kb-card-comments">
+    {status === 'unsupported' && <p className="kb-activity-note">Comments appear once this board’s host updates Kanban.</p>}
+    {status === 'error' && <p className="kb-activity-note">Comments couldn’t be loaded right now.</p>}
+    {comments.length > 0 && <div className="kb-comments-window" ref={windowRef} tabIndex={0} aria-label="Comments, oldest first">
+      {comments.map(comment => <div key={comment.id} className={`kb-comment${isOwn(comment) ? ' is-own' : ''}`}>
+        {avatarFor(comment)}
+        <div className="kb-comment-body">
+          <div className="kb-comment-head">
+            <strong>{actorName(comment)}</strong>
+            <time dateTime={comment.at}>{formatActivityTime(comment.at)}</time>
+          </div>
+          <div className="kb-comment-bubble"><LinkifiedText text={comment.text} /></div>
+        </div>
+      </div>)}
+    </div>}
+    {canWrite && status !== 'unsupported' && <div className="kb-comment-composer">
+      <textarea
+        ref={inputRef}
+        className="kb-comment-input"
+        rows={1}
+        value={draft}
+        maxLength={MAX_COMMENT_CHARS}
+        placeholder="Write a comment…"
+        aria-label="Write a comment"
+        disabled={posting}
+        onChange={event => { setDraft(event.target.value); resize() }}
+        onKeyDown={event => {
+          if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.nativeEvent.isComposing) return
+          event.preventDefault()
+          post()
+        }}
+      />
+      <button type="button" className="kb-btn kb-btn-primary kb-comment-send" disabled={posting || !draft.trim()} onClick={post}>
+        {posting ? 'Posting…' : 'Comment'}
+      </button>
+    </div>}
+    {postError && <p className="kb-attachment-error" role="alert">{postError}</p>}
+  </FoldingSection>
 }
 
 // ---- activity ----

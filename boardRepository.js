@@ -1,8 +1,9 @@
 // Board authority belongs here, not to the UI or a caller's guessed file.
 // The storage adapter differs between browser and CLI; board semantics do not.
 import { boardPath, normalizeBoard, casMutate, uid } from './storage.js'
-import { deleteSharedAsset, pullShared, pushSharedOp, readSharedCard, writeSharedNotes, olderHostRefused } from './sync.js'
+import { deleteSharedAsset, pullShared, pushSharedOp, readSharedCard, writeSharedNotes, postSharedComment, olderHostRefused } from './sync.js'
 import { MAX_NOTES_CHARS, activityPath, cardSnapshot, createActivityEntries, describeCardChange, mergeActivity, operationCardId } from './activity.js'
+import { MAX_COMMENT_CHARS, MAX_COMMENTS_PER_CARD, commentsPath, mergeComments } from './comments.js'
 import { PUBLICATION, publicationPending } from './publication.js'
 import { MAX_CARD_ATTACHMENTS, attachmentPrefix } from './attachments.js'
 import { applyBoardOp, completeCardNotes } from './operations.js'
@@ -347,8 +348,11 @@ export function createBoardRepository({ storage, request = globalThis.fetch, via
   // says so) and the edit stands. Cards the edit removed (a deleted card, or
   // every card of a deleted list) take their history with them.
   async function recordPrivateActivity(boardId, cardId, entries, removed) {
-    await Promise.all(removed.filter(validId).map(id =>
-      Promise.resolve(storage.remove?.(activityPath(boardId, id))).catch(() => {})))
+    // Cards the edit removed take their history and their comments with them.
+    await Promise.all(removed.filter(validId).flatMap(id => [
+      Promise.resolve(storage.remove?.(activityPath(boardId, id))).catch(() => {}),
+      Promise.resolve(storage.remove?.(commentsPath(boardId, id))).catch(() => {}),
+    ]))
     if (!cardId || !entries.length) return { cardId: cardId || null, entries: [], status: 'none' }
     try {
       return { cardId, entries: await appendPrivateActivity(boardId, cardId, entries), status: 'saved' }
@@ -380,16 +384,20 @@ export function createBoardRepository({ storage, request = globalThis.fetch, via
     if (!validId(cardId)) throw boardError('Card id is invalid.', 'invalid-operation')
     const entry = await authority(boardId)
     if (!entry) {
-      const { value } = await storage.getWithVersion(activityPath(boardId, cardId))
-      return { status: 'ok', notes: null, notesVersion: null, activity: mergeActivity(value?.entries, []) }
+      const [{ value }, { value: saved }] = await Promise.all([
+        storage.getWithVersion(activityPath(boardId, cardId)),
+        storage.getWithVersion(commentsPath(boardId, cardId)),
+      ])
+      return { status: 'ok', notes: null, notesVersion: null,
+        activity: mergeActivity(value?.entries, []), comments: mergeComments(saved?.comments, []) }
     }
     try {
       const card = await readSharedCard(entry, cardId, request)
       return { status: 'ok', notes: typeof card.notes === 'string' ? card.notes : null,
         notesVersion: Number.isInteger(card.notes_version) ? card.notes_version : 0,
-        activity: mergeActivity(card.activity, []) }
+        activity: mergeActivity(card.activity, []), comments: mergeComments(card.comments, []) }
     } catch (error) {
-      if (olderHostRefused(error)) return { status: 'unsupported', notes: null, notesVersion: null, activity: [] }
+      if (olderHostRefused(error)) return { status: 'unsupported', notes: null, notesVersion: null, activity: [], comments: [] }
       throw error
     }
   }
@@ -416,5 +424,69 @@ export function createBoardRepository({ storage, request = globalThis.fetch, via
     const activity = sharedActivity(cardId, result.status === 'unchanged' ? null : { entries, activity: result.activity })
     return { status: 'saved', card: result.card, notesVersion: result.notes_version, version: result.version, activity }
   }
-  return { list, read, mutate, readCard, saveNotes }
+  // One comment, appended like an edit of the card's details. On a shared
+  // board the host stamps the author and time, bumps the card's
+  // `commentsCount`, and records the 'commented' activity with the comment in
+  // one transaction; `{status: 'unsupported'}` means the board's host runs a
+  // Kanban without comments. A private board's comments live in app storage
+  // beside its activity.
+  async function addComment(boardId, cardId, text) {
+    if (!validId(cardId)) throw boardError('Card id is invalid.', 'invalid-operation')
+    const body = String(text ?? '').trim()
+    if (!body) throw boardError('A comment must have text.', 'invalid-comment')
+    if (body.length > MAX_COMMENT_CHARS) {
+      throw boardError(`A comment can be at most ${MAX_COMMENT_CHARS.toLocaleString()} characters.`, 'comment-too-long')
+    }
+    const entry = await authority(boardId)
+    const comment = { id: uid(), text: body }
+    if (entry) {
+      if (entry.role !== 'editor') throw boardError('This shared board is read-only.', 'read-only')
+      let result
+      try {
+        result = await postSharedComment(entry, cardId, comment, request)
+      } catch (error) {
+        if (olderHostRefused(error)) return { status: 'unsupported' }
+        throw finalHostRefusal(error)
+      }
+      return { status: 'saved', comments: mergeComments(result.comments, []),
+        activity: Array.isArray(result.activity) ? mergeActivity(result.activity, []) : null,
+        card: result.card, version: result.version }
+    }
+    const { value: doc } = await storage.getWithVersion(boardPath(boardId))
+    if (!doc?.cards || !Object.hasOwn(doc.cards, cardId)) throw boardError('Card no longer exists.', 'missing-card')
+    const stamped = { ...comment, at: new Date().toISOString(), ...(via === 'agent' ? { via: 'agent' } : {}) }
+    const comments = await appendPrivateComment(boardId, cardId, stamped)
+    const entries = createActivityEntries([{ type: 'commented', text: body }], { via, makeId: uid })
+    let activity = null
+    let activityStatus = 'saved'
+    try {
+      activity = await appendPrivateActivity(boardId, cardId, entries)
+    } catch {
+      activityStatus = 'failed'
+    }
+    return { status: 'saved', comments, activity, activityStatus }
+  }
+
+  async function appendPrivateComment(boardId, cardId, comment) {
+    const path = commentsPath(boardId, cardId)
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const { value, version } = await storage.getWithVersion(path)
+      const existing = mergeComments(value?.comments, [])
+      // Refuse at the cap (the host applies the same rule) rather than letting
+      // the merge silently drop the oldest comment.
+      if (existing.length >= MAX_COMMENTS_PER_CARD && !existing.some(item => item.id === comment.id)) {
+        throw boardError(`A card can hold up to ${MAX_COMMENTS_PER_CARD} comments.`, 'comments-full')
+      }
+      const merged = mergeComments(existing, [comment])
+      try {
+        await storage.durableWrite(path, { v: 1, comments: merged }, version ? { ifMatch: version } : { ifNoneMatch: true })
+        return merged
+      } catch (error) {
+        if (error?.code !== 'conflict') throw error
+      }
+    }
+    throw boardError('Could not save the comment after repeated conflicts.', 'comment-conflict')
+  }
+
+  return { list, read, mutate, readCard, saveNotes, addComment }
 }

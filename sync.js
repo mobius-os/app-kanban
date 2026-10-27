@@ -502,6 +502,16 @@ export async function writeSharedNotes(entry, cardId, notes, expectedVersion, re
   }))
 }
 
+// `{status: 'ok', comment, comments, version, card, activity}`. The host stamps
+// the author and time, bumps the card's `commentsCount` on the board, and
+// records the 'commented' activity in the same transaction.
+export async function postSharedComment(entry, cardId, comment, request = fetch) {
+  independent(entry)
+  return _json(await request(`${cardUrl(entry, cardId)}/comments`, {
+    method: 'POST', headers: _auth, body: JSON.stringify(comment),
+  }))
+}
+
 // A host running an older Kanban answers a route or operation it lacks this way.
 export function olderHostRefused(error) {
   return ['invalid-operation', 'route-missing'].includes(error?.code)

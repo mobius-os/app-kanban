@@ -32,6 +32,7 @@
   "source_files": [
     "boardRepository.js",
     "activity.js",
+    "comments.js",
     "attachments.js",
     "domain.js",
     "assignment.js",

@@ -27,7 +27,7 @@ export const MAX_NOTES_CHARS = 16000
 // Keep in step with ACTIVITY_TYPES in collaboration/service.py: the host
 // rejects types it does not know.
 export const ACTIVITY_TYPES = [
-  'created', 'completed', 'renamed', 'notes', 'moved', 'label', 'due', 'assigned',
+  'created', 'completed', 'renamed', 'notes', 'moved', 'label', 'due', 'assigned', 'commented',
   'checklist-added', 'checklist-removed', 'checklist-checked', 'checklist-unchecked', 'checklist-edited',
   'attachment-added', 'attachment-removed', 'pr-added', 'pr-removed', 'pr-changed',
 ]
@@ -168,6 +168,7 @@ export function describeActivity(entry) {
     case 'assigned':
       if (!entry.from) return entry.to ? `assigned this card to ${entry.to}` : 'changed the assignee'
       return entry.to ? `reassigned this card from ${entry.from} to ${entry.to}` : `removed ${entry.from} from this card`
+    case 'commented': return entry.text ? `commented: ${quote(entry.text)}` : 'commented'
     case 'checklist-added': return `added ${quote(entry.text)} to the checklist`
     case 'checklist-removed': return `removed ${quote(entry.text)} from the checklist`
     case 'checklist-checked': return `checked ${quote(entry.text)}`

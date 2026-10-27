@@ -1504,6 +1504,23 @@ export const CSS = `
   .kb-fold-chevron { width: 15px; height: 15px; flex: 0 0 auto; color: var(--muted); transform: rotate(-90deg); transition: transform 0.2s ease; }
   .kb-fold-toggle[aria-expanded="true"] .kb-fold-chevron { transform: none; }
   .kb-card-activity .kb-activity-list { max-height: 460px; margin-top: 8px; overflow-y: auto; overscroll-behavior: contain; }
+  /* Comments: a bounded window about four short comments tall; it scrolls —
+     with no visible scrollbar, like everything here — newest kept in view. */
+  .kb-comments-window { max-height: 272px; margin-top: 8px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; }
+  .kb-comment { display: flex; align-items: flex-start; gap: 10px; }
+  .kb-comment-avatar { margin-top: 2px; }
+  .kb-comment-body { flex: 1 1 auto; min-width: 0; }
+  .kb-comment-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+  .kb-comment-head strong { font-size: 13.5px; font-weight: 650; }
+  .kb-comment-head time { color: var(--muted); font-size: 12px; }
+  .kb-comment-bubble { padding: 8px 12px; border-radius: 4px 14px 14px 14px; background: var(--surface-2); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .kb-comment.is-own .kb-comment-bubble { background: color-mix(in srgb, var(--accent) 13%, var(--surface-2)); }
+  .kb-comment-composer { display: flex; align-items: flex-end; gap: 8px; margin-top: 10px; }
+  .kb-comment-input { flex: 1 1 auto; min-width: 0; min-height: 40px; max-height: 160px; padding: 9px 12px; resize: none; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; line-height: 1.45; }
+  .kb-comment-send { min-height: 40px; }
+  /* The toolbar's save control: the button appears only with unsaved text. */
+  .kb-save-btn { min-height: 34px; padding-inline: 14px; }
+  .kb-saved.kb-saving { opacity: 1; }
   .kb-activity-item.is-change .kb-activity-dot { background: var(--accent); }
   .kb-activity-item.is-assignment .kb-activity-dot { background: var(--kb-success); }
   .kb-activity-copy strong { font-weight: 650; }

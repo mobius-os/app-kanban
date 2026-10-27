@@ -31,8 +31,8 @@ import {
 import { useModalFocus } from './modalFocus.js'
 import { appVisible, onAppVisibilityChange } from '../visibility.js'
 import {
-  AttachmentImage, AttachmentsSection, CardActivity, CardTileAttachment, ChecklistSection, DescriptionSection, DueChip, dueTone,
-  InlineCardText, LabelChip, LinkifiedText, MenuButton, pressedOutside, PullRequestSection, SavedIndicator, StatusPill,
+  AttachmentImage, AttachmentsSection, CardActivity, CardComments, CardTileAttachment, ChecklistSection, DescriptionSection, DueChip, dueTone,
+  InlineCardText, LabelChip, LinkifiedText, MenuButton, pressedOutside, PullRequestSection, SaveControl, StatusPill,
 } from './CardParts.jsx'
 import {
   assigneeAvatar,
@@ -478,7 +478,7 @@ function BoardViewSwitch({ view, counts, onChange }) {
   )
 }
 
-function CardTitleEditor({ card, canWrite, onCommit, onCancel }) {
+function CardTitleEditor({ card, canWrite, onCommit, onCancel, onDirtyChange }) {
   const commitTitle = value => {
     const title = value.trim()
     // Blank existing titles are rejected; untitled drafts remain unpersisted.
@@ -501,6 +501,7 @@ function CardTitleEditor({ card, canWrite, onCommit, onCancel }) {
           onCancel={() => {
             if (!card.title) onCancel?.()
           }}
+          onDirtyChange={onDirtyChange}
         />
       ) : (
         <div className="kb-title-display">{card.title}</div>
@@ -754,6 +755,12 @@ export default memo(function Board({
   const cardDetailsRef = useRef(null)
   const detailsCacheRef = useRef(new Map())
   const [savedTick, setSavedTick] = useState(0)
+  // The toolbar's save control: 'dirty' while the title or description editor
+  // holds unsaved text, 'saving' from commit until the save lands (savedTick)
+  // or fails, else 'idle' (each landed save still flashes ✓ Saved).
+  const [cardSaveState, setCardSaveState] = useState('idle')
+  const [commentPosting, setCommentPosting] = useState(false)
+  const [commentError, setCommentError] = useState('')
   // Personal fold choices on this board. Done starts folded until opened.
   const [listFolds, setListFolds] = useState(() => ({ folded: new Set(), opened: new Set() }))
   const [columnDrag, setColumnDrag] = useState(null) // { columnId, dx, overIndex }
@@ -823,7 +830,18 @@ export default memo(function Board({
   useEffect(() => {
     setNotesConflict(null)
     setNotesError('')
+    setCardSaveState('idle')
+    setCommentPosting(false)
+    setCommentError('')
   }, [boardId, openCardId])
+
+  const noteCardEditing = dirty => setCardSaveState(state => (dirty ? 'dirty' : state === 'dirty' ? 'idle' : state))
+
+  // A landed save (any card edit bumps savedTick), a refused description
+  // (notesError/notesConflict), or a queue/offline note settles 'saving'.
+  useEffect(() => {
+    setCardSaveState(state => (state === 'saving' ? 'idle' : state))
+  }, [savedTick, notesError, notesConflict, syncNote])
 
   // The newest description edit for a card still waiting in the queue.
   const queuedNotesFor = cardId => pendingEntriesRef.current.findLast(({ op }) => op?.type === 'update-card'
@@ -835,15 +853,17 @@ export default memo(function Board({
   // keeps showing the owner's text and the newest saved text becomes "theirs"
   // for that choice.
   const openCardSaved = Boolean(openCardId && board?.cards?.[openCardId])
+  // `commentsCount` is in the key so another member's comment (which bumps it
+  // on the board card) re-reads the open card's details, like the checklist.
   const openCardNotesKey = openCardSaved
-    ? `${board.cards[openCardId].notes}\u0000${board.cards[openCardId].notesLength ?? ''}\u0000${queuedNotesFor(openCardId) ?? ''}`
+    ? `${board.cards[openCardId].notes}\u0000${board.cards[openCardId].notesLength ?? ''}\u0000${queuedNotesFor(openCardId) ?? ''}\u0000${board.cards[openCardId].commentsCount ?? ''}`
     : ''
   useEffect(() => {
     if (!openCardSaved) { showDetails(null); return undefined }
     let alive = true
     const cardId = openCardId
     const cached = detailsCacheRef.current.get(cardId)
-    if (cardDetailsRef.current?.cardId !== cardId) showDetails(cached || { cardId, status: 'loading', notes: null, notesVersion: null, activity: [] })
+    if (cardDetailsRef.current?.cardId !== cardId) showDetails(cached || { cardId, status: 'loading', notes: null, notesVersion: null, activity: [], comments: [] })
     createBoardRepository({ storage: window.mobius.storage }).readCard(boardId, cardId)
       .then(details => {
         if (!alive) return
@@ -857,7 +877,7 @@ export default memo(function Board({
       })
       .catch(() => {
         if (alive && cardDetailsRef.current?.cardId === cardId && cardDetailsRef.current.status === 'loading') {
-          showDetails({ cardId, status: 'error', notes: null, notesVersion: null, activity: [] })
+          showDetails({ cardId, status: 'error', notes: null, notesVersion: null, activity: [], comments: [] })
         }
       })
     return () => { alive = false }
@@ -1644,6 +1664,47 @@ export default memo(function Board({
     if (keepMine) saveCardNotes(conflict.cardId, conflict.mine, { version: conflict.notesVersion, text: conflict.theirs })
   }
 
+  // A comment goes straight to the card's record (boardRepository.addComment):
+  // the host stamps who and when and records the 'commented' activity with it.
+  // A failure keeps the text in the composer and says why.
+  const postComment = async text => {
+    const cardId = openCardId
+    if (!cardId || !boardRef.current?.cards?.[cardId]) return false
+    setCommentPosting(true)
+    setCommentError('')
+    try {
+      const result = await createBoardRepository({ storage: window.mobius.storage }).addComment(boardId, cardId, text)
+      if (result.status === 'unsupported') {
+        updateDetails(cardId, details => ({ ...details, status: 'unsupported' }))
+        return false
+      }
+      updateDetails(cardId, details => ({
+        ...details,
+        comments: result.comments,
+        ...(result.activity ? { activity: mergeActivity(details.activity, result.activity) } : {}),
+      }))
+      if (result.activityStatus === 'failed') {
+        setSyncNote('Posted, but this comment couldn’t be added to the card’s activity')
+      }
+      // The host bumped the card's comment count; show it without waiting for
+      // a poll, and mark our own comment seen so the card is not flagged to us.
+      if (result.card && boardRef.current?.cards?.[cardId]) {
+        const next = structuredClone(boardRef.current)
+        next.cards[cardId] = { ...next.cards[cardId], commentsCount: result.card.commentsCount }
+        boardRef.current = next
+        setBoard(next)
+        markSeenRef.current([cardId], next)
+      }
+      setSavedTick(tick => tick + 1)
+      return true
+    } catch (error) {
+      setCommentError(String(error?.message || 'The comment could not be posted.'))
+      return false
+    } finally {
+      setCommentPosting(false)
+    }
+  }
+
   // Every assignment change on a saved card records who made it. Taking a
   // person off a card also offers an immediate Undo.
   const assignCard = (cardId, target, { offerUndo = true } = {}) => {
@@ -2107,6 +2168,13 @@ export default memo(function Board({
   const isDraftCard = draftCard?.boardId === boardId && draftCard.card.id === openCardId
   const openCard_ = openCardId ? board.cards[openCardId] || (isDraftCard ? draftCard.card : null) : null
   // Header choices on an untitled draft ride along into its add-card.
+  // A saved card's title commit edits it; a draft's first commit creates it.
+  const commitCardTitle = title => {
+    if (!isDraftCard) return updateCard(openCard_.id, { title })
+    const saved = mutate({ type: 'add-card', columnId: draftCard.columnId, card: { ...draftCard.card, title } })
+    if (saved) { setDraftCard(null); window.mobius?.signal?.('item_created', { type: 'card' }) }
+    return saved
+  }
   const patchOpenCard = patch => isDraftCard
     ? setDraftCard(current => ({ ...current, card: { ...current.card, ...patch } }))
     : updateCard(openCard_.id, patch)
@@ -2128,6 +2196,15 @@ export default memo(function Board({
     assignmentTimeline: cardAssignmentTimeline(openCard_, assignmentLog?.observed),
     actorName: activityActor,
   }) : []
+  // A comment names its author like activity does; on a private board every
+  // comment is the owner's. Own comments get the tinted bubble.
+  const ownComment = comment => !comment.by
+    || nameForRef(assignmentRef({ label: comment.by.name, host: comment.by.host })) === 'you'
+  const commentAvatar = comment => {
+    const host = comment.by?.host || ''
+    const member = (host && collaboratorForHost(displayMembers || [], host)) || { host, name: comment.by?.name || 'You' }
+    return <MemberAvatar member={{ ...member, avatar: memberAvatars[host] || '' }} small presence={false} className="kb-comment-avatar" />
+  }
   const createdLabel = openCard_?.createdAt && !Number.isNaN(Date.parse(openCard_.createdAt))
     ? `Created ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: new Date(openCard_.createdAt).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }).format(new Date(openCard_.createdAt))}`
     : ''
@@ -2422,13 +2499,13 @@ export default memo(function Board({
                 : <StatusPill columns={board.columns} columnId={openCardColumn.id} colorFor={columnColor} canWrite={access.canWrite}
                   onMove={columnId => moveCard(openCard_.id, columnId, null)} />}
               <span className="kb-card-toolbar-spacer" />
-              <SavedIndicator tick={savedTick} />
+              <SaveControl state={cardSaveState} tick={savedTick} />
               <button type="button" className="kb-iconbtn kb-card-close" aria-label="Close card" title="Close. Your changes are already saved." onClick={closeCard}><X /></button>
             </div>
-            <CardTitleEditor card={openCard_} canWrite={access.canWrite} onCommit={title => {
-              if (!isDraftCard) return updateCard(openCard_.id, { title })
-              const saved = mutate({ type: 'add-card', columnId: draftCard.columnId, card: { ...draftCard.card, title } })
-              if (saved) { setDraftCard(null); window.mobius?.signal?.('item_created', { type: 'card' }) }
+            <CardTitleEditor card={openCard_} canWrite={access.canWrite} onDirtyChange={noteCardEditing} onCommit={title => {
+              setCardSaveState('saving')
+              const saved = commitCardTitle(title)
+              if (saved === false) setCardSaveState('idle')
               return saved
             }} onCancel={() => { if (isDraftCard) { setDraftCard(null); setOpenCardId(null) } }} />
             <div className="kb-detail-chips">
@@ -2455,7 +2532,11 @@ export default memo(function Board({
               conflict={notesConflict?.cardId === openCard_.id}
               error={notesError}
               onEditStart={() => beginNotesEdit(openCard_.id)}
-              onCommit={notes => saveCardNotes(openCard_.id, notes, notesEditBase(openCard_.id))}
+              onDirtyChange={noteCardEditing}
+              onCommit={notes => {
+                setCardSaveState('saving')
+                return saveCardNotes(openCard_.id, notes, notesEditBase(openCard_.id))
+              }}
               onKeepMine={() => resolveNotesConflict(true)}
               onUseTheirs={() => resolveNotesConflict(false)}
             />
@@ -2498,6 +2579,18 @@ export default memo(function Board({
               onRefresh={() => setPullStatusRefresh(value => value + 1)} />
 
             {!isDraftCard && <>
+            <CardComments
+              card={openCard_}
+              comments={openDetails?.comments || []}
+              status={openDetails?.status || 'loading'}
+              canWrite={access.canWrite}
+              posting={commentPosting}
+              postError={commentError}
+              actorName={activityActor}
+              avatarFor={commentAvatar}
+              isOwn={ownComment}
+              onPost={postComment}
+            />
             <CardActivity
               card={openCard_}
               timeline={openTimeline}

@@ -340,7 +340,7 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(partsSource, /document\.activeElement === editorRef\.current[\s\S]*if \(!isFocused && !dirtyRef\.current\) renderText\(savedText\)/)
   assert.match(partsSource, /label="Card description"[\s\S]*links/)
   assert.match(boardSource, /className="kb-card-open"[^\n]*aria-label=/)
-  assert.match(partsSource, /event\.key !== 'Escape'[\s\S]*onCancel\?\.\(\)/)
+  assert.match(partsSource, /event\.key === 'Escape'[\s\S]*onCancel\?\.\(\)/)
   assert.match(themeSource, /\.kb-notes-display \{[^}]*flex: 0 0 auto;[^}]*max-height: none/)
   assert.match(partsSource, /data-modal-inline-editor/)
   assert.match(boardSource, /setDraftCard\(\{ boardId, columnId: colId, card \}\)/)
