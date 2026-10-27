@@ -116,6 +116,16 @@ export function cardClipboardText(title, notes) {
   return `---\n\n**Kanban card**\n\n---\n\n**Title:** ${shownTitle}\n**Description:**${beforeNotes}${shownNotes}\n\n---`
 }
 
+// Whether the card's text reached the clipboard. A host refuses either by
+// returning false or by rejecting; both mean "not copied", never a thrown error.
+export async function copyCardToClipboard(clipboard, title, notes) {
+  try {
+    return Boolean(await clipboard?.writeText(cardClipboardText(title, notes)))
+  } catch {
+    return false
+  }
+}
+
 // A short, readable name for a link: the site plus the last part of the
 // address ("abseil.io/…/ch19.html"), or "repo#123" for GitHub pull requests
 // and issues. The full address stays in the link and its tooltip.

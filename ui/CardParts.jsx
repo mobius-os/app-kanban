@@ -8,7 +8,7 @@ import { Calendar, Check, ChevronDown, ChevronLeft, Copy, DotsHorizontal, Paperc
 import { useModalFocus } from './modalFocus.js'
 import { describeAssignmentEvent, restorableAssignment } from '../assignment.js'
 import { isPreviewImage, loadCardAttachment, MAX_CARD_ATTACHMENTS } from '../attachments.js'
-import { cardClipboardText, checklistProgress, dueDateStatus, formatDueDate, labelDisplayName, labelsInOrder, MAX_LABEL_NAME_CHARS, shortLinkText } from '../domain.js'
+import { checklistProgress, copyCardToClipboard, dueDateStatus, formatDueDate, labelDisplayName, labelsInOrder, MAX_LABEL_NAME_CHARS, shortLinkText } from '../domain.js'
 import { cardPullUrls } from '../operations.js'
 import { parsePullRequestUrl } from '../prMatching.js'
 
@@ -464,7 +464,7 @@ export function CopyCardButton({ title, notes, ready }) {
     return () => clearTimeout(timer)
   }, [result])
   const copy = async () => {
-    const copied = await window.mobius?.clipboard?.writeText(cardClipboardText(title, notes))
+    const copied = await copyCardToClipboard(window.mobius?.clipboard, title, notes)
     setResult(copied ? 'copied' : 'failed')
   }
   const tone = result ? ` is-${result}` : ''
