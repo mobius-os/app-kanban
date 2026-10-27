@@ -1505,8 +1505,11 @@ export const CSS = `
   .kb-fold-toggle[aria-expanded="true"] .kb-fold-chevron { transform: none; }
   .kb-card-activity .kb-activity-list { max-height: 460px; margin-top: 8px; overflow-y: auto; overscroll-behavior: contain; }
   /* Comments: a bounded window about four short comments tall; it scrolls —
-     with no visible scrollbar, like everything here — newest kept in view. */
-  .kb-comments-window { max-height: 272px; margin-top: 8px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; }
+     with no visible scrollbar, like everything here — newest kept in view.
+     The edge fades dissolve a half-scrolled comment instead of slicing its
+     avatar at the boundary; the padding keeps fully scrolled rows clear of
+     the fade so the first and last comments read at full strength. */
+  .kb-comments-window { max-height: 272px; margin-top: 8px; padding: 14px 0 10px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 10px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 10px), transparent 100%); }
   .kb-comment { display: flex; align-items: flex-start; gap: 10px; }
   .kb-comment-avatar { margin-top: 2px; }
   .kb-comment-body { flex: 1 1 auto; min-width: 0; }
