@@ -1,12 +1,12 @@
 // Card comments: stored beside the board like a long description, recorded in
-// the card's activity, shown folded above Activity with a bounded window.
+// the card's activity, shown in the card's own Comments tab.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createBoardRepository } from '../boardRepository.js'
 import { configureSync, shareBoard } from '../sync.js'
 import { MAX_COMMENT_CHARS, MAX_COMMENTS_PER_CARD, commentsPath, mentionParts, mentionQuery, mergeComments, newCommentId, normalizeComment } from '../comments.js'
-import { describeActivity } from '../activity.js'
+import { describeActivity, formatActivityDay, formatActivityTime, groupByDay } from '../activity.js'
 
 const comment = (id, at, text = 'Hello', extra = {}) => ({ id, at, text, ...extra })
 
@@ -252,18 +252,25 @@ test('a host without comments reads as unsupported, never as a failed save', asy
   assert.equal((await repo.addComment('b', 'c1', 'Hi')).status, 'unsupported')
 })
 
-// ---- the card sheet: comments fold above Activity; one save control ----
+// ---- the card sheet: Home | Comments | Activity tabs; one save control ----
 
-test('comments fold above Activity with a bounded window, Enter posts, Shift+Enter breaks lines', async () => {
+test('a saved card has Home, Comments and Activity tabs; Comments fill the tab, Enter posts, Shift+Enter breaks lines', async () => {
   const board = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
   const parts = await readFile(new URL('../ui/CardParts.jsx', import.meta.url), 'utf8')
   const theme = await readFile(new URL('../theme.js', import.meta.url), 'utf8')
-  assert.ok(board.indexOf('<CardComments') < board.indexOf('<CardActivity'), 'comments sit directly above Activity')
-  const section = parts.slice(parts.indexOf('export function CardComments'), parts.indexOf('// ---- activity ----'))
-  assert.match(section, /<FoldingSection title="Comments"/, 'folded to one line like Activity')
-  assert.match(section, /Last comment \$\{lowerFirst\(formatActivityTime\(latest\.at\)\)\} by /)
+  assert.match(parts, /const CARD_TABS = \[\['home', 'Home'\], \['comments', 'Comments'\], \['activity', 'Activity'\]\]/)
+  assert.match(parts, /role="tablist"[\s\S]{0,400}role="tab"[\s\S]{0,200}aria-selected=\{tab === id\}/, 'a real tab list')
+  assert.match(board, /\{!isDraftCard && <CardTabs tab=\{cardTab\}/, 'a card still being created has no tabs')
+  assert.match(board, /setCardTab\('home'\) \}, \[openCardId\]\)/, 'every card opens on Home, even from a notification')
+  assert.match(board, /hidden: cardTab !== id/, 'hidden panels stay mounted, so a draft comment survives a tab switch')
+  assert.match(board, /active=\{cardTab === 'comments'\}/, 'the newest comment is scrolled into view when the tab opens')
+  const section = parts.slice(parts.indexOf('export function CardComments'), parts.indexOf('function CommentRow'))
+  assert.doesNotMatch(section, /FoldingSection/, 'comments no longer fold')
+  assert.match(section, /if \(active && scroller\) scroller\.scrollTop = scroller\.scrollHeight/)
   assert.match(section, /event\.key !== 'Enter' \|\| event\.shiftKey/, 'Enter posts; Shift+Enter makes a new line')
-  assert.match(theme, /\.kb-comments-window \{ max-height: \d+px;[^}]*overflow-y: auto/, 'the window is bounded and scrolls')
+  assert.match(theme, /\.kb-card-sheet\.is-tabbed \{ height: [^;]+; overflow: hidden;/, 'one fixed height, so switching tabs never resizes the card')
+  assert.match(theme, /\.kb-comments-window \{ flex: 1 1 auto;[^}]*overflow-y: auto/, 'the conversation fills the tab and scrolls')
+  assert.match(theme, /\.kb-card-sheet\.is-tabbed > \.kb-card-panel\[hidden\] \{ display: none; \}/, 'a flex panel still hides')
   assert.doesNotMatch(theme, /\.kb-comments-window[^\n]*scrollbar/, 'the app-wide rule already hides the scrollbar')
   // The presence stack's overlap margin must not pull comment or picker
   // avatars outside their (clipping) scroll containers.
@@ -271,6 +278,20 @@ test('comments fold above Activity with a bounded window, Enter posts, Shift+Ent
   assert.match(theme, /\.kb-mention-option > \.kb-member-avatar-small \{ margin-left: 0; \}/)
   // Another member's comment bumps the card's count, which re-reads the open card.
   assert.match(board, /openCardNotesKey[\s\S]{0,400}commentsCount/)
+})
+
+test('comments and activity are grouped by day, each entry showing only its time', () => {
+  const now = new Date(2026, 9, 28, 17, 0)
+  const at = (day, hour) => new Date(2026, 9, day, hour, 5).toISOString()
+  assert.equal(formatActivityDay(at(28, 9), now), 'Today')
+  assert.equal(formatActivityDay(at(27, 23), now), 'Yesterday')
+  assert.match(formatActivityDay(at(26, 9), now), /26/)
+  assert.equal(formatActivityDay('not a date', now), '')
+  assert.match(formatActivityTime(at(28, 9), now), /^Today, /, 'the full time stays available as a tooltip')
+  const items = [at(26, 9), at(26, 10), at(28, 9), at(28, 11)].map(time => ({ time }))
+  const groups = groupByDay(items, item => item.time, now)
+  assert.deepEqual(groups.map(group => [group.day.replace(/.*26.*/, 'Oct 26'), group.items.length]), [['Oct 26', 2], ['Today', 2]])
+  assert.deepEqual(groupByDay([], item => item.time, now), [], 'nothing to show is no groups')
 })
 
 test('typing @ lists board members above the composer; Enter then picks instead of posting', async () => {
@@ -282,6 +303,11 @@ test('typing @ lists board members above the composer; Enter then picks instead 
   assert.ok(section.indexOf("if (picker)") < section.indexOf("if (event.key !== 'Enter' || event.shiftKey) return"),
     'picker keys are handled before Enter posts')
   assert.match(section, /chooseMention\(candidates\[mentionIndex\]/)
+  // The card sheet's modal handles Escape in the capture phase, before React;
+  // only the inline-editor marker makes Escape close the picker, not the card.
+  assert.match(section, /className="kb-comment-field" data-modal-inline-editor=\{picker \? '' : undefined\}/)
+  const modal = await readFile(new URL('../ui/modalFocus.js', import.meta.url), 'utf8')
+  assert.match(modal, /closest\?\.\('\[data-modal-inline-editor\]'\)\) return/)
   // A deployment address is not a name: "@m" must not list someone on mobius-….
   assert.doesNotMatch(section.slice(section.indexOf('const candidates'), section.indexOf('const picker')), /member\.host/)
   assert.match(section, /CommentText text=\{comment\.text\}/, 'bubbles highlight mentions')
