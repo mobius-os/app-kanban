@@ -961,7 +961,8 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
   const [mention, setMention] = useState(null)
   const [mentionIndex, setMentionIndex] = useState(0)
   // The @ that Escape dismissed: React re-reads the caret on key-up, which
-  // would reopen the picker at once. Typing more reopens it.
+  // would reopen the picker at once, so only a real text edit (or posting)
+  // clears it — never a caret move alone.
   const [dismissedMention, setDismissedMention] = useState(null)
   const windowRef = useRef(null)
   const inputRef = useRef(null)
@@ -989,6 +990,7 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
     submissionRef.current = null
     setDraft('')
     setMention(null)
+    setDismissedMention(null)
     requestAnimationFrame(() => { resize(); inputRef.current?.focus() })
   }
   // Members whose handle or any word of whose name starts with the @ being
@@ -1087,7 +1089,7 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
           placeholder="Write a comment…"
           aria-label="Write a comment"
           disabled={posting}
-          onChange={event => { setDraft(event.target.value); trackMention(event.target); resize() }}
+          onChange={event => { setDraft(event.target.value); setDismissedMention(null); trackMention(event.target); resize() }}
           onSelect={event => trackMention(event.target)}
           onKeyDown={composerKeys}
         />

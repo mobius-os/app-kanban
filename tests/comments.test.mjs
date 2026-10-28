@@ -308,6 +308,11 @@ test('typing @ lists board members above the composer; Enter then picks instead 
   assert.match(section, /className="kb-comment-field" data-modal-inline-editor=\{picker \? '' : undefined\}/)
   const modal = await readFile(new URL('../ui/modalFocus.js', import.meta.url), 'utf8')
   assert.match(modal, /closest\?\.\('\[data-modal-inline-editor\]'\)\) return/)
+  // Escape's dismissal survives the key-up caret re-read (onSelect) but not a
+  // real edit or a posted comment, so the next @ always opens the picker again.
+  assert.match(section, /onChange=\{event => \{ setDraft\(event\.target\.value\); setDismissedMention\(null\);/)
+  assert.doesNotMatch(section, /onSelect=\{[^}]*setDismissedMention/)
+  assert.match(section.slice(section.indexOf('const post = async'), section.indexOf('const query =')), /setDismissedMention\(null\)/)
   // A deployment address is not a name: "@m" must not list someone on mobius-….
   assert.doesNotMatch(section.slice(section.indexOf('const candidates'), section.indexOf('const picker')), /member\.host/)
   assert.match(section, /CommentText text=\{comment\.text\}/, 'bubbles highlight mentions')
