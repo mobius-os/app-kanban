@@ -1520,6 +1520,41 @@ export const CSS = `
   .kb-fold-chevron { width: 15px; height: 15px; flex: 0 0 auto; color: var(--muted); transform: rotate(-90deg); transition: transform 0.2s ease; }
   .kb-fold-toggle[aria-expanded="true"] .kb-fold-chevron { transform: none; }
   .kb-card-activity .kb-activity-list { max-height: 460px; margin-top: 8px; overflow-y: auto; overscroll-behavior: contain; }
+  /* Comments: a bounded window about four short comments tall; it scrolls —
+     with no visible scrollbar, like everything here — newest kept in view.
+     The edge fades dissolve a half-scrolled comment instead of slicing its
+     avatar at the boundary, so each fade is a full avatar tall; the matching
+     padding keeps rows at the scroll ends clear of the fade, reading at full
+     strength. */
+  .kb-comments-window { max-height: 300px; margin-top: 8px; padding: 26px 0 22px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); }
+  .kb-comment { display: flex; align-items: flex-start; gap: 10px; }
+  /* Small avatars overlap in the presence stack (margin-left: -6px); in a
+     comment row that pulls them outside the scroll window, which clips them. */
+  .kb-comment > .kb-member-avatar-small { margin: 2px 0 0; }
+  .kb-comment-body { flex: 1 1 auto; min-width: 0; }
+  .kb-comment-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+  .kb-comment-head strong { font-size: 13.5px; font-weight: 650; }
+  .kb-comment-head time { color: var(--muted); font-size: 12px; }
+  .kb-comment-bubble { padding: 8px 12px; border-radius: 4px 14px 14px 14px; background: var(--surface-2); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .kb-comment.is-own .kb-comment-bubble { background: color-mix(in srgb, var(--accent) 13%, var(--surface-2)); }
+  .kb-comment-composer { display: flex; align-items: flex-end; gap: 8px; margin-top: 10px; }
+  .kb-comment-field { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
+  .kb-comment-input { flex: 1 1 auto; min-width: 0; min-height: 40px; max-height: 160px; padding: 9px 12px; resize: none; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; line-height: 1.45; }
+  .kb-comment-send { min-height: 40px; }
+  .kb-mention { color: var(--accent); font-weight: 620; }
+  /* Tall enough for the six members the picker shows at most (6 × 44px rows
+     plus padding), so the last name is never cut off behind the hidden
+     scrollbar; arrowing still scrolls the selection into view if it must. */
+  .kb-mention-menu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 30; min-width: 230px; max-width: 100%; max-height: 280px; overflow-y: auto; overscroll-behavior: contain; padding: 4px; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 32px color-mix(in srgb, var(--text) 14%, transparent); }
+  .kb-mention-option { min-height: 44px; padding: 4px 10px; display: flex; align-items: center; gap: 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+  .kb-mention-option.is-active, .kb-mention-option:hover { background: var(--surface-2); }
+  .kb-mention-option > .kb-member-avatar-small { margin-left: 0; }
+  .kb-mention-copy { min-width: 0; display: flex; flex-direction: column; }
+  .kb-mention-copy strong { overflow: hidden; font-size: 13.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .kb-mention-copy small { color: var(--muted); font-size: 12px; }
+  /* The toolbar's save control: the button appears only with unsaved text. */
+  .kb-save-btn { min-height: 34px; padding-inline: 14px; }
+  .kb-saved.kb-saving { opacity: 1; }
   .kb-activity-item.is-change .kb-activity-dot { background: var(--accent); }
   .kb-activity-item.is-assignment .kb-activity-dot { background: var(--kb-success); }
   .kb-activity-copy strong { font-weight: 650; }

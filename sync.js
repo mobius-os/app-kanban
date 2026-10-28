@@ -8,6 +8,7 @@
 // conflict re-apply the op to the returned doc and retry.
 
 import { PUBLICATION, fencePublication, publicationPending } from './publication.js'
+import { privateBoardComments } from './comments.js'
 import { normalizeBoard, boardPath, getBoard } from './storage.js'
 
 let API = null
@@ -142,9 +143,12 @@ export async function shareBoard(boardId) {
     // accidental private writes if this discovery write fails.
     await saveShareEntry(boardId, entry)
     const doc = { ...fenced.doc }; delete doc[PUBLICATION]
+    // Comments live beside a private board, not in it: they move to the host
+    // in this same request, or the shared card would open with an empty thread.
+    const comments = await privateBoardComments(store(), boardId, doc)
     const res = await _json(await fetch(API, {
       method: 'POST', headers: _auth,
-      body: JSON.stringify({ id: entry.oid, local_id: boardId, app: 'kanban', kind: 'board', label: doc.title, doc }),
+      body: JSON.stringify({ id: entry.oid, local_id: boardId, app: 'kanban', kind: 'board', label: doc.title, doc, comments }),
     }))
     if (res.id !== entry.oid || res.host !== entry.host) throw new Error('The host returned a different board authority.')
     entry = { ...entry, version: res.version }; delete entry.publishing
@@ -499,6 +503,16 @@ export async function writeSharedNotes(entry, cardId, notes, expectedVersion, re
   return _json(await request(`${cardUrl(entry, cardId)}/notes`, {
     method: 'PUT', headers: _auth, body: JSON.stringify({ notes, expected_version: expectedVersion,
       ...(activity.length ? { activity } : {}) }),
+  }))
+}
+
+// `{status: 'ok', comment, comments, version, card, activity}`. The host stamps
+// the author and time, bumps the card's `commentsCount` on the board, and
+// records the 'commented' activity in the same transaction.
+export async function postSharedComment(entry, cardId, comment, request = fetch) {
+  independent(entry)
+  return _json(await request(`${cardUrl(entry, cardId)}/comments`, {
+    method: 'POST', headers: _auth, body: JSON.stringify(comment),
   }))
 }
 

@@ -225,7 +225,7 @@ function fingerprintHash(text) {
 export function cardFingerprint(card, columnId) {
   return fingerprintHash(JSON.stringify([
     columnId || '', card?.title || '', card?.notes || '', card?.notesLength ?? null, card?.notesVersion ?? null,
-    card?.label || 'none', card?.due || '', card?.assignee || '', card?.assigneeHost || '',
+    card?.label || 'none', card?.due || '', card?.assignee || '', card?.assigneeHost || '', card?.commentsCount ?? null,
     (card?.checklist || []).map(item => [item?.id, item?.text, item?.done === true]),
     card?.pullRequestUrls || [], (card?.attachments || []).map(item => item?.id),
   ]))

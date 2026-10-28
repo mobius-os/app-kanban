@@ -202,6 +202,7 @@ test('enabling sharing publishes a CAS-fenced fresh snapshot, never the private 
     async get(path) { return structuredClone(files[path] || null) },
     async getWithVersion(path) { return {value:structuredClone(files[path] || null),version:files[path]?'v1':null} },
     async durableWrite(path,value) { files[path]=structuredClone(value) },
+    async list(prefix) { return Object.keys(files).filter(path=>path.startsWith(prefix)).map(path=>({name:path.slice(prefix.length)})) },
   }}}
   globalThis.fetch = async (url, options) => {
     if(url.endsWith('/health')) return Response.json({protocol:'kanban/1',host:'me.example'})

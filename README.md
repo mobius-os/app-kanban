@@ -19,6 +19,16 @@ A clean, mobile-first kanban board for Möbius.
   records only that the description changed, or a completion whose line it adds.
 - A copy button on the card sheet puts the card's title and full description on
   the clipboard as Markdown, ready to paste into a chat.
+- Comments on every card, folded to one line above Activity like Activity
+  itself. They are kept beside the board like a long description: on a shared
+  board the host stamps who said what and when, records a matching activity
+  entry in the same transaction, and counts comments on the board card so
+  everyone's board notices the change. The open list shows a bounded window
+  that scrolls (newest in view); Enter posts and Shift+Enter makes a new line.
+- One save control in the card sheet's toolbar: editing the title or
+  description shows a Save button beside the close button, Enter saves and
+  leaves the field (Shift+Enter makes a new line), and every landed save —
+  including autosave on clicking away — flashes ✓ Saved there and fades out.
 - Deleting a card or a list deletes its files and activity; removing a file from
   a card deletes the file. Files are added and removed one at a time, by id,
   against the card as it is when the edit lands, so two people changing a

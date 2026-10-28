@@ -380,6 +380,101 @@ class CardDetails(unittest.IsolatedAsyncioTestCase):
         await self.call(self.a, 'DELETE', f'boards/{self.oid}')
         self.assertEqual(self.a.store.list('card'), [])
 
+    # ---- comments: stamped by the host, counted on the board card ----
+
+    async def comment(self, service, cid='c1', text='Looks good', comment_id='k1', status=200, actor=OWNER):
+        return await self.call(service, 'POST', f'{self.base}/cards/{cid}/comments',
+                               {'id': comment_id, 'text': text}, status, actor=actor)
+
+    async def test_a_comment_is_stamped_by_the_host_and_counted_on_the_board(self):
+        await self.join()
+        before = (await self.call(self.b, 'GET', f'{self.base}/state'))['version']
+        saved = await self.comment(self.b, text='  Looks good  ')
+        self.assertEqual(saved['comment']['text'], 'Looks good')
+        self.assertEqual(saved['comment']['by'], {'host': 'b.example', 'name': 'B'})
+        self.assertIn('at', saved['comment'])
+        # The board card carries the count, so every member's poll sees the change.
+        self.assertEqual(saved['card']['commentsCount'], 1)
+        self.assertGreater(saved['version'], before)
+        # The matching activity commits with the comment, in one transaction.
+        self.assertEqual(saved['activity'][-1]['type'], 'commented')
+        self.assertEqual(saved['activity'][-1]['text'], 'Looks good')
+        self.assertEqual(saved['activity'][-1]['by']['host'], 'b.example')
+        details = await self.call(self.a, 'GET', f'{self.base}/cards/c1')
+        self.assertEqual([c['text'] for c in details['comments']], ['Looks good'])
+
+    async def test_a_replayed_comment_saves_once(self):
+        first = await self.comment(self.a)
+        again = await self.comment(self.a)
+        self.assertEqual(again['comment'], first['comment'])
+        self.assertEqual(len(again['comments']), 1)
+        self.assertEqual(again['card']['commentsCount'], 1)
+
+    async def test_comment_refusals_leave_the_card_unchanged(self):
+        body = await self.comment(self.a, text='   ', status=400)
+        self.assertEqual(body['code'], 'invalid-comment')
+        body = await self.comment(self.a, text='x' * 2001, status=413)
+        self.assertEqual(body['code'], 'comment-too-long')
+        body = await self.comment(self.a, cid='gone', status=404)
+        self.assertEqual(body['code'], 'card-missing')
+        await self.join(role='viewer')
+        body = await self.comment(self.b, status=403)
+        self.assertEqual(body['code'], 'read-only')
+        card = (await self.call(self.a, 'GET', f'{self.base}/state'))['doc']['cards']['c1']
+        self.assertNotIn('commentsCount', card)
+
+    async def test_a_full_card_refuses_further_comments(self):
+        with unittest.mock.patch('collaboration.service.MAX_COMMENTS_PER_CARD', 2):
+            await self.comment(self.a, comment_id='k1')
+            await self.comment(self.a, comment_id='k2')
+            body = await self.comment(self.a, comment_id='k3', status=413)
+        self.assertEqual(body['code'], 'comments-full')
+
+    async def test_sharing_a_board_with_comments_brings_them_to_the_host(self):
+        # The review's reproduction: comments written while the board was
+        # private must be there after sharing, for the owner and for members.
+        doc = board(cards=('c1', 'c2'))
+        written_privately = {
+            'c1': [{'id': 'p2', 'at': '2026-10-09T09:00:00.000Z', 'text': 'Second'},
+                   {'id': 'p1', 'at': '2026-10-09T08:00:00.000Z', 'text': ' First ', 'via': 'agent'}],
+            'gone': [{'id': 'p3', 'at': '2026-10-09T08:00:00.000Z', 'text': 'Card is not on the board'}],
+        }
+        oid = (await self.call(self.a, 'POST', 'boards', {'doc': doc, 'comments': written_privately}))['id']
+        base = f'boards/a.example/{oid}'
+        details = await self.call(self.a, 'GET', f'{base}/cards/c1')
+        self.assertEqual([(c['id'], c['text']) for c in details['comments']], [('p1', 'First'), ('p2', 'Second')])
+        # Private comments are the owner's; identities, times and the agent mark are kept.
+        self.assertEqual(details['comments'][0]['by'], {'host': 'a.example', 'name': 'A'})
+        self.assertEqual(details['comments'][0]['via'], 'agent')
+        self.assertEqual(details['comments'][1]['at'], '2026-10-09T09:00:00.000Z')
+        state = (await self.call(self.a, 'GET', f'{base}/state'))['doc']
+        self.assertEqual(state['cards']['c1']['commentsCount'], 2)
+        self.assertNotIn('commentsCount', state['cards']['c2'])
+        self.assertNotIn('gone', state['cards'])
+        # A new comment after sharing joins the published thread.
+        saved = await self.call(self.a, 'POST', f'{base}/cards/c1/comments', {'id': 'k1', 'text': 'After sharing'})
+        self.assertEqual([c['id'] for c in saved['comments']], ['p1', 'p2', 'k1'])
+        self.assertEqual(saved['card']['commentsCount'], 3)
+
+    async def test_published_comments_are_validated_before_anything_is_saved(self):
+        doc = board()
+        for comments, code in (({'c1': [{'id': 'bad id!', 'at': '2026-10-09T08:00:00Z', 'text': 'x'}]}, 'invalid-request'),
+                               ({'c1': [{'id': 'p1', 'at': 'yesterday', 'text': 'x'}]}, 'invalid-activity'),
+                               ({'c1': [{'id': 'p1', 'at': '2026-10-09T08:00:00Z', 'text': 'x' * 2001}]}, 'comment-too-long'),
+                               ({'c1': 'not a list'}, 'comments-full')):
+            body = await self.call(self.a, 'POST', 'boards', {'doc': doc, 'comments': comments}, status=400 if code != 'comment-too-long' and code != 'comments-full' else 413)
+            self.assertEqual(body['code'], code)
+        self.assertEqual(len(self.a.store.list('board')), 1, 'only the fixture board exists')
+
+    async def test_an_agent_comment_is_marked_as_the_agents(self):
+        # The owner token reaches the service through the agent helper (agent_request).
+        saved = await self.comment(self.a, actor=OWNER)
+        self.assertEqual(saved['comment']['via'], 'agent')
+        self.assertEqual(saved['activity'][-1]['via'], 'agent')
+        # The app's own frame is not an agent.
+        saved = await self.comment(self.a, comment_id='k2', actor=APP)
+        self.assertNotIn('via', saved['comment'])
+
 
 if __name__ == '__main__':
     unittest.main()

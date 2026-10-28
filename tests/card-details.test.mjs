@@ -301,7 +301,7 @@ test('the card sheet keeps a description it could not send and never clears a co
   // An unreachable host queues the edit like any other change instead of dropping it.
   assert.match(source, /if \(isRetryableBoardError\(error\)\) return await keepForLater\(\)/)
   // Only opening another card (or choosing) ends a conflict; the details loader keeps it.
-  assert.match(source, /useEffect\(\(\) => \{\s*setNotesConflict\(null\)\s*setNotesError\(''\)\s*\}, \[boardId, openCardId\]\)/)
+  assert.match(source, /useEffect\(\(\) => \{\s*setNotesConflict\(null\)\s*setNotesError\(''\)[\s\S]*?\}, \[boardId, openCardId\]\)/)
   assert.equal(source.match(/setNotesConflict\(null\)/g).length, 3)
 })
 
@@ -335,7 +335,7 @@ test('an opened picture closes on a tap anywhere outside it, and Escape closes t
 test('attachments show their first row of files and Show N more like the checklist, and a new file past the row expands the list', async () => {
   const parts = await readFile(new URL('../ui/CardParts.jsx', import.meta.url), 'utf8')
   const board = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
-  const section = parts.slice(parts.indexOf('export function AttachmentsSection('), parts.indexOf('// ---- activity ----'))
+  const section = parts.slice(parts.indexOf('export function AttachmentsSection('), parts.indexOf('// ---- comments ----'))
   assert.match(parts, /export const ATTACHMENT_PREVIEW_ITEMS = 3/, 'one row of the three-column grid')
   assert.match(section, /<CardSection title="Attachments"[^>]*meta=\{<span className="kb-section-count">\{count\}<\/span>\}/)
   assert.doesNotMatch(section, /FoldingSection/, 'attachments no longer fold; Activity still does')

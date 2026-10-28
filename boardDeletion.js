@@ -7,11 +7,12 @@
 // path the app writes.
 import { boardPath, assignmentLogPath, forgetBoardViews } from './storage.js'
 import { activityPrefix } from './activity.js'
+import { commentsPrefix } from './comments.js'
 import { attachmentPrefix } from './attachments.js'
 import { boardQueuePrefixes, forgetLegacyQueue } from './pendingOps.js'
 import { forgetCapacityAlerts } from './capacityAlerts.js'
 
-export const boardDataPrefixes = boardId => [activityPrefix(boardId), attachmentPrefix(boardId), ...boardQueuePrefixes(boardId)]
+export const boardDataPrefixes = boardId => [activityPrefix(boardId), commentsPrefix(boardId), attachmentPrefix(boardId), ...boardQueuePrefixes(boardId)]
 
 async function removePrefix(storage, prefix) {
   const items = await storage.list(prefix)
