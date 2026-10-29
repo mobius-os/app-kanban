@@ -348,6 +348,9 @@ export const CSS = `
   .kb-card-count { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .kb-card-count > svg { width: 13px; height: 13px; }
   .kb-card-count.is-complete { color: var(--kb-success); }
+  /* Unread mentions of you: purple, like everything that means "you". */
+  .kb-card-mention { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px 1px 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11.5px; font-weight: 700; line-height: 18px; font-variant-numeric: tabular-nums; }
+  .kb-card-mention > svg { width: 12px; height: 12px; }
   /* A label is a tinted chip with a dot and, when the board names it, its name. */
   .kb-card-label { min-width: 0; flex: 0 1 auto; display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 1px 6px; overflow: hidden; border-radius: 6px; background: color-mix(in srgb, var(--kb-lc) 15%, transparent); color: var(--kb-lc); font-size: 11.5px; font-weight: 600; line-height: 18px; white-space: nowrap; text-overflow: ellipsis; }
   .kb-card-label::before { content: ""; width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: currentColor; }
@@ -1571,6 +1574,8 @@ export const CSS = `
   .kb-comment-input { flex: 1 1 auto; min-width: 0; min-height: 40px; max-height: 160px; padding: 9px 12px; resize: none; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; line-height: 1.45; }
   .kb-comment-send { min-height: 40px; }
   .kb-mention { color: var(--accent); font-weight: 620; }
+  .kb-mention.is-you { padding: 0 4px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .kb-comment-bubble.is-for-you { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent); }
   /* Tall enough for the six members the picker shows at most (6 × 44px rows
      plus padding), so the last name is never cut off behind the hidden
      scrollbar; arrowing still scrolls the selection into view if it must. */

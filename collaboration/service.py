@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from urllib.parse import quote, unquote
 
+from . import mentions
 from .store import Store
 from .transport import federation_request
 
@@ -84,6 +85,8 @@ SEEN_REFRESH = 4
 # Operations that change nothing but presence; they skip the write lock unless
 # presence or the display name actually needs persisting.
 READ_ONLY_OPS = ('state', 'asset-read', 'card-read')
+# A wake must not stall the comment that caused it for long; misses are retried.
+WAKE_TIMEOUT = 5
 INVITE_TTL = 7 * 86400
 
 
@@ -338,8 +341,9 @@ def touched_pieces(pieces):
 
 
 class Service:
-    def __init__(self, root, *, host, app_id, request=federation_request, resolve=None, owner_name=None, now=time.time):
+    def __init__(self, root, *, host, app_id, request=federation_request, resolve=None, owner_name=None, now=time.time, notify=None):
         self.store = Store(root)
+        self.notify = notify
         self.host = check(host, HOST, 'instance host')
         self.app_id = app_id
         self.request = request
@@ -863,6 +867,8 @@ class Service:
             member = self.member(row,mid,credential)
             if op != 'leave' and member.get('pending'):
                 fail(409,'invitation-pending','Accept the invitation before using this board.')
+            if op == 'mentions':
+                return {'status':'ok','mentions':mentions.take(self.store,oid,mid,body.get('ack'),self.now())}
             if op == 'leave':
                 row['members'].pop(mid)
                 self.store.put('board',oid,row)
@@ -1003,6 +1009,9 @@ class Service:
                    'by': {'host': actor['host'], 'name': actor.get('name') or actor['host']}}
         if actor.get('via') == 'agent':
             comment['via'] = 'agent'
+        mentioned = mentions.mention_targets(row, body.get('mentions'), actor['host'])
+        if mentioned:
+            comment['mentions'] = mentioned
         record['comments'].append(comment)
         entry = {'id': uuid.uuid4().hex, 'at': comment['at'], 'type': 'commented',
                  'text': text[:MAX_ACTIVITY_TEXT], 'by': comment['by']}
@@ -1012,6 +1021,7 @@ class Service:
         self.commit_pieces(row, {'cards': {card_id: card}})
         record['activity'] = merge_activity(record['activity'], [entry])
         self.store.put('card', key, record)
+        mentions.queue(self.store, self.now(), row, card_id, card, comment, mentioned)
         return {'status': 'ok', 'comment': comment, 'comments': record['comments'],
                 'version': row['version'], 'card': card, 'activity': record['activity']}
 
@@ -1109,6 +1119,84 @@ class Service:
         return {'status':'ok'}
 
     async def state_operation(self, host, oid, op, body, *, agent=False):
+        """Run a board operation for this deployment's owner, then its mention work:
+        a comment on a board hosted here wakes the people it mentions, and every
+        sync collects mentions waiting for this owner and reports the unread ones
+        per card (`my_mentions`) for the board's @ badges."""
+        result = await self.board_operation(host, oid, op, body, agent=agent)
+        if op == 'comment-write' and host == self.host:
+            await self.deliver_mentions(oid)
+        if op == 'state':
+            if host != self.host and result.get('mentions_pending'):
+                try:
+                    await self.pull_mentions(host, oid)
+                except Failure:
+                    pass  # The host keeps them; the next sync or wake retries.
+            result = {**result, 'my_mentions': mentions.unread_counts(self.store, host, oid)}
+        return result
+
+    async def deliver_mentions(self, oid=None):
+        """Wake each deployment with mentions due, on one board or on all of them."""
+        with self.store.transaction():
+            groups = mentions.claim_due(self.store, self.now(), oid)
+        targets = list(groups)
+        outcomes = await asyncio.gather(*(self.wake_member(host, board) for host, board in targets))
+        return {'results': [{'host': host, 'id': board, 'delivery': outcome}
+                            for (host, board), outcome in zip(targets, outcomes)]}
+
+    async def wake_member(self, host, oid):
+        if host == self.host:
+            await self.receive_own_mentions(oid)
+            return 'delivered'
+        try:
+            response = await self.request('POST', f'https://{host}/api/app-services/{SERVICE_ID}/mentions/wake',
+                json={'protocol': PROTOCOL, 'host': self.host, 'id': oid}, max_response_bytes=32768, timeout_seconds=WAKE_TIMEOUT)
+            data = response.json()
+        except Exception:
+            return 'unreachable'
+        if not isinstance(data, dict) or data.get('protocol') != PROTOCOL:
+            return 'unreachable'
+        if data.get('code') == 'not-joined':
+            with self.store.transaction():
+                mentions.drop(self.store, oid, host)
+            return 'not-a-member'
+        # An older Kanban answers route-missing: keep retrying until it updates.
+        return 'delivered' if response.status_code == 200 and data.get('status') == 'delivered' else 'unreachable'
+
+    async def receive_own_mentions(self, oid):
+        """This deployment's owner was mentioned on a board hosted here: no network hop."""
+        with self.store.transaction():
+            items = mentions.take(self.store, oid, self.host, None, self.now())
+            fresh = mentions.inbox_accept(self.store, self.host, oid, items, self.now())
+            mentions.take(self.store, oid, self.host, [item['id'] for item in items], self.now())
+        await self.notify_owner(fresh)
+
+    async def pull_mentions(self, host, oid):
+        """Collect this owner's waiting mentions from a board's host over the membership,
+        keep and notify the new ones, then acknowledge everything received."""
+        member = self.store.get('joined', host+'/'+oid)
+        if not member or member['status'] != 'joined':
+            fail(404, 'not-joined', 'This deployment is not a member of that board.')
+        credentials = {'member_id': member['member_id'], 'credential': member['credential']}
+        items = (await self.remote(host, oid, {'op': 'mentions', **credentials, 'ack': []})).get('mentions') or []
+        with self.store.transaction():
+            fresh = mentions.inbox_accept(self.store, host, oid, items, self.now())
+        await self.notify_owner(fresh)
+        if items:
+            await self.remote(host, oid, {'op': 'mentions', **credentials,
+                                          'ack': [item.get('id') for item in items if isinstance(item, dict)]})
+        return len(fresh)
+
+    async def notify_owner(self, entries):
+        if not self.notify:
+            return
+        for entry in entries:
+            try:
+                await self.notify(mentions.notification(entry, self.app_id))
+            except Exception:
+                pass  # The unread badge still shows it; a missed push never fails the sync.
+
+    async def board_operation(self, host, oid, op, body, *, agent=False):
         """Run a board operation for this deployment's owner. `agent` comes from the
         authenticated caller (agent_request), never from the request body."""
         check(host,HOST,'board host'); check(oid,ID,'board id')
@@ -1159,9 +1247,18 @@ class Service:
             elif path==['invitations','deliver'] and method=='POST':
                 if body.get('protocol')!=PROTOCOL: fail(400,'invalid-protocol','Unsupported collaboration protocol.')
                 result=self.receive(body)
+            elif path==['mentions','wake'] and method=='POST':
+                if body.get('protocol')!=PROTOCOL: fail(400,'invalid-protocol','Unsupported collaboration protocol.')
+                await self.pull_mentions(check(body.get('host'),HOST,'board host'),check(body.get('id'),ID,'board id'))
+                result={'status':'delivered'}
             elif len(path)==2 and path[0]=='peer' and method=='POST':
                 if body.get('protocol')!=PROTOCOL: fail(400,'invalid-protocol','Unsupported collaboration protocol.')
                 result=self.peer(path[1],body)
+                if body.get('op')=='state' and result.get('status')=='ok':
+                    with self.store.snapshot():
+                        result={**result,'mentions_pending':mentions.pending_count(self.store,path[1],body.get('member_id'),self.now())}
+                elif body.get('op')=='comment-write':
+                    await self.deliver_mentions(path[1])
             else:
                 self.owner(actor,write=method!='GET')
                 agent=agent_request(actor)
@@ -1174,6 +1271,13 @@ class Service:
                 elif p==['join'] and method=='POST': result=await self.join(body)
                 elif p==['resume-joins'] and method=='POST':
                     result=await self.resume_join()
+                elif p==['mentions','retry'] and method=='POST':
+                    result=await self.deliver_mentions()
+                elif len(p)==6 and p[2]=='cards' and p[4]=='mentions' and p[5]=='read' and method=='POST':
+                    host,oid=check(p[0],HOST,'board host'),check(p[1],ID,'board id')
+                    with self.store.transaction():
+                        mentions.mark_read(self.store,host,oid,p[3])
+                    result={'status':'ok','my_mentions':mentions.unread_counts(self.store,host,oid)}
                 elif p==['invitations'] and method=='GET':
                     result={'invitations':[{k:v for k,v in i.items() if k not in ('invite','declined_tokens')} for i in self.store.list('invitation') if i['status']=='pending']}
                 elif len(p)==4 and p[0]=='invitations' and p[3]=='decline' and method=='POST':
@@ -1202,6 +1306,8 @@ class Service:
                         for key in removed:
                             if key==self.host: fail(400,'owner-removal','The host cannot remove itself.')
                             row['members'].pop(key)
+                        for target in targets:
+                            mentions.drop(self.store,p[0],target)
                         # Revocation includes still-unredeemed grants to the
                         # removed deployment(s), or the exact registry group.
                         # Otherwise an older invite could silently restore access.
@@ -1218,8 +1324,9 @@ class Service:
                             fail(409,'migration-staged','The board handoff is not active.')
                         self.store.delete('board',oid)
                         self.store.delete('board-backup',oid)
-                        for kind in ('asset','card','board-card','board-change'):
+                        for kind in ('asset','card','board-card','board-change',mentions.OUTBOX):
                             self.store.delete_prefix(kind,oid+'/')
+                        self.store.delete_prefix(mentions.INBOX,self.host+'/'+oid+'/')
                     result={'status':'deleted'}
                 elif len(p)==3 and p[2]=='leave' and method=='POST':
                     host,oid=p[:2]; key=check(host,HOST,'host')+'/'+check(oid,ID,'board id')
@@ -1228,7 +1335,9 @@ class Service:
                         try: await self.remote(host,oid,{'op':'leave','member_id':member['member_id'],'credential':member['credential']})
                         except Failure as e:
                             if e.code not in ('membership-revoked','board-missing'): raise
-                        with self.store.transaction(): self.store.delete('joined',key)
+                        with self.store.transaction():
+                            self.store.delete('joined',key)
+                            self.store.delete_prefix(mentions.INBOX,key+'/')
                     result={'status':'left'}
                 elif len(p)==3 and p[2]=='state' and method in ('GET','PUT'):
                     if method=='GET':

@@ -67,7 +67,12 @@ async def dispatch(request):
             raise Failure(503,'identity-unavailable','Collaborator identity could not be resolved.')
         data=response.json()
         return data.get('hosts') if data.get('linked') is True else None
-    service=Service(Path(os.environ['APP_STORAGE_DIR'])/'server',host=os.environ['INSTANCE_DOMAIN'],app_id=int(os.environ['APP_ID']),resolve=resolve,owner_name=owner_name)
+    async def notify(payload):
+        # A mention for this owner: the app token may notify its own owner, and
+        # the platform attributes it to Kanban (bell entry plus push).
+        async with httpx.AsyncClient(timeout=5,follow_redirects=False,trust_env=False) as client:
+            await client.post(os.environ['API_BASE_URL'].rstrip('/')+'/api/notifications/send',json=payload,headers={'Authorization':'Bearer '+os.environ['APP_TOKEN']})
+    service=Service(Path(os.environ['APP_STORAGE_DIR'])/'server',host=os.environ['INSTANCE_DOMAIN'],app_id=int(os.environ['APP_ID']),resolve=resolve,owner_name=owner_name,notify=notify)
     try: return await service.handle(request)
     finally: service.close()
 

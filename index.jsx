@@ -6,6 +6,7 @@ import { configureSync, recoverMemberships, loadShareMap, listInvitations, accep
 import { sharingFromBoards } from './publication.js'
 import { createBoardLoadCoordinator } from './request-guard.js'
 import { appVisible, onAppVisibilityChange } from './visibility.js'
+import { parseMentionIntent } from './comments.js'
 import Home from './ui/Home.jsx'
 import Board from './ui/Board.jsx'
 
@@ -54,6 +55,9 @@ export default function App({ appId, token }) {
   const [directoryUnavailable, setDirectoryUnavailable] = useState(false)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [online, setOnline] = useState(() => window.mobius?.online !== false)
+  // A tapped mention notification: its board and card, until the boards are known.
+  const [mentionTarget, setMentionTarget] = useState(null)
+  const [cardRequest, setCardRequest] = useState(null)
   const visible = useAppVisible()
   const navRef = useRef(null)
   // The current history entry owns its board destination independently from
@@ -286,6 +290,24 @@ export default function App({ appId, token }) {
     showBoard(id)
   }, [showBoard, showHome])
 
+  useEffect(() => {
+    const onIntent = event => {
+      if (event.source !== window.parent || event.data?.type !== 'moebius:app-intent') return
+      const target = parseMentionIntent(event.data.intent)
+      if (target) setMentionTarget(target)
+    }
+    window.addEventListener('message', onIntent)
+    return () => window.removeEventListener('message', onIntent)
+  }, [])
+  useEffect(() => {
+    if (!mentionTarget || !resolved) return
+    const boardId = Object.keys(shareMap.byBoard).find(id => shareMap.byBoard[id]?.oid === mentionTarget.oid)
+    if (!boardId) return
+    setMentionTarget(null)
+    setCardRequest({ boardId, cardId: mentionTarget.cardId })
+    if (openId !== boardId) openBoard(boardId)
+  }, [mentionTarget, resolved, shareMap, openId, openBoard])
+
   // Switching within the board surface deliberately keeps the current nav
   // handle. A board entered from home still has exactly one Back sentinel;
   // a board selected from the launch board still has none.
@@ -387,6 +409,7 @@ export default function App({ appId, token }) {
           online={online}
           share={shareMap.byBoard[openId] || null}
           onShared={onShared}
+          cardRequest={cardRequest?.boardId === openId ? cardRequest : null}
         />
       ) : boards ? (
         <Home

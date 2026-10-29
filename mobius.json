@@ -29,6 +29,11 @@
     "writes": "queued",
     "execution": "full"
   },
+  "schedule": {
+    "default": "*/5 * * * *",
+    "user_configurable": false,
+    "job": "mentions-retry.sh"
+  },
   "source_files": [
     "boardRepository.js",
     "activity.js",
@@ -56,6 +61,7 @@
     "collaboration/__init__.py",
     "collaboration/net_utils.py",
     "collaboration/service.py",
+    "collaboration/mentions.py",
     "collaboration/store.py",
     "collaboration/transport.py",
     "publication.js",

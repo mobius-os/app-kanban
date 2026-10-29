@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createBoardRepository } from '../boardRepository.js'
 import { configureSync, shareBoard } from '../sync.js'
-import { MAX_COMMENT_CHARS, MAX_COMMENTS_PER_CARD, commentsPath, mentionParts, mentionQuery, mergeComments, newCommentId, normalizeComment } from '../comments.js'
+import { MAX_COMMENT_CHARS, MAX_COMMENTS_PER_CARD, MAX_MENTIONS, commentsPath, mentionedMemberIds, mentionNames, mentionParts, mentionQuery, mergeComments, newCommentId, normalizeComment, parseMentionIntent } from '../comments.js'
 import { describeActivity, formatActivityDay, formatActivityTime, groupByDay } from '../activity.js'
 
 const comment = (id, at, text = 'Hello', extra = {}) => ({ id, at, text, ...extra })
@@ -148,6 +148,9 @@ test('a shared comment posts to the host and adopts its stamped copy and count',
   const result = await repo.addComment('b', 'c1', 'Over the wire')
   assert.match(posts[0].path, /\/cards\/c1\/comments$/)
   assert.equal(posts[0].body.text, 'Over the wire')
+  assert.equal(Object.hasOwn(posts[0].body, 'mentions'), false, 'no mentions, no field: an older host sees the same request')
+  await repo.addComment('b', 'c1', '@maya over the wire', { mentions: ['m1'] })
+  assert.deepEqual(posts[1].body.mentions, ['m1'], 'the host is told who to notify')
   assert.equal(result.status, 'saved')
   assert.equal(result.comments[0].by.host, 'b.example')
   assert.equal(result.card.commentsCount, 1)
@@ -261,7 +264,8 @@ test('a saved card has Home, Comments and Activity tabs; Comments fill the tab, 
   assert.match(parts, /const CARD_TABS = \[\['home', 'Home'\], \['comments', 'Comments'\], \['activity', 'Activity'\]\]/)
   assert.match(parts, /role="tablist"[\s\S]{0,400}role="tab"[\s\S]{0,200}aria-selected=\{tab === id\}/, 'a real tab list')
   assert.match(board, /\{!isDraftCard && <CardTabs tab=\{cardTab\}/, 'a card still being created has no tabs')
-  assert.match(board, /setCardTab\('home'\) \}, \[openCardId\]\)/, 'every card opens on Home, even from a notification')
+  assert.match(board, /setCardTab\(requestedTabRef\.current \|\| 'home'\)[\s\S]{0,80}\}, \[openCardId\]\)/,
+    'every card opens on Home, except one a mention notification opens on Comments')
   assert.match(board, /hidden: cardTab !== id/, 'hidden panels stay mounted, so a draft comment survives a tab switch')
   assert.match(board, /active=\{cardTab === 'comments'\}/, 'the newest comment is scrolled into view when the tab opens')
   const section = parts.slice(parts.indexOf('export function CardComments'), parts.indexOf('function CommentRow'))
@@ -340,4 +344,44 @@ test('one save control: Save appears for unsaved text, Enter commits by leaving 
   assert.match(control, /state === 'dirty'/)
   assert.match(control, /state === 'saving'/)
   assert.match(control, /Saved/)
+})
+
+// ---- mention notifications ----
+
+test('a comment tells the host which members it names, once each, by member id', () => {
+  const people = [{ label: 'maya', memberId: 'm1' }, { label: 'Marco Polo', memberId: 'm2' }, { label: 'ghost', memberId: '' }]
+  assert.deepEqual(mentionedMemberIds('@Maya and @marco polo, @maya again', people), ['m1', 'm2'])
+  assert.deepEqual(mentionedMemberIds('mail maya@example.com, @ghost, @nobody', people), [], 'only real mentions of members with an id')
+  const many = Array.from({ length: 30 }, (_, index) => ({ label: `p${index}`, memberId: `m${index}` }))
+  assert.equal(mentionedMemberIds(many.map(person => `@${person.label}`).join(' '), many).length, MAX_MENTIONS)
+})
+
+test('a mention of you is recognised whatever its case or leading @', () => {
+  assert.equal(mentionNames('@Sam', '@sam'), true)
+  assert.equal(mentionNames('@sam', 'Sam'), true)
+  assert.equal(mentionNames('@samuel', 'sam'), false)
+  assert.equal(mentionNames('@sam', ''), false)
+})
+
+test('a mention notification opens exactly one board card, and nothing else parses as one', () => {
+  const oid = 'a'.repeat(32)
+  assert.deepEqual(parseMentionIntent(`mention:${oid}:card-1`), { oid, cardId: 'card-1' })
+  for (const bad of ['', 'artifact:x', `mention:${oid}`, `mention:${oid}:card/1`, `mention:XYZ:card-1`, `mention:${oid}:card-1:extra`]) {
+    assert.equal(parseMentionIntent(bad), null, bad)
+  }
+})
+
+test('the board shows unread mentions of you as a purple pill and clears it when Comments opens', async () => {
+  const board = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
+  const parts = await readFile(new URL('../ui/CardParts.jsx', import.meta.url), 'utf8')
+  const theme = await readFile(new URL('../theme.js', import.meta.url), 'utf8')
+  const card = board.slice(board.indexOf('function Card('), board.indexOf('function memberRecords('))
+  assert.ok(card.indexOf('kb-card-mention') < card.indexOf('kb-card-label'), 'the pill comes first in the details row')
+  assert.match(board, /state\.my_mentions/, 'counts arrive with the board\'s own sync, not a separate poll')
+  assert.match(board, /cardTab !== 'comments'[\s\S]{0,260}markMentionsRead\(share, openCardId\)/)
+  assert.match(board, /mentionedMemberIds\(text, mentionables\)/)
+  assert.match(parts, /forYou = !own && mentionParts/, 'someone else\'s comment naming you is outlined')
+  assert.match(theme, /\.kb-card-mention \{[^}]*background: var\(--accent\)/)
+  const app = await readFile(new URL('../index.jsx', import.meta.url), 'utf8')
+  assert.match(app, /moebius:app-intent[\s\S]{0,120}parseMentionIntent/)
 })
