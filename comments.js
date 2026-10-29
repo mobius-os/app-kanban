@@ -90,6 +90,10 @@ export function mentionQuery(text, caret) {
 // Split a comment into plain text and `{mention}` parts. A mention is an @ at
 // the start of a word: a known member label matches first (longest first, so
 // names with spaces work), any other @word still reads as a mention.
+// A known label is a mention only as a whole token: "@sam" is not inside
+// "@samuel" or "@sam-team", though punctuation may end it ("@sam." / "@sam,").
+const TOKEN_CONTINUES = /^(?:[\p{L}\p{N}_-]|\.[\p{L}\p{N}])/u
+
 export function mentionParts(text, labels = []) {
   const source = String(text || '')
   const known = [...new Set(labels.filter(Boolean))].sort((a, b) => b.length - a.length)
@@ -99,7 +103,8 @@ export function mentionParts(text, labels = []) {
   while (i < source.length) {
     if (source[i] === '@' && (i === 0 || /\s/u.test(source[i - 1]))) {
       const rest = source.slice(i + 1)
-      const label = known.find(candidate => rest.toLowerCase().startsWith(candidate.toLowerCase()))
+      const label = known.find(candidate => rest.toLowerCase().startsWith(candidate.toLowerCase())
+        && !TOKEN_CONTINUES.test(rest.slice(candidate.length)))
         || (rest.match(/^[\p{L}\p{N}._-]+/u) || [])[0]
       if (label) {
         if (plain) { parts.push({ text: plain }); plain = '' }
@@ -116,14 +121,16 @@ export function mentionParts(text, labels = []) {
 }
 
 // The board members a comment names, by member id, for the host to notify:
-// each `@label` of a known member counts once, whatever its case. The host
+// each `@label` of a known member counts once, whatever its case, and a person
+// linked through several deployments is notified on every one (`memberIds`),
+// so one offline deployment never hides the mention from the others. The host
 // accepts at most MAX_MENTIONS and checks every id against the board itself.
 export const MAX_MENTIONS = 20
 export function mentionedMemberIds(text, mentionables = []) {
   const named = new Set(mentionParts(text, mentionables.map(member => member.label))
     .filter(part => part.mention).map(part => part.mention.slice(1).toLowerCase()))
-  const ids = mentionables.filter(member => member.memberId && named.has(String(member.label).toLowerCase()))
-    .map(member => member.memberId)
+  const ids = mentionables.filter(member => named.has(String(member.label).toLowerCase()))
+    .flatMap(member => member.memberIds || [])
   return [...new Set(ids)].slice(0, MAX_MENTIONS)
 }
 

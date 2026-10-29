@@ -308,6 +308,8 @@ export default function App({ appId, token }) {
     if (openId !== boardId) openBoard(boardId)
   }, [mentionTarget, resolved, shareMap, openId, openBoard])
 
+  const cardRequestHandled = useCallback(() => setCardRequest(null), [])
+
   // Switching within the board surface deliberately keeps the current nav
   // handle. A board entered from home still has exactly one Back sentinel;
   // a board selected from the launch board still has none.
@@ -410,6 +412,7 @@ export default function App({ appId, token }) {
           share={shareMap.byBoard[openId] || null}
           onShared={onShared}
           cardRequest={cardRequest?.boardId === openId ? cardRequest : null}
+          onCardRequestHandled={cardRequestHandled}
         />
       ) : boards ? (
         <Home

@@ -156,6 +156,16 @@ class Mentions(unittest.IsolatedAsyncioTestCase):
         await self.call(self.a, 'DELETE', f'boards/{self.oid}/members/{self.b_id}')
         self.assertEqual(self.outbox(), [])
 
+    async def test_a_person_on_two_deployments_still_hears_on_the_online_one(self):
+        invitation = await self.call(self.a, 'POST', f'boards/{self.oid}/invites', {'role': 'editor'})
+        c_id = (await self.call(self.c, 'POST', 'boards/join', {'invite': invitation['invite']}))['membership']['member_id']
+        self.down.add('b.example')
+        saved = await self.comment(self.a, [self.b_id, c_id])
+        self.assertEqual(saved['comment']['mentions'], [self.b_id, c_id])
+        self.assertEqual(len(self.pushes['c.example']), 1, 'the online deployment is notified at once')
+        self.assertEqual(await self.badges(self.c), {'c1': 1})
+        self.assertEqual([r['member_host'] for r in self.outbox()], ['b.example'], 'only the offline one waits for a retry')
+
     def test_the_notification_opens_the_cards_comments_tab_with_a_safe_tag(self):
         entry = {'oid': 'f' * 32, 'card_id': 'card-1', 'author': 'Maya', 'card_title': 'Venue', 'snippet': 'hi'}
         push = mentions.notification(entry, 9)

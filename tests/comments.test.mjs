@@ -349,10 +349,10 @@ test('one save control: Save appears for unsaved text, Enter commits by leaving 
 // ---- mention notifications ----
 
 test('a comment tells the host which members it names, once each, by member id', () => {
-  const people = [{ label: 'maya', memberId: 'm1' }, { label: 'Marco Polo', memberId: 'm2' }, { label: 'ghost', memberId: '' }]
+  const people = [{ label: 'maya', memberIds: ['m1'] }, { label: 'Marco Polo', memberIds: ['m2'] }, { label: 'ghost', memberIds: [] }]
   assert.deepEqual(mentionedMemberIds('@Maya and @marco polo, @maya again', people), ['m1', 'm2'])
   assert.deepEqual(mentionedMemberIds('mail maya@example.com, @ghost, @nobody', people), [], 'only real mentions of members with an id')
-  const many = Array.from({ length: 30 }, (_, index) => ({ label: `p${index}`, memberId: `m${index}` }))
+  const many = Array.from({ length: 30 }, (_, index) => ({ label: `p${index}`, memberIds: [`m${index}`] }))
   assert.equal(mentionedMemberIds(many.map(person => `@${person.label}`).join(' '), many).length, MAX_MENTIONS)
 })
 
@@ -384,4 +384,31 @@ test('the board shows unread mentions of you as a purple pill and clears it when
   assert.match(theme, /\.kb-card-mention \{[^}]*background: var\(--accent\)/)
   const app = await readFile(new URL('../index.jsx', import.meta.url), 'utf8')
   assert.match(app, /moebius:app-intent[\s\S]{0,120}parseMentionIntent/)
+})
+
+test('a known name counts only as a whole word, so @samuel never notifies sam', () => {
+  const sam = [{ label: 'sam', memberIds: ['sam-id'] }]
+  assert.deepEqual(mentionedMemberIds('@samuel please check', sam), [])
+  assert.deepEqual(mentionedMemberIds('@sam-team and @sam_bot', sam), [])
+  assert.deepEqual(mentionedMemberIds('@sam.k is someone else', sam), [])
+  for (const text of ['@sam please check', '@sam, can you?', 'thanks @sam.', '@Sam']) {
+    assert.deepEqual(mentionedMemberIds(text, sam), ['sam-id'], text)
+  }
+  assert.deepEqual(mentionParts('@samuel and @sam', ['sam']), [{ mention: '@samuel' }, { text: ' and ' }, { mention: '@sam' }],
+    'the highlight follows the same rule')
+  assert.deepEqual(mentionedMemberIds('@Hamza Dva ok', [{ label: 'Hamza', memberIds: ['h1'] }, { label: 'Hamza Dva', memberIds: ['h2'] }]), ['h2'])
+})
+
+test('a person linked through several deployments is notified on every one', async () => {
+  assert.deepEqual(mentionedMemberIds('@maya', [{ label: 'maya', memberIds: ['phone', 'laptop'] }]), ['phone', 'laptop'])
+  const board = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
+  assert.match(board, /memberIds: member\.member_ids\?\.length \? member\.member_ids/, 'the grouped ids reach the picker')
+})
+
+test('a mention notification opens its card once, even after leaving and returning to the board', async () => {
+  const board = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
+  const app = await readFile(new URL('../index.jsx', import.meta.url), 'utf8')
+  assert.match(board, /handledCardRequestRef\.current = cardRequest[\s\S]{0,160}onCardRequestHandled\?\.\(\)/)
+  assert.match(app, /const cardRequestHandled = useCallback\(\(\) => setCardRequest\(null\), \[\]\)/)
+  assert.match(app, /onCardRequestHandled=\{cardRequestHandled\}/)
 })

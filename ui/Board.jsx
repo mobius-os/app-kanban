@@ -667,6 +667,7 @@ export default memo(function Board({
   share,
   onShared,
   cardRequest,
+  onCardRequestHandled,
 }) {
   const [board, setBoard] = useState(null)
   const [openCardId, setOpenCardId] = useState(null)
@@ -785,11 +786,13 @@ export default memo(function Board({
   useEffect(() => {
     if (!cardRequest || handledCardRequestRef.current === cardRequest || !board?.cards?.[cardRequest.cardId]) return
     handledCardRequestRef.current = cardRequest
+    // One-shot: the App forgets it, so coming back to this board never replays it.
+    onCardRequestHandled?.()
     setDraftCard(null)
     if (openCardId === cardRequest.cardId) { setCardTab('comments'); return }
     requestedTabRef.current = 'comments'
     setOpenCardId(cardRequest.cardId)
-  }, [cardRequest, board, openCardId])
+  }, [cardRequest, board, openCardId, onCardRequestHandled])
   // Seeing a card's comments clears its @ badge, here and on this owner's other devices.
   useEffect(() => {
     if (cardTab !== 'comments' || !openCardId || !share || !myMentions[openCardId]) return
@@ -2216,7 +2219,7 @@ export default memo(function Board({
   // it and an insertion never doubles it. A private board lists no one.
   const mentionables = (displayMembers || []).map(member => ({
     key: member.member_id || member.host || memberLabel(member),
-    memberId: member.member_id || '',
+    memberIds: member.member_ids?.length ? member.member_ids : member.member_id ? [member.member_id] : [],
     label: memberLabel(member).replace(/^@/u, ''),
     name: member.name,
     host: member.host,
