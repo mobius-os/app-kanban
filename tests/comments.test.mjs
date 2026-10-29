@@ -272,7 +272,8 @@ test('a saved card has Home, Comments and Activity tabs; Comments fill the tab, 
   assert.doesNotMatch(section, /FoldingSection/, 'comments no longer fold')
   assert.match(section, /if \(active && scroller\) scroller\.scrollTop = scroller\.scrollHeight/)
   assert.match(section, /event\.key !== 'Enter' \|\| event\.shiftKey/, 'Enter posts; Shift+Enter makes a new line')
-  assert.match(theme, /\.kb-card-sheet\.is-tabbed \{ height: [^;]+; overflow: hidden;/, 'one fixed height, so switching tabs never resizes the card')
+  assert.match(theme, /\.kb-card-sheet\.is-tabbed \{ height: [^;]+; overflow: clip;/,
+    'one fixed height, and clip (never hidden): a hidden box is still a scroll container, so the phone keyboard’s reveal-the-focused-input scroll would shove the toolbar out of view')
   assert.match(theme, /\.kb-comments-window \{ flex: 1 1 auto;[^}]*overflow-y: auto/, 'the conversation fills the tab and scrolls')
   assert.match(theme, /\.kb-card-sheet\.is-tabbed > \.kb-card-panel\[hidden\] \{ display: none; \}/, 'a flex panel still hides')
   assert.doesNotMatch(theme, /\.kb-comments-window[^\n]*scrollbar/, 'the app-wide rule already hides the scrollbar')
