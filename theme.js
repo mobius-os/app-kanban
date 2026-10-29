@@ -1554,16 +1554,18 @@ export const CSS = `
      ends clear of the fades. */
   .kb-comments-window { flex: 1 1 auto; min-height: 0; padding: 26px 0 22px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); }
   .kb-comments-window > :first-child { margin-top: auto; }
-  .kb-comment { display: flex; align-items: flex-start; gap: 10px; }
+  .kb-comment { display: flex; align-items: flex-start; gap: 10px; padding-right: 40px; }
+  .kb-comment.is-own { justify-content: flex-end; padding: 0 0 0 40px; }
   /* Small avatars overlap in the presence stack (margin-left: -6px); in a
      comment row that pulls them outside the scroll window, which clips them. */
   .kb-comment > .kb-member-avatar-small { margin: 2px 0 0; }
-  .kb-comment-body { flex: 1 1 auto; min-width: 0; }
+  .kb-comment-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+  .kb-comment.is-own .kb-comment-body { align-items: flex-end; }
   .kb-comment-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
   .kb-comment-head strong { font-size: 13.5px; font-weight: 650; }
   .kb-comment-head time { color: var(--muted); font-size: 12px; }
-  .kb-comment-bubble { padding: 8px 12px; border-radius: 4px 14px 14px 14px; background: var(--surface-2); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .kb-comment.is-own .kb-comment-bubble { background: color-mix(in srgb, var(--accent) 13%, var(--surface-2)); }
+  .kb-comment-bubble { max-width: 100%; padding: 8px 12px; border-radius: 4px 14px 14px 14px; background: var(--surface-2); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .kb-comment.is-own .kb-comment-bubble { border-radius: 14px 4px 14px 14px; background: color-mix(in srgb, var(--accent) 13%, var(--surface-2)); }
   .kb-comment-composer { flex: 0 0 auto; display: flex; align-items: flex-end; gap: 8px; margin: 0 calc(-1 * var(--kb-card-pad)); padding: 12px var(--kb-card-pad) 0; border-top: 1px solid var(--border); }
   .kb-comment-field { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
   .kb-comment-input { flex: 1 1 auto; min-width: 0; min-height: 40px; max-height: 160px; padding: 9px 12px; resize: none; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; line-height: 1.45; }

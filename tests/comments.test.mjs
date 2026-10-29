@@ -316,6 +316,13 @@ test('typing @ lists board members above the composer; Enter then picks instead 
   // A deployment address is not a name: "@m" must not list someone on mobius-….
   assert.doesNotMatch(section.slice(section.indexOf('const candidates'), section.indexOf('const picker')), /member\.host/)
   assert.match(section, /CommentText text=\{comment\.text\}/, 'bubbles highlight mentions')
+  // Like a chat: own comments on the right without an avatar, others on the left.
+  const row = parts.slice(parts.indexOf('function CommentRow'), parts.indexOf('// ---- activity ----'))
+  assert.match(row, /\{!own && avatar\}/)
+  assert.match(row, /<strong className=\{own \? 'kb-visually-hidden' : undefined\}>\{author\}<\/strong>/, 'the name stays for screen readers')
+  const theme = await readFile(new URL('../theme.js', import.meta.url), 'utf8')
+  assert.match(theme, /\.kb-comment\.is-own \{ justify-content: flex-end;/)
+  assert.match(theme, /\.kb-comment\.is-own \.kb-comment-body \{ align-items: flex-end; \}/)
   const board = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
   assert.match(board, /memberLabel\(member\)\.replace\(\/\^@\/u, ''\)/, 'a handle keeps a single @ when inserted')
 })

@@ -1102,12 +1102,14 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
   </section>
 }
 
+// Like a chat: your own comments sit on the right without an avatar (the
+// name stays for screen readers), everyone else's on the left with theirs.
 function CommentRow({ comment, own, author, avatar, labels }) {
   return <div className={`kb-comment${own ? ' is-own' : ''}`}>
-    {avatar}
+    {!own && avatar}
     <div className="kb-comment-body">
       <div className="kb-comment-head">
-        <strong>{author}</strong>
+        <strong className={own ? 'kb-visually-hidden' : undefined}>{author}</strong>
         <time dateTime={comment.at} title={formatActivityTime(comment.at)}>{formatActivityClock(comment.at)}</time>
       </div>
       <div className="kb-comment-bubble"><CommentText text={comment.text} labels={labels} /></div>
