@@ -122,7 +122,8 @@ export function normalizeActivityEntry(entry) {
   if (entry.via === 'agent') normalized.via = 'agent'
   if (entry.by && typeof entry.by === 'object') {
     const by = { host: clip(entry.by.host), name: clip(entry.by.name) }
-    if (by.host || by.name) normalized.by = by
+    if (typeof entry.by.member_id === 'string' && entry.by.member_id.trim()) by.member_id = entry.by.member_id.trim()
+    if (by.host || by.name || by.member_id) normalized.by = by
   }
   return normalized
 }
@@ -254,4 +255,14 @@ export function groupByDay(items, timeOf, now = new Date()) {
     else groups.push({ day, items: [item] })
     return groups
   }, [])
+}
+
+// Shared authors are principals on this board, not claimed deployment addresses.
+// Old records lack that evidence: retain their text, but never guess they are us.
+export function entryAuthorship(entry, { shared = false, memberIds = [] } = {}) {
+  const mid = entry.by?.member_id
+  if (shared && !mid) return { own: false, label: 'Unverified author' }
+  const own = !shared || memberIds.includes(mid)
+  const name = own ? 'You' : `${entry.by?.name || entry.by?.host || 'Member'} (collaborator)`
+  return { own, label: entry.via === 'agent' ? (own ? 'Your agent' : `${name}’s agent`) : name }
 }

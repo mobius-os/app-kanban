@@ -141,7 +141,8 @@ def activity_entries(raw, actor, at):
         if item.get('type') not in ACTIVITY_TYPES:
             continue
         entry = {'id': entry_id, 'at': at, 'type': item['type'],
-                 'by': {'host': actor['host'], 'name': actor.get('name') or actor['host']}}
+                 'by': {'host': actor['host'], 'name': actor.get('name') or actor['host'],
+                        'member_id': actor['member_id']}}
         for key in ('from', 'to', 'text'):
             if key in item:
                 if not isinstance(item[key], str): fail(400, 'invalid-activity', 'Activity text is invalid.')
@@ -879,9 +880,9 @@ class Service:
                 fail(403,'read-only','This board member is a viewer.')
             changes = self.presence_changes(member, self.claimed_name(body))
             member.update(changes)
-            # `via` is the member deployment's statement about its own request
-            # (state_operation sets it from its authenticated caller).
-            result = self.operation(row,op,body,{'host':member['host'],'name':member.get('name'),
+            # Host/name and `via` are this member's claims, not the owner's
+            # identity. Preserve the authenticated principal for every author.
+            result = self.operation(row,op,body,{'host':member['host'],'name':member.get('name'),'member_id':mid,
                 'via':'agent' if body.get('via') == 'agent' else ''})
             if changes or op not in READ_ONLY_OPS:
                 self.store.put('board',oid,row)
@@ -1006,7 +1007,8 @@ class Service:
         if len(record['comments']) >= MAX_COMMENTS_PER_CARD:
             fail(413, 'comments-full', f'A card can hold up to {MAX_COMMENTS_PER_CARD} comments.')
         comment = {'id': comment_id, 'at': self.stamp(), 'text': text,
-                   'by': {'host': actor['host'], 'name': actor.get('name') or actor['host']}}
+                   'by': {'host': actor['host'], 'name': actor.get('name') or actor['host'],
+                        'member_id': actor['member_id']}}
         if actor.get('via') == 'agent':
             comment['via'] = 'agent'
         mentioned = mentions.mention_targets(row, body.get('mentions'), actor['host'])
@@ -1201,7 +1203,7 @@ class Service:
         authenticated caller (agent_request), never from the request body."""
         check(host,HOST,'board host'); check(oid,ID,'board id')
         body = {k:v for k,v in body.items() if k != 'via'}
-        actor = {'host':self.host,'name':self.owner_name,'via':'agent' if agent else ''}
+        actor = {'host':self.host,'name':self.owner_name,'member_id':self.host,'via':'agent' if agent else ''}
         if host == self.host:
             if op in READ_ONLY_OPS:
                 with self.store.snapshot():

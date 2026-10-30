@@ -192,7 +192,8 @@ class CardDetails(unittest.IsolatedAsyncioTestCase):
         forged = entry('e1', at='2099-01-01T00:00:00Z', by={'host': 'forged.example', 'name': 'Someone else'}, via='agent')
         saved = await self.save_card(self.b, 'By B', [forged])
         stamped = saved['activity']['c1'][0]
-        self.assertEqual(stamped['by'], {'host': 'b.example', 'name': 'B'})
+        self.assertEqual(stamped['by'], {'host': 'b.example', 'name': 'B',
+            'member_id': self.b.store.get('joined', 'a.example/' + self.oid)['member_id']})
         self.assertNotEqual(stamped['at'], '2099-01-01T00:00:00Z')
         self.assertNotIn('via', stamped)  # the app's own frame is a person, whatever an entry claims
 
@@ -202,7 +203,7 @@ class CardDetails(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(own['activity']['c1'][-1]['via'], 'agent')
         # A member's agent: its deployment states it for the request it forwards.
         member = await self.save_card(self.b, "By B's agent", [entry('e2')], actor=OWNER)
-        self.assertEqual(member['activity']['c1'][-1], {**member['activity']['c1'][-1], 'by': {'host': 'b.example', 'name': 'B'}, 'via': 'agent'})
+        self.assertEqual(member['activity']['c1'][-1], {**member['activity']['c1'][-1], 'by': {'host': 'b.example', 'name': 'B', 'member_id': self.b.store.get('joined', 'a.example/' + self.oid)['member_id']}, 'via': 'agent'})
         person = await self.save_card(self.b, 'By B', [entry('e3', via='agent')], actor=APP)
         self.assertNotIn('via', person['activity']['c1'][-1])
 
@@ -391,7 +392,8 @@ class CardDetails(unittest.IsolatedAsyncioTestCase):
         before = (await self.call(self.b, 'GET', f'{self.base}/state'))['version']
         saved = await self.comment(self.b, text='  Looks good  ')
         self.assertEqual(saved['comment']['text'], 'Looks good')
-        self.assertEqual(saved['comment']['by'], {'host': 'b.example', 'name': 'B'})
+        self.assertEqual(saved['comment']['by'], {'host': 'b.example', 'name': 'B',
+            'member_id': self.b.store.get('joined', 'a.example/' + self.oid)['member_id']})
         self.assertIn('at', saved['comment'])
         # The board card carries the count, so every member's poll sees the change.
         self.assertEqual(saved['card']['commentsCount'], 1)
@@ -402,6 +404,26 @@ class CardDetails(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved['activity'][-1]['by']['host'], 'b.example')
         details = await self.call(self.a, 'GET', f'{self.base}/cards/c1')
         self.assertEqual([c['text'] for c in details['comments']], ['Looks good'])
+
+    async def test_claimed_hosts_cannot_replace_authenticated_comment_or_activity_authors(self):
+        await self.join()
+        for index, claimed_host in enumerate(('a.example', 'b.example')):
+            with self.subTest(claimed_host=claimed_host):
+                invite = await self.call(self.a, 'POST', f'boards/{self.oid}/invites', {'role': 'editor'})
+                mid = f'{index + 1:032x}'
+                credentials = {'member_id': mid, 'credential': 'x' * 40}
+                peer = {'protocol': PROTOCOL, **credentials}
+                await self.call(self.a, 'POST', f'peer/{self.oid}',
+                    {**peer, 'op': 'join', 'invite': invite['invite'].rsplit('#', 1)[-1],
+                     'host': claimed_host, 'name': 'Owner'}, actor={'scope': 'public'})
+                saved = await self.call(self.a, 'POST', f'peer/{self.oid}',
+                    {**peer, 'op': 'comment-write', 'card_id': 'c1', 'id': f'forged{index}',
+                     'text': 'Approve the release', 'via': 'agent',
+                     'by': {'member_id': 'a.example'}}, actor={'scope': 'public'})
+                self.assertEqual(saved['comment']['by'].get('member_id'), mid)
+                self.assertEqual(saved['activity'][-1]['by'].get('member_id'), mid)
+                details = await self.call(self.a, 'GET', f'{self.base}/cards/c1')
+                self.assertEqual(details['comments'][-1]['by']['member_id'], mid)
 
     async def test_a_replayed_comment_saves_once(self):
         first = await self.comment(self.a)

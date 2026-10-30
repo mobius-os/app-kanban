@@ -17,7 +17,7 @@ import {
 import { loadMemberAvatar, resolveMemberHandles, pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay, acceptSharedPoll, createSharedRefreshLifecycle, notifyOwner, markMentionsRead } from '../sync.js'
 import { alertCapacity, formatBytes } from '../capacityAlerts.js'
 import { applyBoardOp, columnMoveAnchor, cardPullUrls, hasExternalNotes } from '../operations.js'
-import { cardTimeline, mergeActivity, MAX_NOTES_CHARS } from '../activity.js'
+import { cardTimeline, mergeActivity, entryAuthorship, MAX_NOTES_CHARS } from '../activity.js'
 import { parsePullRequestUrl, pullRequestStatus } from '../prMatching.js'
 import { acknowledgeRecoveredBoardOps, applyPendingBoardOps, enqueuePendingBoardOp, readPendingBoardOps, readRecoveredBoardOps, exportUnsyncedBoardOps, replayPendingBoardOps, hasRecoverableBoardOps } from '../pendingOps.js'
 import { createBoardRepository, isRetryableBoardError, replayOutcomeForBoardError } from '../boardRepository.js'
@@ -2193,12 +2193,8 @@ export default memo(function Board({
   const openCardFullNotesKnown = !hasExternalNotes(openCard_) || openDetails?.status === 'ok'
   // Activity by someone on a shared board names them as the board shows them;
   // on a private board every entry is this owner's (or their agent's).
-  const activityActor = entry => {
-    const name = entry.by ? nameForRef(assignmentRef({ label: entry.by.name, host: entry.by.host })) : 'you'
-    const who = name === 'you' ? 'You' : name
-    if (entry.via !== 'agent') return who
-    return who === 'You' ? 'Your agent' : `${who}’s agent`
-  }
+  const authorContext = { shared: Boolean(share), memberIds: selfMember?.member_ids || (selfMember?.member_id ? [selfMember.member_id] : []) }
+  const activityActor = entry => entryAuthorship(entry, authorContext).label
   const openTimeline = openCard_ && !isDraftCard ? cardTimeline({
     card: openCard_,
     activity: openDetails?.activity || [],
@@ -2207,12 +2203,14 @@ export default memo(function Board({
   }) : []
   // A comment names its author like activity does; on a private board every
   // comment is the owner's. Own comments get the tinted bubble.
-  const ownComment = comment => !comment.by
-    || nameForRef(assignmentRef({ label: comment.by.name, host: comment.by.host })) === 'you'
+  const ownComment = comment => entryAuthorship(comment, authorContext).own
   const commentAvatar = comment => {
-    const host = comment.by?.host || ''
-    const member = (host && collaboratorForHost(displayMembers || [], host)) || { host, name: comment.by?.name || 'You' }
-    return <MemberAvatar member={{ ...member, avatar: memberAvatars[host] || '' }} small presence={false} />
+    // Never borrow someone's avatar merely because a peer claimed their host.
+    const mid = comment.by?.member_id
+    const member = mid && (displayMembers || []).find(m => m.member_id === mid || m.member_ids?.includes(mid))
+    const own = ownComment(comment)
+    return <MemberAvatar member={{ name: own ? 'You' : (comment.by?.name || 'Unverified author'),
+      avatar: own && member ? memberAvatars[member.host] || '' : '' }} small presence={false} />
   }
   // People the composer can @mention: this board's members, labelled the way
   // the board shows them. memberLabel keeps a handle's @, so the picker strips

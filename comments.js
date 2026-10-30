@@ -34,7 +34,8 @@ export function normalizeComment(comment) {
   // A private board's comments carry no author: they are the owner's.
   if (comment.by && typeof comment.by === 'object') {
     const by = { host: clip(comment.by.host), name: clip(comment.by.name) }
-    if (by.host || by.name) normalized.by = by
+    if (typeof comment.by.member_id === 'string' && comment.by.member_id.trim()) by.member_id = comment.by.member_id.trim()
+    if (by.host || by.name || by.member_id) normalized.by = by
   }
   return normalized
 }

@@ -413,3 +413,24 @@ test('a mention notification opens its card once, even after leaving and returni
   assert.match(app, /const cardRequestHandled = useCallback\(\(\) => setCardRequest\(null\), \[\]\)/)
   assert.match(app, /onCardRequestHandled=\{cardRequestHandled\}/)
 })
+
+test('authenticated authorship survives comment and activity normalization', async () => {
+  const { normalizeActivityEntry } = await import('../activity.js')
+  const by = { host: 'owner.example', name: 'Owner', member_id: 'attacker' }
+  assert.deepEqual(normalizeComment(comment('auth', '2026-10-09T08:00:00Z', 'Hi', { by })).by, by)
+  assert.deepEqual(normalizeActivityEntry({ id: 'auth', at: '2026-10-09T08:00:00Z', type: 'commented', by }).by, by)
+})
+
+test('shared author labels use membership, never a claimed host, including legacy records', async () => {
+  const { entryAuthorship } = await import('../activity.js')
+  const context = { shared: true, memberIds: ['owner.example'] }
+  const forged = { by: { host: 'owner.example', name: 'Owner', member_id: 'attacker' }, via: 'agent' }
+  assert.deepEqual(entryAuthorship(forged, context), { own: false, label: 'Owner (collaborator)’s agent' })
+  assert.deepEqual(entryAuthorship({ ...forged, by: { host: 'owner.example', name: 'Owner' } }, context),
+    { own: false, label: 'Unverified author' })
+  assert.deepEqual(entryAuthorship({}, context), { own: false, label: 'Unverified author' })
+  assert.deepEqual(entryAuthorship({ ...forged, by: { ...forged.by, member_id: 'owner.example' } }, context),
+    { own: true, label: 'Your agent' })
+  assert.deepEqual(entryAuthorship({ via: 'agent' }), { own: true, label: 'Your agent' })
+  assert.equal(entryAuthorship(forged, { shared: true, memberIds: ['attacker'] }).own, true)
+})
