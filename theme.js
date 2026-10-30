@@ -1192,7 +1192,7 @@ export const CSS = `
 
   @media (prefers-reduced-motion: reduce) {
     .kb-mini-spinner { animation: none; }
-    .kb-saved, .kb-show-more > svg, .kb-fold-chevron, .kb-section-progress > span { transition: none; }
+    .kb-saved, .kb-show-more > svg, .kb-card-tab::after, .kb-section-progress > span { transition: none; }
     .kb-board-enter .kb-col { animation: none; }
     .kb-loading-spinner { animation: none; }
     .kb-board-skeleton-icon,
@@ -1473,7 +1473,7 @@ export const CSS = `
   @media (prefers-reduced-motion: no-preference) { .kb-copy-card-btn.is-copied > svg { animation: kb-copy-pop 0.22s ease-out; } }
   .kb-section { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 14px 0; border-top: 1px solid var(--border); }
   .kb-section-head { min-height: 20px; display: flex; align-items: center; gap: 8px; }
-  .kb-section-head h3, .kb-section-line h3, .kb-fold-toggle h3 { margin: 0; color: var(--muted); font-size: 14px; font-weight: 620; letter-spacing: -0.005em; }
+  .kb-section-head h3, .kb-section-line h3 { margin: 0; color: var(--muted); font-size: 14px; font-weight: 620; letter-spacing: -0.005em; }
   .kb-section-count { color: var(--muted); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .kb-section-progress { flex: 0 1 120px; height: 5px; overflow: hidden; border-radius: 3px; background: var(--surface-2); }
   .kb-section-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.25s ease; }
@@ -1513,31 +1513,60 @@ export const CSS = `
     .kb-check-item:not(.is-editing) .kb-check-delete { display: none; }
     .kb-check-item.is-editing .kb-check-delete { opacity: 1; }
   }
-  .kb-folding { gap: 4px; }
-  .kb-fold-toggle { width: calc(100% + 16px); min-height: 44px; margin: -6px -8px; padding: 0 8px; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 10px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
-  .kb-fold-toggle:hover { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
-  .kb-fold-summary { min-width: 0; margin-left: auto; overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
-  .kb-fold-chevron { width: 15px; height: 15px; flex: 0 0 auto; color: var(--muted); transform: rotate(-90deg); transition: transform 0.2s ease; }
-  .kb-fold-toggle[aria-expanded="true"] .kb-fold-chevron { transform: none; }
-  .kb-card-activity .kb-activity-list { max-height: 460px; margin-top: 8px; overflow-y: auto; overscroll-behavior: contain; }
-  /* Comments: a bounded window about four short comments tall; it scrolls —
-     with no visible scrollbar, like everything here — newest kept in view.
-     The edge fades dissolve a half-scrolled comment instead of slicing its
-     avatar at the boundary, so each fade is a full avatar tall; the matching
-     padding keeps rows at the scroll ends clear of the fade, reading at full
-     strength. */
-  .kb-comments-window { max-height: 300px; margin-top: 8px; padding: 26px 0 22px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); }
-  .kb-comment { display: flex; align-items: flex-start; gap: 10px; }
+  /* ---- Card tabs: Home | Comments | Activity (CardTabs + Board's panels) ----
+     A saved card is one fixed-height sheet: the toolbar and tabs stay put and
+     only the open panel scrolls, so switching tabs never resizes the card. */
+  .kb-card-sheet { --kb-card-pad: 22px; }
+  .kb-card-sheet.is-tabbed { height: min(calc(100dvh - clamp(72px, 11dvh, 120px)), 820px); overflow: hidden; padding-bottom: 0; }
+  .kb-card-sheet.is-tabbed > .kb-card-toolbar, .kb-card-sheet.is-tabbed > .kb-card-tabs { flex: 0 0 auto; }
+  .kb-card-tabs { display: flex; gap: 6px; margin: 4px calc(-1 * var(--kb-card-pad)) 0; padding: 0 var(--kb-card-pad); border-bottom: 1px solid var(--border); }
+  .kb-card-tab { position: relative; min-height: 44px; display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; border: 0; background: transparent; color: var(--muted); font: 620 14px/1 var(--font); white-space: nowrap; cursor: pointer; }
+  .kb-card-tab:first-child { margin-left: -10px; }
+  .kb-card-tab:hover, .kb-card-tab[aria-selected="true"] { color: var(--text); }
+  .kb-card-tab:focus-visible { outline-offset: -4px; border-radius: 10px; }
+  .kb-card-tab::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; border-radius: 2px 2px 0 0; background: transparent; transition: background 0.12s ease; }
+  .kb-card-tab[aria-selected="true"]::after { background: var(--accent); }
+  .kb-card-tab .kb-view-count { font-weight: 650; }
+  .kb-card-tab[aria-selected="true"] .kb-view-count { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+  .kb-card-sheet.is-tabbed > .kb-card-panel { flex: 1 1 auto; min-height: 0; margin: 0 calc(-1 * var(--kb-card-pad)); padding: 16px var(--kb-card-pad) 18px; overflow-y: auto; overscroll-behavior: contain; }
+  .kb-card-sheet.is-tabbed > .kb-card-panel-comments { display: flex; flex-direction: column; padding-top: 0; overflow: visible; }
+  .kb-card-sheet.is-tabbed > .kb-card-panel[hidden] { display: none; }
+  @media (max-width: 640px) {
+    .kb-card-sheet { --kb-card-pad: 16px; }
+    .kb-card-sheet.is-tabbed { height: calc(100dvh - max(16px, env(safe-area-inset-top))); }
+  }
+  .kb-card-comments, .kb-card-activity { min-height: 100%; display: flex; flex-direction: column; }
+  .kb-card-comments { flex: 1 1 auto; min-height: 0; }
+  .kb-day-break { margin: 4px 0 -2px; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; font-weight: 650; }
+  .kb-day-break::before, .kb-day-break::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--border); }
+  .kb-day-group + .kb-day-group { margin-top: 12px; }
+  .kb-day-group > .kb-day-break { margin: 0 0 4px; }
+  .kb-tab-empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 40px 20px; color: var(--muted); text-align: center; }
+  .kb-tab-empty-icon { width: 52px; height: 52px; margin-bottom: 6px; display: grid; place-items: center; border-radius: 16px; background: var(--surface-2); }
+  .kb-tab-empty-icon > svg { width: 24px; height: 24px; }
+  .kb-tab-empty strong { color: var(--text); font-size: 15px; font-weight: 650; }
+  .kb-tab-empty > span:last-child { max-width: 280px; font-size: 13.5px; line-height: 1.45; }
+  /* Comments fill the tab above the pinned composer and scroll with no
+     visible scrollbar, like everything here. The first comment's auto margin
+     keeps a short conversation next to the composer, as in a chat. The top
+     fade dissolves a half-scrolled comment instead of slicing its avatar, so
+     it is a full avatar tall; the matching padding keeps the rows at the scroll
+     ends clear of the fades. */
+  .kb-comments-window { flex: 1 1 auto; min-height: 0; padding: 26px 0 22px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 22px), transparent 100%); }
+  .kb-comments-window > :first-child { margin-top: auto; }
+  .kb-comment { display: flex; align-items: flex-start; gap: 10px; padding-right: 40px; }
+  .kb-comment.is-own { justify-content: flex-end; padding: 0 0 0 40px; }
   /* Small avatars overlap in the presence stack (margin-left: -6px); in a
      comment row that pulls them outside the scroll window, which clips them. */
   .kb-comment > .kb-member-avatar-small { margin: 2px 0 0; }
-  .kb-comment-body { flex: 1 1 auto; min-width: 0; }
+  .kb-comment-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+  .kb-comment.is-own .kb-comment-body { align-items: flex-end; }
   .kb-comment-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
   .kb-comment-head strong { font-size: 13.5px; font-weight: 650; }
   .kb-comment-head time { color: var(--muted); font-size: 12px; }
-  .kb-comment-bubble { padding: 8px 12px; border-radius: 4px 14px 14px 14px; background: var(--surface-2); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .kb-comment.is-own .kb-comment-bubble { background: color-mix(in srgb, var(--accent) 13%, var(--surface-2)); }
-  .kb-comment-composer { display: flex; align-items: flex-end; gap: 8px; margin-top: 10px; }
+  .kb-comment-bubble { max-width: 100%; padding: 8px 12px; border-radius: 4px 14px 14px 14px; background: var(--surface-2); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .kb-comment.is-own .kb-comment-bubble { border-radius: 14px 4px 14px 14px; background: color-mix(in srgb, var(--accent) 13%, var(--surface-2)); }
+  .kb-comment-composer { flex: 0 0 auto; display: flex; align-items: flex-end; gap: 8px; margin: 0 calc(-1 * var(--kb-card-pad)); padding: 12px var(--kb-card-pad) 0; border-top: 1px solid var(--border); }
   .kb-comment-field { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
   .kb-comment-input { flex: 1 1 auto; min-width: 0; min-height: 40px; max-height: 160px; padding: 9px 12px; resize: none; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; line-height: 1.45; }
   .kb-comment-send { min-height: 40px; }

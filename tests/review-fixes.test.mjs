@@ -327,8 +327,8 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.equal(heading.match(/>New card</g).length, 1, 'New card is never the unconditional heading')
   assert.ok(inOrder(['<StatusPill', 'kb-card-close', '<CardTitleEditor', '<AssigneePicker', '<LabelChip', '<DueChip']),
     'the card header reads status then close; the details row reads assignee, label, then due date')
-  assert.ok(inOrder(['<DescriptionSection', '<AttachmentsSection', '<ChecklistSection', '<PullRequestSection', '<CardActivity', 'kb-card-danger-zone']),
-    'card sections read description, attachments, checklist, pull request, activity, then delete')
+  assert.ok(inOrder(['<DescriptionSection', '<AttachmentsSection', '<ChecklistSection', '<PullRequestSection', 'kb-card-danger-zone', '<CardComments', '<CardActivity']),
+    'Home reads description, attachments, checklist, pull request, then delete; Comments and Activity follow as their own tabs')
   assert.equal(sheetSource.match(/<AssigneePicker/g).length, 1, 'one assignee control for every screen size')
   assert.equal(sheetSource.match(/<DueChip/g).length, 1, 'one due-date control for every screen size')
   assert.equal(sheetSource.match(/<StatusPill/g).length, 1, 'one status control for every screen size')

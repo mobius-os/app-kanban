@@ -338,13 +338,13 @@ test('attachments show their first row of files and Show N more like the checkli
   const section = parts.slice(parts.indexOf('export function AttachmentsSection('), parts.indexOf('// ---- comments ----'))
   assert.match(parts, /export const ATTACHMENT_PREVIEW_ITEMS = 3/, 'one row of the three-column grid')
   assert.match(section, /<CardSection title="Attachments"[^>]*meta=\{<span className="kb-section-count">\{count\}<\/span>\}/)
-  assert.doesNotMatch(section, /FoldingSection/, 'attachments no longer fold; Activity still does')
+  assert.doesNotMatch(section, /FoldingSection/, 'attachments never fold')
   assert.match(section, /attachments\.slice\(0, ATTACHMENT_PREVIEW_ITEMS\)/)
   assert.match(section, /<ShowMore expanded=\{expanded\}[^]*?more=\{`Show \$\{hidden\} more`\} less="Show fewer" \/>/, 'the same control and words as the checklist')
   assert.match(section, /if \(count > shownCount\.current && count > ATTACHMENT_PREVIEW_ITEMS\) setExpanded\(true\)/, 'a file added past the first row is shown, not hidden')
   assert.match(section, /if \(!count\) return <section[^]*kb-section-line[^]*Add attachment/, 'with no files the heading line offers the add action')
   assert.match(board, /<AttachmentsSection\s+key=\{openCard_\.id\}/, 'each card starts with the first row only')
-  assert.match(parts, /return <FoldingSection title="Activity"/)
+  assert.match(parts, /return <section className="kb-card-activity" aria-label="Activity">/, 'activity is a tab of its own')
 })
 
 test('board cards show the full title, two lines of description, and only their first picture or file', async () => {

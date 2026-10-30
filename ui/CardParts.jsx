@@ -1,15 +1,16 @@
-// The open card's sections. Each section owns its own preview limit and
-// empty state, so a card opens at a predictable size however much it holds:
-// a few lines of description, the first checklist items, and Attachments and
-// Activity folded to one line each.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+// The open card's parts: the Home tab's sections, each owning its own preview
+// limit and empty state so a card opens at a predictable size however much it
+// holds (a few lines of description, the first checklist items, the first row
+// of attachments), and the Comments and Activity tabs.
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Calendar, Check, ChevronDown, ChevronLeft, Copy, DotsHorizontal, Paperclip, Pencil, Plus, PullRequestClosed, PullRequestDraft, PullRequestMerged, PullRequestOpen, Reload, Trash } from '@openai/apps-sdk-ui/components/Icon'
+import { Calendar, Chat, Check, ChevronDown, ChevronLeft, Clock, Copy, DotsHorizontal, Paperclip, Pencil, Plus, PullRequestClosed, PullRequestDraft, PullRequestMerged, PullRequestOpen, Reload, Trash } from '@openai/apps-sdk-ui/components/Icon'
 import { useModalFocus } from './modalFocus.js'
 import { describeAssignmentEvent, restorableAssignment } from '../assignment.js'
 import { isPreviewImage, loadCardAttachment, MAX_CARD_ATTACHMENTS } from '../attachments.js'
 import { assigneeAvatar, checklistProgress, copyCardToClipboard, dueDateStatus, formatDueDate, labelDisplayName, labelsInOrder, MAX_LABEL_NAME_CHARS, shortLinkText } from '../domain.js'
 import { MAX_COMMENT_CHARS, mentionParts, mentionQuery, newCommentId } from '../comments.js'
+import { formatActivityClock, formatActivityTime, groupByDay } from '../activity.js'
 import { cardPullUrls } from '../operations.js'
 import { parsePullRequestUrl } from '../prMatching.js'
 
@@ -265,18 +266,47 @@ export function CardSection({ title, meta, loading, className = '', children }) 
   </section>
 }
 
-// A section folded to one line: its title, an optional count or spinner, a
-// summary on the right, and a chevron. Opening it shows the children.
-export function FoldingSection({ title, meta, summary, open, onToggle, className = '', children }) {
-  return <section className={`kb-section kb-folding${className ? ` ${className}` : ''}`} aria-label={title}>
-    <button type="button" className="kb-fold-toggle" aria-expanded={open} onClick={onToggle}>
-      <h3>{title}</h3>
-      {meta}
-      <span className="kb-fold-summary">{open ? '' : summary}</span>
-      <ChevronDown aria-hidden="true" className="kb-fold-chevron" />
-    </button>
-    {open && children}
-  </section>
+const CARD_TABS = [['home', 'Home'], ['comments', 'Comments'], ['activity', 'Activity']]
+
+// Home | Comments | Activity across the top of an open card. Arrow keys move
+// between the tabs and only the selected one is in the Tab order, as in any
+// tab list; each tab names a panel the Board renders (kb-card-panel-<id>).
+export function CardTabs({ tab, counts, onChange }) {
+  const listRef = useRef(null)
+  const step = event => {
+    const offset = { ArrowRight: 1, ArrowLeft: -1 }[event.key]
+    if (!offset) return
+    event.preventDefault()
+    const index = CARD_TABS.findIndex(([id]) => id === tab)
+    const [next] = CARD_TABS[(index + offset + CARD_TABS.length) % CARD_TABS.length]
+    onChange(next)
+    listRef.current?.querySelector(`#kb-card-tab-${next}`)?.focus()
+  }
+  return <div ref={listRef} className="kb-card-tabs" role="tablist" aria-label="Card sections" onKeyDown={step}>
+    {CARD_TABS.map(([id, label]) => <button
+      key={id}
+      id={`kb-card-tab-${id}`}
+      type="button"
+      role="tab"
+      className="kb-card-tab"
+      aria-selected={tab === id}
+      aria-controls={`kb-card-panel-${id}`}
+      tabIndex={tab === id ? 0 : -1}
+      onClick={() => onChange(id)}
+    >
+      {label}
+      {counts[id] > 0 && <span className="kb-view-count">{counts[id]}</span>}
+    </button>)}
+  </div>
+}
+
+// What a Comments or Activity tab shows before there is anything in it.
+function EmptyTab({ icon: Icon, title, children }) {
+  return <div className="kb-tab-empty">
+    <span className="kb-tab-empty-icon" aria-hidden="true"><Icon /></span>
+    <strong>{title}</strong>
+    <span>{children}</span>
+  </div>
 }
 
 // On a phone the menu becomes a bottom sheet in document.body: the card sheet
@@ -920,30 +950,27 @@ function CommentText({ text, labels }) {
     : <LinkifiedText key={index} text={part.text} />)
 }
 
-// Comments fold to one line above Activity, exactly like Activity. Open, they
-// show a bounded window — about four short comments tall — that scrolls
-// without a visible scrollbar, newest kept in view, with the composer below.
+// The Comments tab: the conversation fills the card above a composer pinned
+// to its bottom, grouped by day, and scrolls without a visible scrollbar with
+// the newest comment in view whenever the tab opens (`active`).
 // Enter posts, Shift+Enter makes a new line; typing @ lists the board's
 // members (`mentionables`) and Enter/Tab or a click inserts the picked name.
-export function CardComments({ card, comments, status, canWrite, posting, postError, actorName, avatarFor, isOwn, onPost, mentionables = [] }) {
-  const [open, setOpen] = useState(false)
+export function CardComments({ card, comments, status, canWrite, posting, postError, actorName, avatarFor, isOwn, onPost, mentionables = [], active }) {
   const [draft, setDraft] = useState('')
   // The @ the composer is completing: {start, query}, null when none.
   const [mention, setMention] = useState(null)
   const [mentionIndex, setMentionIndex] = useState(0)
+  // The @ that Escape dismissed: React re-reads the caret on key-up, which
+  // would reopen the picker at once, so only a real text edit (or posting)
+  // clears it — never a caret move alone.
+  const [dismissedMention, setDismissedMention] = useState(null)
   const windowRef = useRef(null)
   const inputRef = useRef(null)
-  useEffect(() => { setOpen(false); setDraft(''); setMention(null) }, [card.id])
-  const loading = status === 'loading'
-  const count = comments.length || (Number.isInteger(card.commentsCount) && card.commentsCount > 0 ? card.commentsCount : 0)
-  const latest = comments[comments.length - 1]
-  const summary = latest
-    ? `Last comment ${lowerFirst(formatActivityTime(latest.at))} by ${actorName(latest)}`
-    : loading ? '' : 'No comments yet'
+  useEffect(() => { setDraft(''); setMention(null); setDismissedMention(null) }, [card.id])
   useLayoutEffect(() => {
     const scroller = windowRef.current
-    if (open && scroller) scroller.scrollTop = scroller.scrollHeight
-  }, [open, comments.length])
+    if (active && scroller) scroller.scrollTop = scroller.scrollHeight
+  }, [active, comments.length])
   const resize = () => {
     const input = inputRef.current
     if (!input) return
@@ -963,6 +990,7 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
     submissionRef.current = null
     setDraft('')
     setMention(null)
+    setDismissedMention(null)
     requestAnimationFrame(() => { resize(); inputRef.current?.focus() })
   }
   // Members whose handle or any word of whose name starts with the @ being
@@ -972,7 +1000,8 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
   const candidates = query === null ? [] : mentionables.filter(member =>
     [member.label, ...String(member.name || '').replace(/^@/u, '').split(/\s+/u)]
       .some(value => value && value.toLowerCase().startsWith(query))).slice(0, 6)
-  const picker = candidates.length > 0
+  const mentionKey = mention ? `${mention.start}:${mention.query}` : null
+  const picker = candidates.length > 0 && mentionKey !== dismissedMention
   useEffect(() => { setMentionIndex(0) }, [mention?.start, mention?.query])
   const menuRef = useRef(null)
   // The scrollbar is hidden app-wide, so the arrowed-to member must be
@@ -1008,7 +1037,7 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
         // Close the picker, not the card under it.
         event.preventDefault()
         event.stopPropagation()
-        setMention(null)
+        setDismissedMention(mentionKey)
         return
       }
     }
@@ -1016,27 +1045,24 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
     event.preventDefault()
     post()
   }
-  const meta = <>
-    {count > 0 && <span className="kb-section-count">{count}</span>}
-    {loading && <DelayedSpinner label="Loading comments" />}
-  </>
-  return <FoldingSection title="Comments" meta={meta} summary={summary} open={open} onToggle={() => setOpen(value => !value)} className="kb-card-comments">
+  return <section className="kb-card-comments" aria-label="Comments">
+    {status === 'loading' && <DelayedSpinner label="Loading comments" />}
     {status === 'unsupported' && <p className="kb-activity-note">Comments appear once this board’s host updates Kanban.</p>}
     {status === 'error' && <p className="kb-activity-note">Comments couldn’t be loaded right now.</p>}
     {comments.length > 0 && <div className="kb-comments-window" ref={windowRef} tabIndex={0} aria-label="Comments, oldest first">
-      {comments.map(comment => <div key={comment.id} className={`kb-comment${isOwn(comment) ? ' is-own' : ''}`}>
-        {avatarFor(comment)}
-        <div className="kb-comment-body">
-          <div className="kb-comment-head">
-            <strong>{actorName(comment)}</strong>
-            <time dateTime={comment.at}>{formatActivityTime(comment.at)}</time>
-          </div>
-          <div className="kb-comment-bubble"><CommentText text={comment.text} labels={mentionables.map(member => member.label)} /></div>
-        </div>
-      </div>)}
+      {groupByDay(comments, comment => comment.at).map(({ day, items }, index) => <Fragment key={`${day}-${index}`}>
+        {day && <h4 className="kb-day-break">{day}</h4>}
+        {items.map(comment => <CommentRow key={comment.id} comment={comment} own={isOwn(comment)} author={actorName(comment)}
+          avatar={avatarFor(comment)} labels={mentionables.map(member => member.label)} />)}
+      </Fragment>)}
     </div>}
+    {comments.length === 0 && status === 'ok' && <EmptyTab icon={Chat} title="No comments yet">
+      {canWrite ? 'Ask a question or bring someone in with an @mention.' : 'Nobody has commented on this card yet.'}
+    </EmptyTab>}
     {canWrite && status !== 'unsupported' && <div className="kb-comment-composer">
-      <div className="kb-comment-field">
+      {/* The card's modal hears Escape first (capture phase); while the
+          picker is open the field claims it so Escape closes only the picker. */}
+      <div className="kb-comment-field" data-modal-inline-editor={picker ? '' : undefined}>
         {picker && <div className="kb-mention-menu" role="listbox" aria-label="Mention someone" ref={menuRef}>
           {candidates.map((member, index) => <button
             key={member.key}
@@ -1063,7 +1089,7 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
           placeholder="Write a comment…"
           aria-label="Write a comment"
           disabled={posting}
-          onChange={event => { setDraft(event.target.value); trackMention(event.target); resize() }}
+          onChange={event => { setDraft(event.target.value); setDismissedMention(null); trackMention(event.target); resize() }}
           onSelect={event => trackMention(event.target)}
           onKeyDown={composerKeys}
         />
@@ -1073,62 +1099,64 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
       </button>
     </div>}
     {postError && <p className="kb-attachment-error" role="alert">{postError}</p>}
-  </FoldingSection>
+  </section>
+}
+
+// Like a chat: your own comments sit on the right without an avatar (the
+// name stays for screen readers), everyone else's on the left with theirs.
+function CommentRow({ comment, own, author, avatar, labels }) {
+  return <div className={`kb-comment${own ? ' is-own' : ''}`}>
+    {!own && avatar}
+    <div className="kb-comment-body">
+      <div className="kb-comment-head">
+        <strong className={own ? 'kb-visually-hidden' : undefined}>{author}</strong>
+        <time dateTime={comment.at} title={formatActivityTime(comment.at)}>{formatActivityClock(comment.at)}</time>
+      </div>
+      <div className="kb-comment-bubble"><CommentText text={comment.text} labels={labels} /></div>
+    </div>
+  </div>
 }
 
 // ---- activity ----
 
-export function formatActivityTime(iso, now = new Date()) {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date)
-  if (date.toDateString() === now.toDateString()) return `Today, ${time}`
-  const yesterday = new Date(now)
-  yesterday.setDate(now.getDate() - 1)
-  if (date.toDateString() === yesterday.toDateString()) return `Yesterday, ${time}`
-  const day = new Intl.DateTimeFormat(undefined, {
-    month: 'short', day: 'numeric', ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
-  }).format(date)
-  return `${day}, ${time}`
-}
-
-const lowerFirst = text => text ? text.charAt(0).toLocaleLowerCase() + text.slice(1) : text
-
+// The Activity tab: the card's whole history, newest first, grouped by day.
 export function CardActivity({ card, timeline, status, canWrite, nameFor, onRestore }) {
-  const [open, setOpen] = useState(false)
-  useEffect(() => { setOpen(false) }, [card.id])
-  const latest = timeline[0]
-  const loading = status === 'loading'
   const restoreEvent = timeline.find(item => item.event && !item.event.observed)?.event
   const restore = canWrite && restoreEvent ? restorableAssignment(restoreEvent, card) : null
-  const summary = latest
-    ? `Last change ${lowerFirst(formatActivityTime(latest.at))}${latest.actor ? ` by ${latest.actor}` : ''}`
-    : loading ? '' : 'No changes yet'
-  const meta = <>
-    {timeline.length > 0 && <span className="kb-section-count">{timeline.length}</span>}
-    {loading && <DelayedSpinner label="Loading activity" />}
-  </>
-  return <FoldingSection title="Activity" meta={meta} summary={summary} open={open} onToggle={() => setOpen(value => !value)} className="kb-card-activity">
+  const restoreButton = restore && <button type="button" className="kb-btn kb-btn-quiet kb-activity-restore" onClick={() => onRestore(restore)}>
+    {nameFor(restore) === 'you' ? 'Put me back' : `Restore ${nameFor(restore)}`}
+  </button>
+  return <section className="kb-card-activity" aria-label="Activity">
+    {status === 'loading' && <DelayedSpinner label="Loading activity" />}
     {status === 'unsupported' && <p className="kb-activity-note">Full activity appears once this board’s host updates Kanban. Assignment changes are shown below.</p>}
     {status === 'error' && <p className="kb-activity-note">Activity couldn’t be loaded right now.</p>}
-    {timeline.length > 0 && <ol className="kb-activity-list" tabIndex={0} aria-label="Card activity, newest first">
-      {timeline.map(item => <li key={item.key} className={`kb-activity-item is-${item.kind}`}>
-        <span className="kb-activity-dot" aria-hidden="true" />
-        <div className="kb-activity-copy">
-          {item.text === undefined
-            ? <span>{describeAssignmentEvent(item.event, nameFor)}</span>
-            : <span><strong>{item.actor}</strong> {item.text}</span>}
-          <small>
-            <time dateTime={item.at}>{formatActivityTime(item.at)}</time>
-            {item.kind === 'observed' && <> · changed outside Kanban</>}
-          </small>
-        </div>
-        {item.event && item.event === restoreEvent && restore && (
-          <button type="button" className="kb-btn kb-btn-quiet kb-activity-restore" onClick={() => onRestore(restore)}>
-            {nameFor(restore) === 'you' ? 'Put me back' : `Restore ${nameFor(restore)}`}
-          </button>
-        )}
-      </li>)}
-    </ol>}
-  </FoldingSection>
+    {timeline.length > 0 && <div className="kb-activity-days" tabIndex={0} aria-label="Card activity, newest first">
+      {groupByDay(timeline, item => item.at).map(({ day, items }, index) => <div key={`${day}-${index}`} className="kb-day-group">
+        {day && <h4 className="kb-day-break">{day}</h4>}
+        <ol className="kb-activity-list">
+          {items.map(item => <ActivityRow key={item.key} item={item} nameFor={nameFor}
+            action={item.event === restoreEvent ? restoreButton : null} />)}
+        </ol>
+      </div>)}
+    </div>}
+    {timeline.length === 0 && status !== 'loading' && <EmptyTab icon={Clock} title="No changes yet">
+      Moves, edits, assignments and comments on this card will show up here.
+    </EmptyTab>}
+  </section>
+}
+
+function ActivityRow({ item, nameFor, action }) {
+  return <li className={`kb-activity-item is-${item.kind}`}>
+    <span className="kb-activity-dot" aria-hidden="true" />
+    <div className="kb-activity-copy">
+      {item.text === undefined
+        ? <span>{describeAssignmentEvent(item.event, nameFor)}</span>
+        : <span><strong>{item.actor}</strong> {item.text}</span>}
+      <small>
+        <time dateTime={item.at} title={formatActivityTime(item.at)}>{formatActivityClock(item.at)}</time>
+        {item.kind === 'observed' && <> · changed outside Kanban</>}
+      </small>
+    </div>
+    {action}
+  </li>
 }

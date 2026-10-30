@@ -211,3 +211,47 @@ export function cardTimeline({ card, activity, assignmentTimeline, actorName }) 
   }))
   return [...changes, ...assignments].sort((left, right) => Date.parse(right.at) - Date.parse(left.at))
 }
+
+// ---- times shown in the card's Comments and Activity tabs ----
+
+const validDate = iso => {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+const clockTime = date => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date)
+
+// "Today", "Yesterday", or a short date ("Oct 26"; the year only when it isn't this one).
+export function formatActivityDay(iso, now = new Date()) {
+  const date = validDate(iso)
+  if (!date) return ''
+  if (date.toDateString() === now.toDateString()) return 'Today'
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short', day: 'numeric', ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
+  }).format(date)
+}
+
+export function formatActivityClock(iso) {
+  const date = validDate(iso)
+  return date ? clockTime(date) : ''
+}
+
+export function formatActivityTime(iso, now = new Date()) {
+  const date = validDate(iso)
+  return date ? `${formatActivityDay(iso, now)}, ${clockTime(date)}` : ''
+}
+
+// Consecutive items that fall on the same day, in their given order, so a
+// list can show each day once and every entry only its time.
+export function groupByDay(items, timeOf, now = new Date()) {
+  return items.reduce((groups, item) => {
+    const day = formatActivityDay(timeOf(item), now)
+    const last = groups[groups.length - 1]
+    if (last && last.day === day) last.items.push(item)
+    else groups.push({ day, items: [item] })
+    return groups
+  }, [])
+}

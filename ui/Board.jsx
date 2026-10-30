@@ -31,7 +31,7 @@ import {
 import { useModalFocus } from './modalFocus.js'
 import { appVisible, onAppVisibilityChange } from '../visibility.js'
 import {
-  AttachmentImage, AttachmentsSection, CardActivity, CardComments, CardTileAttachment, ChecklistSection, CopyCardButton, DescriptionSection, DueChip, dueTone,
+  AttachmentImage, AttachmentsSection, CardActivity, CardComments, CardTabs, CardTileAttachment, ChecklistSection, CopyCardButton, DescriptionSection, DueChip, dueTone,
   InlineCardText, LabelChip, LinkifiedText, MemberAvatar, memberLabel, MenuButton, pressedOutside, PullRequestSection, SaveControl, StatusPill,
 } from './CardParts.jsx'
 import {
@@ -666,6 +666,7 @@ export default memo(function Board({
   const lightboxRef = useModalFocus(Boolean(previewAttachment), () => setPreviewAttachment(null))
   const [confirmDeleteCol, setConfirmDeleteCol] = useState(null)
   const [confirmDeleteCard, setConfirmDeleteCard] = useState(false)
+  const [cardTab, setCardTab] = useState('home')
   const [drag, setDrag] = useState(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [syncNote, setSyncNote] = useState('')
@@ -758,7 +759,8 @@ export default memo(function Board({
   const lastInteractionAtRef = useRef(Date.now())
   const fileInputRef = useRef(null)
   const cardSheetRef = useModalFocus(Boolean(openCardId), () => { setOpenCardId(null); setDraftCard(null) })
-  useEffect(() => { setConfirmDeleteCard(false) }, [openCardId])
+  // Every card opens on Home, including one opened from a notification.
+  useEffect(() => { setConfirmDeleteCard(false); setCardTab('home') }, [openCardId])
 
   const showDetails = details => {
     cardDetailsRef.current = details
@@ -2181,6 +2183,13 @@ export default memo(function Board({
     handle: member.handle,
     avatar: memberAvatars[member.host] || '',
   })).filter(member => member.label)
+  const openCommentCount = openDetails?.comments?.length
+    || (Number.isInteger(openCard_?.commentsCount) && openCard_.commentsCount > 0 ? openCard_.commentsCount : 0)
+  // A draft has one plain body; a saved card's three tabs share one sheet, and
+  // hidden panels stay mounted so a draft comment or an open list survives a switch.
+  const cardPanel = id => isDraftCard ? {} : {
+    id: `kb-card-panel-${id}`, role: 'tabpanel', 'aria-labelledby': `kb-card-tab-${id}`, hidden: cardTab !== id,
+  }
   const createdLabel = openCard_?.createdAt && !Number.isNaN(Date.parse(openCard_.createdAt))
     ? `Created ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: new Date(openCard_.createdAt).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }).format(new Date(openCard_.createdAt))}`
     : ''
@@ -2460,7 +2469,7 @@ export default memo(function Board({
           <div
             ref={cardSheetRef}
             tabIndex={-1}
-            className={`kb-sheet kb-card-sheet${attachmentDropActive ? ' is-dropping' : ''}`}
+            className={`kb-sheet kb-card-sheet${isDraftCard ? '' : ' is-tabbed'}${attachmentDropActive ? ' is-dropping' : ''}`}
             role="dialog"
             aria-modal="true"
             aria-label={isDraftCard ? 'New card' : 'Card details'}
@@ -2478,122 +2487,132 @@ export default memo(function Board({
               <SaveControl state={cardSaveState} tick={savedTick} />
               <button type="button" className="kb-iconbtn kb-card-close" aria-label="Close card" title="Close. Your changes are already saved." onClick={closeCard}><X /></button>
             </div>
-            <CardTitleEditor card={openCard_} canWrite={access.canWrite} onDirtyChange={noteCardEditing} onCommit={title => {
-              setCardSaveState('saving')
-              const saved = commitCardTitle(title)
-              if (saved === false) setCardSaveState('idle')
-              return saved
-            }} onCancel={() => { if (isDraftCard) { setDraftCard(null); setOpenCardId(null) } }} />
-            <div className="kb-detail-chips">
-              <AssigneePicker
-                card={openCard_}
-                canWrite={access.canWrite}
-                members={displayMembers}
-                share={share}
-                chip
-                onUpdate={patch => isDraftCard ? patchOpenCard(patch) : assignCard(openCard_.id, { label: patch.assignee, host: patch.assigneeHost })}
-              />
-              <LabelChip label={openCard_.label} labels={LABELS} names={board.labelNames} canWrite={access.canWrite}
-                onChange={label => patchOpenCard({ label })} onRename={(color, name) => mutate({ type: 'name-label', color, name })} />
-              <DueChip due={openCard_.due} canWrite={access.canWrite} onChange={due => patchOpenCard({ due })} />
-              {!isDraftCard && <CopyCardButton key={openCard_.id} title={openCard_.title}
-                notes={shownNotes(openDetails, openCard_)} ready={openCardFullNotesKnown} />}
-            </div>
-
-            <DescriptionSection
-              cardId={openCard_.id}
-              text={shownNotes(openDetails, openCard_)}
-              canWrite={access.canWrite}
-              editable={openCardFullNotesKnown}
-              loading={hasExternalNotes(openCard_) && (!openDetails || openDetails.status === 'loading')}
-              maxLength={share && openDetails?.status === 'ok' ? MAX_NOTES_CHARS : null}
-              conflict={notesConflict?.cardId === openCard_.id}
-              error={notesError}
-              onEditStart={() => beginNotesEdit(openCard_.id)}
-              onDirtyChange={noteCardEditing}
-              onCommit={notes => {
+            {!isDraftCard && <CardTabs tab={cardTab} onChange={setCardTab} counts={{ comments: openCommentCount, activity: openTimeline.length }} />}
+            <div className="kb-card-panel" {...cardPanel('home')}>
+              <CardTitleEditor card={openCard_} canWrite={access.canWrite} onDirtyChange={noteCardEditing} onCommit={title => {
                 setCardSaveState('saving')
-                return saveCardNotes(openCard_.id, notes, notesEditBase(openCard_.id))
-              }}
-              onKeepMine={() => resolveNotesConflict(true)}
-              onUseTheirs={() => resolveNotesConflict(false)}
-            />
-
-            {access.canWrite && <input
-              ref={fileInputRef}
-              className="kb-visually-hidden"
-              type="file"
-              multiple
-              tabIndex={-1}
-              disabled={isDraftCard || attachmentBusy}
-              onChange={attachFromInput}
-            />}
-            <AttachmentsSection
-              key={openCard_.id}
-              boardId={boardId}
-              share={share}
-              attachments={openCard_.attachments || []}
-              canWrite={access.canWrite}
-              isDraft={isDraftCard}
-              busy={attachmentBusy}
-              error={attachmentError}
-              onPick={() => fileInputRef.current?.click()}
-              onPreview={attachment => setPreviewAttachment(attachment)}
-              onDownload={downloadAttachment}
-              onRemove={attachment => removeAttachment(openCard_.id, attachment)}
-            />
-
-            <ChecklistSection
-              checklist={Array.isArray(openCard_.checklist) ? openCard_.checklist : []}
-              canWrite={access.canWrite}
-              onAdd={text => addCheckItem(openCard_.id, text)}
-              onToggle={itemId => toggleCheckItem(openCard_.id, itemId)}
-              onDelete={itemId => removeCheckItem(openCard_.id, itemId)}
-              onEdit={(itemId, text) => editCheckItem(openCard_.id, itemId, text)}
-            />
-
-            <PullRequestSection card={openCard_} canWrite={access.canWrite} online={online} statuses={pullStatuses}
-              onUpdate={(previousUrl, nextUrl) => mutateCard({ type: 'edit-pull-request', cardId: openCard_.id, previousUrl, nextUrl })}
-              onRefresh={() => setPullStatusRefresh(value => value + 1)} />
-
-            {!isDraftCard && <>
-            <CardComments
-              card={openCard_}
-              comments={openDetails?.comments || []}
-              status={openDetails?.status || 'loading'}
-              canWrite={access.canWrite}
-              posting={commentPosting}
-              postError={commentError}
-              actorName={activityActor}
-              avatarFor={commentAvatar}
-              isOwn={ownComment}
-              onPost={postComment}
-              mentionables={mentionables}
-            />
-            <CardActivity
-              card={openCard_}
-              timeline={openTimeline}
-              status={openDetails?.status || 'loading'}
-              canWrite={access.canWrite}
-              nameFor={nameForRef}
-              onRestore={ref => assignCard(openCard_.id, ref)}
-            />
-            {access.canWrite && (confirmDeleteCard
-              ? <div ref={cardDeleteConfirmRef} tabIndex={-1} className="kb-col-confirm kb-card-delete-confirm" role="alertdialog" aria-modal="true" aria-label="Delete card">
-                <div className="kb-col-confirm-copy">Delete this card{share ? ' for everyone on this board' : ''}? This can’t be undone.</div>
-                <div className="kb-col-confirm-actions">
-                  <button className="kb-btn kb-btn-quiet" onClick={closeDeleteCardConfirm}>Cancel</button>
-                  <button className="kb-btn kb-btn-danger" onClick={() => deleteCard(openCard_.id)}>Delete</button>
-                </div>
+                const saved = commitCardTitle(title)
+                if (saved === false) setCardSaveState('idle')
+                return saved
+              }} onCancel={() => { if (isDraftCard) { setDraftCard(null); setOpenCardId(null) } }} />
+              <div className="kb-detail-chips">
+                <AssigneePicker
+                  card={openCard_}
+                  canWrite={access.canWrite}
+                  members={displayMembers}
+                  share={share}
+                  chip
+                  onUpdate={patch => isDraftCard ? patchOpenCard(patch) : assignCard(openCard_.id, { label: patch.assignee, host: patch.assigneeHost })}
+                />
+                <LabelChip label={openCard_.label} labels={LABELS} names={board.labelNames} canWrite={access.canWrite}
+                  onChange={label => patchOpenCard({ label })} onRename={(color, name) => mutate({ type: 'name-label', color, name })} />
+                <DueChip due={openCard_.due} canWrite={access.canWrite} onChange={due => patchOpenCard({ due })} />
+                {!isDraftCard && <CopyCardButton key={openCard_.id} title={openCard_.title}
+                  notes={shownNotes(openDetails, openCard_)} ready={openCardFullNotesKnown} />}
               </div>
-              : <div className="kb-card-danger-zone">
-                <button ref={deleteCardButtonRef} className="kb-btn kb-delete-card" onClick={() => setConfirmDeleteCard(true)}>
-                  <Trash aria-hidden="true" />
-                  Delete card
-                </button>
-                {createdLabel && <span className="kb-card-created">{createdLabel}</span>}
-              </div>)}
-            {!access.canWrite && createdLabel && <div className="kb-card-danger-zone"><span className="kb-card-created">{createdLabel}</span></div>}
+
+              <DescriptionSection
+                cardId={openCard_.id}
+                text={shownNotes(openDetails, openCard_)}
+                canWrite={access.canWrite}
+                editable={openCardFullNotesKnown}
+                loading={hasExternalNotes(openCard_) && (!openDetails || openDetails.status === 'loading')}
+                maxLength={share && openDetails?.status === 'ok' ? MAX_NOTES_CHARS : null}
+                conflict={notesConflict?.cardId === openCard_.id}
+                error={notesError}
+                onEditStart={() => beginNotesEdit(openCard_.id)}
+                onDirtyChange={noteCardEditing}
+                onCommit={notes => {
+                  setCardSaveState('saving')
+                  return saveCardNotes(openCard_.id, notes, notesEditBase(openCard_.id))
+                }}
+                onKeepMine={() => resolveNotesConflict(true)}
+                onUseTheirs={() => resolveNotesConflict(false)}
+              />
+
+              {access.canWrite && <input
+                ref={fileInputRef}
+                className="kb-visually-hidden"
+                type="file"
+                multiple
+                tabIndex={-1}
+                disabled={isDraftCard || attachmentBusy}
+                onChange={attachFromInput}
+              />}
+              <AttachmentsSection
+                key={openCard_.id}
+                boardId={boardId}
+                share={share}
+                attachments={openCard_.attachments || []}
+                canWrite={access.canWrite}
+                isDraft={isDraftCard}
+                busy={attachmentBusy}
+                error={attachmentError}
+                onPick={() => fileInputRef.current?.click()}
+                onPreview={attachment => setPreviewAttachment(attachment)}
+                onDownload={downloadAttachment}
+                onRemove={attachment => removeAttachment(openCard_.id, attachment)}
+              />
+
+              <ChecklistSection
+                checklist={Array.isArray(openCard_.checklist) ? openCard_.checklist : []}
+                canWrite={access.canWrite}
+                onAdd={text => addCheckItem(openCard_.id, text)}
+                onToggle={itemId => toggleCheckItem(openCard_.id, itemId)}
+                onDelete={itemId => removeCheckItem(openCard_.id, itemId)}
+                onEdit={(itemId, text) => editCheckItem(openCard_.id, itemId, text)}
+              />
+
+              <PullRequestSection card={openCard_} canWrite={access.canWrite} online={online} statuses={pullStatuses}
+                onUpdate={(previousUrl, nextUrl) => mutateCard({ type: 'edit-pull-request', cardId: openCard_.id, previousUrl, nextUrl })}
+                onRefresh={() => setPullStatusRefresh(value => value + 1)} />
+
+              {!isDraftCard && <>
+              {access.canWrite && (confirmDeleteCard
+                ? <div ref={cardDeleteConfirmRef} tabIndex={-1} className="kb-col-confirm kb-card-delete-confirm" role="alertdialog" aria-modal="true" aria-label="Delete card">
+                  <div className="kb-col-confirm-copy">Delete this card{share ? ' for everyone on this board' : ''}? This can’t be undone.</div>
+                  <div className="kb-col-confirm-actions">
+                    <button className="kb-btn kb-btn-quiet" onClick={closeDeleteCardConfirm}>Cancel</button>
+                    <button className="kb-btn kb-btn-danger" onClick={() => deleteCard(openCard_.id)}>Delete</button>
+                  </div>
+                </div>
+                : <div className="kb-card-danger-zone">
+                  <button ref={deleteCardButtonRef} className="kb-btn kb-delete-card" onClick={() => setConfirmDeleteCard(true)}>
+                    <Trash aria-hidden="true" />
+                    Delete card
+                  </button>
+                  {createdLabel && <span className="kb-card-created">{createdLabel}</span>}
+                </div>)}
+              {!access.canWrite && createdLabel && <div className="kb-card-danger-zone"><span className="kb-card-created">{createdLabel}</span></div>}
+              </>}
+            </div>
+            {!isDraftCard && <>
+            <div className="kb-card-panel kb-card-panel-comments" {...cardPanel('comments')}>
+              <CardComments
+                card={openCard_}
+                comments={openDetails?.comments || []}
+                status={openDetails?.status || 'loading'}
+                canWrite={access.canWrite}
+                posting={commentPosting}
+                postError={commentError}
+                actorName={activityActor}
+                avatarFor={commentAvatar}
+                isOwn={ownComment}
+                onPost={postComment}
+                mentionables={mentionables}
+                active={cardTab === 'comments'}
+              />
+            </div>
+            <div className="kb-card-panel" {...cardPanel('activity')}>
+              <CardActivity
+                card={openCard_}
+                timeline={openTimeline}
+                status={openDetails?.status || 'loading'}
+                canWrite={access.canWrite}
+                nameFor={nameForRef}
+                onRestore={ref => assignCard(openCard_.id, ref)}
+              />
+            </div>
             </>}
           </div>
         </>
