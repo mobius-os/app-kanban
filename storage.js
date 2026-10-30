@@ -286,9 +286,9 @@ export function includeSharedBoards(boards, shareMap) {
   return [...indexed.values()]
 }
 
-export async function createBoard(title) {
+export async function createBoard(title, s = store()) {
   const doc = newBoardDoc(title)
-  await store().durableWrite(boardPath(doc.id), doc, { ifNoneMatch: true })
+  await s.durableWrite(boardPath(doc.id), doc, { ifNoneMatch: true })
   return doc.id
 }
 
