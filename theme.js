@@ -1520,7 +1520,12 @@ export const CSS = `
      A saved card is one fixed-height sheet: the toolbar and tabs stay put and
      only the open panel scrolls, so switching tabs never resizes the card. */
   .kb-card-sheet { --kb-card-pad: 22px; }
-  .kb-card-sheet.is-tabbed { height: min(calc(100dvh - clamp(72px, 11dvh, 120px)), 820px); overflow: hidden; padding-bottom: 0; }
+  /* overflow: clip, not hidden — a hidden box is still a programmatic scroll
+     container, so the browser's reveal-the-focused-input scroll (phone keyboard
+     opening on the comment composer) shoves the toolbar and tabs out of view
+     and strands the sheet mid-scroll. A clipped box cannot scroll; the panels
+     below own all scrolling. */
+  .kb-card-sheet.is-tabbed { height: min(calc(100dvh - clamp(72px, 11dvh, 120px)), 820px); overflow: clip; padding-bottom: 0; }
   .kb-card-sheet.is-tabbed > .kb-card-toolbar, .kb-card-sheet.is-tabbed > .kb-card-tabs { flex: 0 0 auto; }
   .kb-card-tabs { display: flex; gap: 6px; margin: 4px calc(-1 * var(--kb-card-pad)) 0; padding: 0 var(--kb-card-pad); border-bottom: 1px solid var(--border); }
   .kb-card-tab { position: relative; min-height: 44px; display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; border: 0; background: transparent; color: var(--muted); font: 620 14px/1 var(--font); white-space: nowrap; cursor: pointer; }
