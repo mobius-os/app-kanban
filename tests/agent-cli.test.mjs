@@ -163,3 +163,41 @@ test('CLI writes private and shared boards through their authority using JSON an
     await new Promise(resolve => server.close(resolve))
   }
 })
+
+test('CLI create-board makes a private board through a create-only write and returns its lists', async () => {
+  const boards = {}
+  const server = createServer(async (req, res) => {
+    res.setHeader('Content-Type', 'application/json')
+    let body = ''
+    for await (const chunk of req) body += chunk
+    const send = value => res.end(JSON.stringify(value))
+    if (req.url === '/api/apps/') return send([{ id: 1, slug: 'kanban' }])
+    const board = req.url.match(/^\/api\/storage\/apps\/1\/(boards\/[^/?]+\.json)$/)
+    if (board && req.method === 'PUT') {
+      if (req.headers['if-none-match'] !== '*' || boards[board[1]]) { res.writeHead(412); return send({}) }
+      boards[board[1]] = JSON.parse(body); res.writeHead(204); return res.end()
+    }
+    if (board && boards[board[1]]) { res.setHeader('ETag', '"v1"'); return send(boards[board[1]]) }
+    if (req.url === '/api/apps/1/service/boards') return send({ hosted: [], joined: [] })
+    res.writeHead(404); send({})
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${server.address().port}`
+  try {
+    const child = spawn(process.execPath, ['scripts/kanban.mjs', 'create-board'], {
+      env: { ...process.env, API_BASE_URL: base, AGENT_TOKEN: 'fixture' },
+    })
+    let out = ''
+    child.stdout.on('data', chunk => { out += chunk })
+    child.stdin.end(JSON.stringify({ title: '  Code health  ' }))
+    const code = await new Promise(resolve => child.on('close', resolve))
+    assert.equal(code, 0)
+    const result = JSON.parse(out)
+    assert.equal(result.status, 'saved')
+    assert.equal(result.title, 'Code health')
+    assert.deepEqual(result.columns.map(column => column.name), ['To do', 'In progress', 'Done'])
+    assert.equal(boards[`boards/${result.boardId}.json`].title, 'Code health')
+  } finally {
+    server.close()
+  }
+})
