@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, PullRequestOpen, Share, SquareCheckCheckboxChecked, Trash, User, X } from '@openai/apps-sdk-ui/components/Icon'
+import { AtSign, Check, ChevronDown, ChevronLeft, ChevronRight, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, PullRequestOpen, Share, SquareCheckCheckboxChecked, Trash, User, X } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard, loadUi, saveBoardView, saveListFolds, saveSeenCards, loadAssignmentLog, subscribeAssignmentLog, updateAssignmentLog } from '../storage.js'
 import {
   assignmentRef,
@@ -14,7 +14,7 @@ import {
   normalizeBoardView,
   sameAssignment,
 } from '../assignment.js'
-import { loadMemberAvatar, resolveMemberHandles, pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay, acceptSharedPoll, createSharedRefreshLifecycle, notifyOwner } from '../sync.js'
+import { loadMemberAvatar, resolveMemberHandles, pullShared, createInvite, inviteByHandle, getMembers, revokeCollaborator, groupCollaborators, collaboratorForHost, selfCollaborator, inviteDeliveryNotice, shareBoard, cacheSubscriptionIsAuthoritative, rememberSharedState, sharedBoardPollDelay, acceptSharedPoll, createSharedRefreshLifecycle, notifyOwner, markMentionsRead } from '../sync.js'
 import { alertCapacity, formatBytes } from '../capacityAlerts.js'
 import { applyBoardOp, columnMoveAnchor, cardPullUrls, hasExternalNotes } from '../operations.js'
 import { cardTimeline, mergeActivity, MAX_NOTES_CHARS } from '../activity.js'
@@ -29,6 +29,7 @@ import {
   saveCardAttachment,
 } from '../attachments.js'
 import { useModalFocus } from './modalFocus.js'
+import { mentionedMemberIds } from '../comments.js'
 import { appVisible, onAppVisibilityChange } from '../visibility.js'
 import {
   AttachmentImage, AttachmentsSection, CardActivity, CardComments, CardTabs, CardTileAttachment, ChecklistSection, CopyCardButton, DescriptionSection, DueChip, dueTone,
@@ -71,7 +72,7 @@ export const LABELS = {
 // the start of the description, one attachment, then a details row (label,
 // due date, checklist, pull requests, attachment count, person) when any of
 // those are set.
-function Card({ boardId, share, card, labelNames, mine, changed, assigneeLabel, assigneeMember, lifted, onOpen, onDragStart, canWrite }) {
+function Card({ boardId, share, card, labelNames, mine, changed, mentions = 0, assigneeLabel, assigneeMember, lifted, onOpen, onDragStart, canWrite }) {
   const dueStatus = dueDateStatus(card.due)
   const progress = checklistProgress(card.checklist)
   const assignee = (assigneeLabel ?? card.assignee)?.trim()
@@ -79,9 +80,9 @@ function Card({ boardId, share, card, labelNames, mine, changed, assigneeLabel, 
   const attachments = card.attachments || []
   const pullCount = cardPullUrls(card).length
   const labelled = card.label && card.label !== 'none' && LABELS[card.label]
-  const hasDetails = Boolean(labelled || dueStatus || progress.total || pullCount || attachments.length || assignee)
+  const hasDetails = Boolean(mentions || labelled || dueStatus || progress.total || pullCount || attachments.length || assignee)
   // On a phone a person who is the card's only detail sits beside the title instead of on a row of their own.
-  const personOnly = Boolean(assignee) && !(labelled || dueStatus || progress.total || pullCount || attachments.length)
+  const personOnly = Boolean(assignee) && !(mentions || labelled || dueStatus || progress.total || pullCount || attachments.length)
   return (
     <div
       className={`kb-card${mine ? ' is-mine' : ''}${personOnly ? ' is-person-only' : ''}${lifted ? ' kb-lifted' : ''}${canWrite ? '' : ' kb-readonly'}`}
@@ -96,6 +97,10 @@ function Card({ boardId, share, card, labelNames, mine, changed, assigneeLabel, 
       {notePreview && <div className="kb-card-notes">{notePreview}</div>}
       <CardTileAttachment boardId={boardId} share={share} attachments={attachments} />
       {hasDetails && <div className="kb-card-meta">
+        {/* Purple means you: unread mentions of you, cleared by opening the card's Comments tab. */}
+        {mentions > 0 && <span className="kb-card-mention" role="img" aria-label={`Mentioned you ${mentions === 1 ? 'once' : `${mentions} times`}`}>
+          <AtSign aria-hidden="true" />{mentions}
+        </span>}
         {labelled && <span className="kb-card-label" role="img" style={{ '--kb-lc': LABELS[card.label] }} title={labelDisplayName(card.label, labelNames)}
           aria-label={`Label: ${labelDisplayName(card.label, labelNames)}`}>{labelNames?.[card.label] || ''}</span>}
         {dueStatus && <span className={`kb-due kb-due-${dueStatus} kb-due-tone-${dueTone(card.due)}`}>{formatDueDate(card.due)}</span>}
@@ -638,6 +643,11 @@ function ShareSheet({ boardId, share, members, onMembersChange, onRefreshMembers
   )
 }
 
+function sameCounts(left, right) {
+  const keys = Object.keys(left)
+  return keys.length === Object.keys(right).length && keys.every(key => left[key] === right[key])
+}
+
 function sameMembers(left, right) {
   return left === right || JSON.stringify(left) === JSON.stringify(right)
 }
@@ -656,6 +666,8 @@ export default memo(function Board({
   online,
   share,
   onShared,
+  cardRequest,
+  onCardRequestHandled,
 }) {
   const [board, setBoard] = useState(null)
   const [openCardId, setOpenCardId] = useState(null)
@@ -667,6 +679,11 @@ export default memo(function Board({
   const [confirmDeleteCol, setConfirmDeleteCol] = useState(null)
   const [confirmDeleteCard, setConfirmDeleteCard] = useState(false)
   const [cardTab, setCardTab] = useState('home')
+  // Unread mentions of you per card, as the board's own sync reports them.
+  const [myMentions, setMyMentions] = useState({})
+  // The tab a mention notification asked for; any other open starts on Home.
+  const requestedTabRef = useRef(null)
+  const handledCardRequestRef = useRef(null)
   const [drag, setDrag] = useState(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [syncNote, setSyncNote] = useState('')
@@ -759,8 +776,29 @@ export default memo(function Board({
   const lastInteractionAtRef = useRef(Date.now())
   const fileInputRef = useRef(null)
   const cardSheetRef = useModalFocus(Boolean(openCardId), () => { setOpenCardId(null); setDraftCard(null) })
-  // Every card opens on Home, including one opened from a notification.
-  useEffect(() => { setConfirmDeleteCard(false); setCardTab('home') }, [openCardId])
+  // Every card opens on Home, except one a mention notification opens on Comments.
+  useEffect(() => {
+    setConfirmDeleteCard(false)
+    setCardTab(requestedTabRef.current || 'home')
+    requestedTabRef.current = null
+  }, [openCardId])
+  // A mention notification's card opens on its Comments tab once the board has it.
+  useEffect(() => {
+    if (!cardRequest || handledCardRequestRef.current === cardRequest || !board?.cards?.[cardRequest.cardId]) return
+    handledCardRequestRef.current = cardRequest
+    // One-shot: the App forgets it, so coming back to this board never replays it.
+    onCardRequestHandled?.()
+    setDraftCard(null)
+    if (openCardId === cardRequest.cardId) { setCardTab('comments'); return }
+    requestedTabRef.current = 'comments'
+    setOpenCardId(cardRequest.cardId)
+  }, [cardRequest, board, openCardId, onCardRequestHandled])
+  // Seeing a card's comments clears its @ badge, here and on this owner's other devices.
+  useEffect(() => {
+    if (cardTab !== 'comments' || !openCardId || !share || !myMentions[openCardId]) return
+    setMyMentions(({ [openCardId]: _read, ...rest }) => rest)
+    markMentionsRead(share, openCardId).then(setMyMentions).catch(() => {})
+  }, [cardTab, openCardId, share, myMentions])
 
   const showDetails = details => {
     cardDetailsRef.current = details
@@ -1312,6 +1350,9 @@ export default memo(function Board({
               pollRenderedRef.current = { confirmed, board: rendered }
               setBoard(rendered)
             }
+            if (state.my_mentions && typeof state.my_mentions === 'object') {
+              setMyMentions(current => sameCounts(current, state.my_mentions) ? current : state.my_mentions)
+            }
             if (state.object) {
               const nextMembers = memberRecords(state.object)
               if (nextMembers) setMembers(current => sameMembers(current, nextMembers) ? current : nextMembers)
@@ -1637,7 +1678,8 @@ export default memo(function Board({
     setCommentPosting(true)
     setCommentError('')
     try {
-      const result = await createBoardRepository({ storage: window.mobius.storage }).addComment(boardId, cardId, text, { id })
+      const mentions = mentionedMemberIds(text, mentionables)
+      const result = await createBoardRepository({ storage: window.mobius.storage }).addComment(boardId, cardId, text, { id, mentions })
       if (result.status === 'unsupported') {
         updateDetails(cardId, details => ({ ...details, status: 'unsupported' }))
         return false
@@ -2177,6 +2219,7 @@ export default memo(function Board({
   // it and an insertion never doubles it. A private board lists no one.
   const mentionables = (displayMembers || []).map(member => ({
     key: member.member_id || member.host || memberLabel(member),
+    memberIds: member.member_ids?.length ? member.member_ids : member.member_id ? [member.member_id] : [],
     label: memberLabel(member).replace(/^@/u, ''),
     name: member.name,
     host: member.host,
@@ -2377,6 +2420,7 @@ export default memo(function Board({
               labelNames={board.labelNames}
               mine={cardMatchesView(card, 'mine', me)}
               changed={changedIds.has(card.id)}
+              mentions={myMentions[card.id] || 0}
               assigneeLabel={assigneeLabelForCard(card)}
               assigneeMember={collaboratorForHost(displayMembers, card.assigneeHost)}
               lifted={drag?.cardId === card.id && drag.moved}
@@ -2600,6 +2644,7 @@ export default memo(function Board({
                 isOwn={ownComment}
                 onPost={postComment}
                 mentionables={mentionables}
+                selfLabel={myLabel}
                 active={cardTab === 'comments'}
               />
             </div>

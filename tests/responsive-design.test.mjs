@@ -57,7 +57,7 @@ test('every board with lists gets the phone list bar, so a single list still has
 
 test('on a phone a person who is the card’s only detail sits beside the title', () => {
   const card = board.slice(board.indexOf('function Card('), board.indexOf('function memberRecords('))
-  assert.match(card, /const personOnly = Boolean\(assignee\) && !\(labelled \|\| dueStatus \|\| progress\.total \|\| pullCount \|\| attachments\.length\)/)
+  assert.match(card, /const personOnly = Boolean\(assignee\) && !\(mentions \|\| labelled \|\| dueStatus \|\| progress\.total \|\| pullCount \|\| attachments\.length\)/)
   assert.match(phoneRules, /\.kb-card\.is-person-only \.kb-card-meta \{ position: absolute;/)
   assert.match(phoneRules, /\.kb-col \{ flex: 0 0 auto; width: calc\(100vw - 32px\); max-width: none;/, 'one list fills the screen, without the next one peeking in')
 })

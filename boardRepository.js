@@ -434,7 +434,7 @@ export function createBoardRepository({ storage, request = globalThis.fetch, via
   // must send the same id, so a host that committed the first attempt answers
   // it again instead of saving a duplicate (collaboration/service.py
   // write_comment). Callers allocate it once per submission (newCommentId).
-  async function addComment(boardId, cardId, text, { id = newCommentId() } = {}) {
+  async function addComment(boardId, cardId, text, { id = newCommentId(), mentions = [] } = {}) {
     if (!validId(cardId)) throw boardError('Card id is invalid.', 'invalid-operation')
     if (!COMMENT_ID.test(String(id))) throw boardError('Comment id is invalid.', 'invalid-comment')
     const body = String(text ?? '').trim()
@@ -448,7 +448,8 @@ export function createBoardRepository({ storage, request = globalThis.fetch, via
       if (entry.role !== 'editor') throw boardError('This shared board is read-only.', 'read-only')
       let result
       try {
-        result = await postSharedComment(entry, cardId, comment, request)
+        // Only a shared board has other members to notify.
+        result = await postSharedComment(entry, cardId, mentions.length ? { ...comment, mentions } : comment, request)
       } catch (error) {
         if (olderHostRefused(error)) return { status: 'unsupported' }
         throw finalHostRefusal(error)

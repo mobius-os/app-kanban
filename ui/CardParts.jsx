@@ -9,7 +9,7 @@ import { useModalFocus } from './modalFocus.js'
 import { describeAssignmentEvent, restorableAssignment } from '../assignment.js'
 import { isPreviewImage, loadCardAttachment, MAX_CARD_ATTACHMENTS } from '../attachments.js'
 import { assigneeAvatar, checklistProgress, copyCardToClipboard, dueDateStatus, formatDueDate, labelDisplayName, labelsInOrder, MAX_LABEL_NAME_CHARS, shortLinkText } from '../domain.js'
-import { MAX_COMMENT_CHARS, mentionParts, mentionQuery, newCommentId } from '../comments.js'
+import { MAX_COMMENT_CHARS, mentionNames, mentionParts, mentionQuery, newCommentId } from '../comments.js'
 import { formatActivityClock, formatActivityTime, groupByDay } from '../activity.js'
 import { cardPullUrls } from '../operations.js'
 import { parsePullRequestUrl } from '../prMatching.js'
@@ -944,9 +944,10 @@ export function AttachmentsSection({ boardId, share, attachments, canWrite, isDr
 
 // Mention-aware comment text: a member's label (and any other @word) reads as
 // a highlighted mention; everything else keeps its links.
-function CommentText({ text, labels }) {
+// Mentions are purple; a mention of you (`selfLabel`) is also tinted, like the badge.
+function CommentText({ text, labels, selfLabel }) {
   return mentionParts(text, labels).map((part, index) => part.mention
-    ? <span key={index} className="kb-mention">{part.mention}</span>
+    ? <span key={index} className={`kb-mention${mentionNames(part.mention, selfLabel) ? ' is-you' : ''}`}>{part.mention}</span>
     : <LinkifiedText key={index} text={part.text} />)
 }
 
@@ -955,7 +956,7 @@ function CommentText({ text, labels }) {
 // the newest comment in view whenever the tab opens (`active`).
 // Enter posts, Shift+Enter makes a new line; typing @ lists the board's
 // members (`mentionables`) and Enter/Tab or a click inserts the picked name.
-export function CardComments({ card, comments, status, canWrite, posting, postError, actorName, avatarFor, isOwn, onPost, mentionables = [], active }) {
+export function CardComments({ card, comments, status, canWrite, posting, postError, actorName, avatarFor, isOwn, onPost, mentionables = [], selfLabel = '', active }) {
   const [draft, setDraft] = useState('')
   // The @ the composer is completing: {start, query}, null when none.
   const [mention, setMention] = useState(null)
@@ -1053,7 +1054,7 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
       {groupByDay(comments, comment => comment.at).map(({ day, items }, index) => <Fragment key={`${day}-${index}`}>
         {day && <h4 className="kb-day-break">{day}</h4>}
         {items.map(comment => <CommentRow key={comment.id} comment={comment} own={isOwn(comment)} author={actorName(comment)}
-          avatar={avatarFor(comment)} labels={mentionables.map(member => member.label)} />)}
+          avatar={avatarFor(comment)} labels={mentionables.map(member => member.label)} selfLabel={selfLabel} />)}
       </Fragment>)}
     </div>}
     {comments.length === 0 && status === 'ok' && <EmptyTab icon={Chat} title="No comments yet">
@@ -1104,7 +1105,9 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
 
 // Like a chat: your own comments sit on the right without an avatar (the
 // name stays for screen readers), everyone else's on the left with theirs.
-function CommentRow({ comment, own, author, avatar, labels }) {
+function CommentRow({ comment, own, author, avatar, labels, selfLabel }) {
+  // Someone else's comment that names you is outlined, so it stands out in a long thread.
+  const forYou = !own && mentionParts(comment.text, labels).some(part => part.mention && mentionNames(part.mention, selfLabel))
   return <div className={`kb-comment${own ? ' is-own' : ''}`}>
     {!own && avatar}
     <div className="kb-comment-body">
@@ -1112,7 +1115,7 @@ function CommentRow({ comment, own, author, avatar, labels }) {
         <strong className={own ? 'kb-visually-hidden' : undefined}>{author}</strong>
         <time dateTime={comment.at} title={formatActivityTime(comment.at)}>{formatActivityClock(comment.at)}</time>
       </div>
-      <div className="kb-comment-bubble"><CommentText text={comment.text} labels={labels} /></div>
+      <div className={`kb-comment-bubble${forYou ? ' is-for-you' : ''}`}><CommentText text={comment.text} labels={labels} selfLabel={selfLabel} /></div>
     </div>
   </div>
 }

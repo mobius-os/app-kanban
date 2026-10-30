@@ -516,6 +516,15 @@ export async function postSharedComment(entry, cardId, comment, request = fetch)
   }))
 }
 
+// Opening a card's Comments tab clears its @ badge; returns the board's unread counts.
+export async function markMentionsRead(entry, cardId, request = fetch) {
+  independent(entry)
+  const result = await _json(await request(`${cardUrl(entry, cardId)}/mentions/read`, {
+    method: 'POST', headers: _auth, body: '{}',
+  }))
+  return result.my_mentions && typeof result.my_mentions === 'object' ? result.my_mentions : {}
+}
+
 // A host running an older Kanban answers a route or operation it lacks this way.
 export function olderHostRefused(error) {
   return ['invalid-operation', 'route-missing'].includes(error?.code)
