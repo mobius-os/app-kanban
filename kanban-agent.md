@@ -36,6 +36,10 @@ uses the current turn's credentials internally; never print them.
 
 Commands and stdin shapes:
 
+- `create-board`: `{"title":"..."}` creates a private board with To do,
+  In progress and Done lists and returns its board ID and column IDs. Create
+  one only when the owner asked for a new board, never to work around a
+  board you could not find.
 - `add-card BOARD_ID`: `{"columnId":"...","title":"...","notes":"...","id":"optional-stable-id"}`
 - `update-card BOARD_ID`: `{"cardId":"...","patch":{"title":"...","notes":"..."},"notesVersion":3}`
   (`notesVersion` only when changing the notes of a card that has `notesLength`)

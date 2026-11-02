@@ -2,7 +2,7 @@
 // Thin command-line transport for the same repository the board screen uses.
 import { createBoardRepository } from '../boardRepository.js'
 import { configureSync, recoverMemberships } from '../sync.js'
-import { uid } from '../storage.js'
+import { createBoard, uid } from '../storage.js'
 import { isIsoDate } from '../domain.js'
 import { cardPullUrls, hasCardCompletion } from '../operations.js'
 import { pullMatchesCard } from '../prMatching.js'
@@ -196,6 +196,16 @@ async function syncOpenPrs(dryRun) {
 try {
   let result
   if (command === 'list') result = await repository.list()
+  else if (command === 'create-board') {
+    const data = await input()
+    if (!data || typeof data !== 'object' || typeof data.title !== 'string' || !data.title.trim()) {
+      throw new Error('A non-empty title is required.')
+    }
+    const createdId = await createBoard(data.title.trim(), storage)
+    const { doc } = await repository.read(createdId)
+    result = { status: 'saved', appId, boardId: createdId, title: doc.title,
+      columns: doc.columns.map(({ id, name }) => ({ id, name })) }
+  }
   else if (command === 'read' && validId(boardId)) result = await repository.read(boardId)
   else if (command === 'read-card' && validId(boardId) && validId(cardIdArg)) {
     const { doc } = await repository.read(boardId)
@@ -254,7 +264,7 @@ try {
     result = await completeMatchingCard(await input())
   } else if (command === 'sync-open-prs') {
     result = await syncOpenPrs(process.argv.includes('--dry-run'))
-  } else throw new Error('Usage: kanban.mjs list | read BOARD_ID | read-card BOARD_ID CARD_ID | add-card/update-card/move-card/set-checklist-item BOARD_ID < input.json | complete-matching-card < input.json | sync-open-prs [--dry-run]')
+  } else throw new Error('Usage: kanban.mjs list | create-board < input.json | read BOARD_ID | read-card BOARD_ID CARD_ID | add-card/update-card/move-card/set-checklist-item BOARD_ID < input.json | complete-matching-card < input.json | sync-open-prs [--dry-run]')
   console.log(JSON.stringify(result, null, 2))
 } catch (error) {
   console.error(JSON.stringify({ status: 'not-confirmed', error: error.message }))
