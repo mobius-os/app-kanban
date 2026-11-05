@@ -141,7 +141,8 @@ def activity_entries(raw, actor, at):
         if item.get('type') not in ACTIVITY_TYPES:
             continue
         entry = {'id': entry_id, 'at': at, 'type': item['type'],
-                 'by': {'host': actor['host'], 'name': actor.get('name') or actor['host']}}
+                 'by': {'host': actor['host'], 'name': actor.get('name') or actor['host'],
+                        'member_id': actor['member_id']}}
         for key in ('from', 'to', 'text'):
             if key in item:
                 if not isinstance(item[key], str): fail(400, 'invalid-activity', 'Activity text is invalid.')
@@ -639,13 +640,14 @@ class Service:
         """Validate the comments a private board brings when it is shared.
 
         They were written on this deployment, by its owner (or the owner's
-        agent), so a comment without an author is the owner's. Each keeps its
-        id, time and text; only cards the board holds can bring comments.
+        agent), so a comment without an author is the owner's, and every one
+        is bound to the owner's member id. Each keeps its id, time and text;
+        only cards the board holds can bring comments.
         """
         if raw is None: return {}
         if not isinstance(raw, dict):
             fail(400, 'invalid-comment', 'Comments must be grouped by card.')
-        owner = {'host': self.host, 'name': self.owner_name}
+        owner = {'host': self.host, 'name': self.owner_name, 'member_id': self.host}
         kept = {}
         for card_id, items in raw.items():
             if not isinstance(doc['cards'].get(card_id), dict): continue
@@ -673,7 +675,8 @@ class Service:
             fail(413, 'comment-too-long', f'A comment can be at most {MAX_COMMENT_CHARS} characters.')
         by = item.get('by') if isinstance(item.get('by'), dict) else {}
         author = {'host': str(by.get('host') or owner['host'])[:MAX_ACTIVITY_TEXT],
-                  'name': str(by.get('name') or owner['name'])[:MAX_ACTIVITY_TEXT]}
+                  'name': str(by.get('name') or owner['name'])[:MAX_ACTIVITY_TEXT],
+                  'member_id': owner['member_id']}
         comment = {'id': comment_id, 'at': item['at'], 'text': text.strip(), 'by': author}
         if item.get('via') == 'agent': comment['via'] = 'agent'
         return comment
@@ -879,9 +882,9 @@ class Service:
                 fail(403,'read-only','This board member is a viewer.')
             changes = self.presence_changes(member, self.claimed_name(body))
             member.update(changes)
-            # `via` is the member deployment's statement about its own request
-            # (state_operation sets it from its authenticated caller).
-            result = self.operation(row,op,body,{'host':member['host'],'name':member.get('name'),
+            # Host/name and `via` are this member's claims, not the owner's
+            # identity. Preserve the authenticated principal for every author.
+            result = self.operation(row,op,body,{'host':member['host'],'name':member.get('name'),'member_id':mid,
                 'via':'agent' if body.get('via') == 'agent' else ''})
             if changes or op not in READ_ONLY_OPS:
                 self.store.put('board',oid,row)
@@ -1006,7 +1009,8 @@ class Service:
         if len(record['comments']) >= MAX_COMMENTS_PER_CARD:
             fail(413, 'comments-full', f'A card can hold up to {MAX_COMMENTS_PER_CARD} comments.')
         comment = {'id': comment_id, 'at': self.stamp(), 'text': text,
-                   'by': {'host': actor['host'], 'name': actor.get('name') or actor['host']}}
+                   'by': {'host': actor['host'], 'name': actor.get('name') or actor['host'],
+                        'member_id': actor['member_id']}}
         if actor.get('via') == 'agent':
             comment['via'] = 'agent'
         mentioned = mentions.mention_targets(row, body.get('mentions'), actor['host'])
@@ -1201,7 +1205,7 @@ class Service:
         authenticated caller (agent_request), never from the request body."""
         check(host,HOST,'board host'); check(oid,ID,'board id')
         body = {k:v for k,v in body.items() if k != 'via'}
-        actor = {'host':self.host,'name':self.owner_name,'via':'agent' if agent else ''}
+        actor = {'host':self.host,'name':self.owner_name,'member_id':self.host,'via':'agent' if agent else ''}
         if host == self.host:
             if op in READ_ONLY_OPS:
                 with self.store.snapshot():
