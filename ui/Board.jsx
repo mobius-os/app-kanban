@@ -2206,11 +2206,13 @@ export default memo(function Board({
   const ownComment = comment => entryAuthorship(comment, authorContext).own
   const commentAvatar = comment => {
     // Never borrow someone's avatar merely because a peer claimed their host.
+    // A photo needs the verified member id and a host that is not a join-time
+    // claim: yours, or the board host's own (it serves this board).
     const mid = comment.by?.member_id
     const member = mid && (displayMembers || []).find(m => m.member_id === mid || m.member_ids?.includes(mid))
     const own = ownComment(comment)
     return <MemberAvatar member={{ name: own ? 'You' : (comment.by?.name || 'Unverified author'),
-      avatar: own && member ? memberAvatars[member.host] || '' : '' }} small presence={false} />
+      avatar: member && (own || member.host_owner === true) ? memberAvatars[member.host] || '' : '' }} small presence={false} />
   }
   // People the composer can @mention: this board's members, labelled the way
   // the board shows them. memberLabel keeps a handle's @, so the picker strips

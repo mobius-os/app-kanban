@@ -59,6 +59,9 @@ class CardDetails(unittest.IsolatedAsyncioTestCase):
         invitation = await self.call(self.a, 'POST', f'boards/{self.oid}/invites', {'role': role})
         return await self.call(self.b, 'POST', 'boards/join', {'invite': invitation['invite']})
 
+    def joined_member_id(self):
+        return self.b.store.get('joined', 'a.example/' + self.oid)['member_id']
+
     async def write(self, service, doc, status=200):
         state = await self.call(service, 'GET', f'{self.base}/state')
         return await self.call(service, 'PUT', f'{self.base}/state', {'doc': doc, 'expected_version': state['version']}, status)
@@ -192,8 +195,7 @@ class CardDetails(unittest.IsolatedAsyncioTestCase):
         forged = entry('e1', at='2099-01-01T00:00:00Z', by={'host': 'forged.example', 'name': 'Someone else'}, via='agent')
         saved = await self.save_card(self.b, 'By B', [forged])
         stamped = saved['activity']['c1'][0]
-        self.assertEqual(stamped['by'], {'host': 'b.example', 'name': 'B',
-            'member_id': self.b.store.get('joined', 'a.example/' + self.oid)['member_id']})
+        self.assertEqual(stamped['by'], {'host': 'b.example', 'name': 'B', 'member_id': self.joined_member_id()})
         self.assertNotEqual(stamped['at'], '2099-01-01T00:00:00Z')
         self.assertNotIn('via', stamped)  # the app's own frame is a person, whatever an entry claims
 
@@ -203,7 +205,7 @@ class CardDetails(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(own['activity']['c1'][-1]['via'], 'agent')
         # A member's agent: its deployment states it for the request it forwards.
         member = await self.save_card(self.b, "By B's agent", [entry('e2')], actor=OWNER)
-        self.assertEqual(member['activity']['c1'][-1], {**member['activity']['c1'][-1], 'by': {'host': 'b.example', 'name': 'B', 'member_id': self.b.store.get('joined', 'a.example/' + self.oid)['member_id']}, 'via': 'agent'})
+        self.assertEqual(member['activity']['c1'][-1], {**member['activity']['c1'][-1], 'by': {'host': 'b.example', 'name': 'B', 'member_id': self.joined_member_id()}, 'via': 'agent'})
         person = await self.save_card(self.b, 'By B', [entry('e3', via='agent')], actor=APP)
         self.assertNotIn('via', person['activity']['c1'][-1])
 
@@ -392,8 +394,7 @@ class CardDetails(unittest.IsolatedAsyncioTestCase):
         before = (await self.call(self.b, 'GET', f'{self.base}/state'))['version']
         saved = await self.comment(self.b, text='  Looks good  ')
         self.assertEqual(saved['comment']['text'], 'Looks good')
-        self.assertEqual(saved['comment']['by'], {'host': 'b.example', 'name': 'B',
-            'member_id': self.b.store.get('joined', 'a.example/' + self.oid)['member_id']})
+        self.assertEqual(saved['comment']['by'], {'host': 'b.example', 'name': 'B', 'member_id': self.joined_member_id()})
         self.assertIn('at', saved['comment'])
         # The board card carries the count, so every member's poll sees the change.
         self.assertEqual(saved['card']['commentsCount'], 1)
@@ -465,8 +466,10 @@ class CardDetails(unittest.IsolatedAsyncioTestCase):
         base = f'boards/a.example/{oid}'
         details = await self.call(self.a, 'GET', f'{base}/cards/c1')
         self.assertEqual([(c['id'], c['text']) for c in details['comments']], [('p1', 'First'), ('p2', 'Second')])
-        # Private comments are the owner's; identities, times and the agent mark are kept.
-        self.assertEqual(details['comments'][0]['by'], {'host': 'a.example', 'name': 'A'})
+        # Private comments are the owner's; identities, times and the agent mark are kept,
+        # and each is bound to the owner's member id so the shared board verifies it.
+        self.assertEqual(details['comments'][0]['by'], {'host': 'a.example', 'name': 'A', 'member_id': 'a.example'})
+        self.assertEqual(details['comments'][1]['by'], {'host': 'a.example', 'name': 'A', 'member_id': 'a.example'})
         self.assertEqual(details['comments'][0]['via'], 'agent')
         self.assertEqual(details['comments'][1]['at'], '2026-10-09T09:00:00.000Z')
         state = (await self.call(self.a, 'GET', f'{base}/state'))['doc']

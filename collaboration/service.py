@@ -640,13 +640,14 @@ class Service:
         """Validate the comments a private board brings when it is shared.
 
         They were written on this deployment, by its owner (or the owner's
-        agent), so a comment without an author is the owner's. Each keeps its
-        id, time and text; only cards the board holds can bring comments.
+        agent), so a comment without an author is the owner's, and every one
+        is bound to the owner's member id. Each keeps its id, time and text;
+        only cards the board holds can bring comments.
         """
         if raw is None: return {}
         if not isinstance(raw, dict):
             fail(400, 'invalid-comment', 'Comments must be grouped by card.')
-        owner = {'host': self.host, 'name': self.owner_name}
+        owner = {'host': self.host, 'name': self.owner_name, 'member_id': self.host}
         kept = {}
         for card_id, items in raw.items():
             if not isinstance(doc['cards'].get(card_id), dict): continue
@@ -674,7 +675,8 @@ class Service:
             fail(413, 'comment-too-long', f'A comment can be at most {MAX_COMMENT_CHARS} characters.')
         by = item.get('by') if isinstance(item.get('by'), dict) else {}
         author = {'host': str(by.get('host') or owner['host'])[:MAX_ACTIVITY_TEXT],
-                  'name': str(by.get('name') or owner['name'])[:MAX_ACTIVITY_TEXT]}
+                  'name': str(by.get('name') or owner['name'])[:MAX_ACTIVITY_TEXT],
+                  'member_id': owner['member_id']}
         comment = {'id': comment_id, 'at': item['at'], 'text': text.strip(), 'by': author}
         if item.get('via') == 'agent': comment['via'] = 'agent'
         return comment
