@@ -21,9 +21,11 @@ uses the current turn's credentials internally; never print them.
 2. `read BOARD_ID` returns the authoritative board, including its cards. On a
    shared board a long description stays beside the board: such a card has
    `notesLength` and only a preview in `notes`. `read-card BOARD_ID CARD_ID`
-   returns that card with its full description, its `notesVersion`, and its
-   activity (who changed what, when). To change such a description, start
-   from the `read-card` text and send that `notesVersion` with `update-card`;
+   returns `{boardId, card, notesVersion, activity, cardDetails}`. `card.notes`
+   is the full description, `activity` says who changed what and when, and
+   `notesVersion` is a top-level field beside `card`, not inside it. To change
+   such a description, start from the `card.notes` text and send that top-level
+   `notesVersion` with `update-card`;
    an edit without it, or after someone else changed the text, is refused so
    a preview never replaces the full description. Edits made through this
    helper, including assignee changes, are recorded as the agent's.
