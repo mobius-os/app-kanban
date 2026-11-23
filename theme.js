@@ -143,11 +143,13 @@ export const CSS = `
   .kb-title-static { margin: 0; font-size: 17px; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; }
   .kb-sub { font-size: 12px; line-height: 1.25; color: var(--muted); }
   .kb-home-heading { min-width: 0; flex: 1; display: flex; align-items: baseline; gap: 8px; }
-  .kb-switcher-wrap { position: relative; min-width: 0; flex: 0 1 auto; }
+  /* The name gives way before anything is drawn over it: its button shrinks
+     with this box and shortens with an ellipsis, down to a readable minimum. */
+  .kb-switcher-wrap { position: relative; min-width: 96px; flex: 0 1 auto; }
   .kb-switcher-button {
     min-width: 0;
     min-height: 44px;
-    max-width: min(52vw, 440px);
+    max-width: min(100%, 52vw, 440px);
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -335,6 +337,7 @@ export const CSS = `
   .kb-card-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .kb-card.kb-readonly { cursor: pointer; }
   .kb-card-title { font-size: 14.5px; font-weight: 620; line-height: 1.35; letter-spacing: -0.012em; overflow-wrap: anywhere; pointer-events: none; }
+  .kb-card-title.is-placeholder { color: var(--muted); font-weight: 500; }
   .kb-card-notes { margin-top: -4px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--muted); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; pointer-events: none; }
   /* Screenshots are the usual picture, so the crop keeps their top. */
   .kb-card-picture { display: block; width: 100%; height: 120px; object-fit: cover; object-position: top center; border: 1px solid color-mix(in srgb, var(--text) 8%, transparent); border-radius: 8px; background: var(--surface-2); pointer-events: none; }
@@ -760,9 +763,9 @@ export const CSS = `
   .kb-card-toolbar .kb-assignee-trigger .kb-assignee-avatar { width: 100%; height: 100%; flex-basis: 100%; border: 0; font-size: 14px; }
   .kb-card-toolbar .kb-assignee-trigger { overflow: hidden; }
   .kb-card-toolbar .kb-assignee-trigger:disabled, .kb-label-trigger:disabled { cursor: default; }
-  .kb-card-toolbar-title { flex: 1 1 auto; min-width: 0; font-size: 19px; font-weight: 650; line-height: 1.2; letter-spacing: -0.015em; }
-  /* A saved card names the list it sits in; only a draft is a "New card". */
-  .kb-card-danger-zone { border-top: 1px solid var(--border); padding-top: 16px; }
+  .kb-card-new-label { color: var(--muted); font-size: 14px; font-weight: 600; white-space: nowrap; }
+  /* Every card names the list it sits in; one still being created also says "New card". */
+  .kb-card-footer { border-top: 1px solid var(--border); padding-top: 16px; }
   .kb-delete-card {
     width: 100%;
     min-height: 48px;
@@ -1232,7 +1235,7 @@ export const CSS = `
     background: transparent;
     color: var(--kb-danger);
   }
-  .kb-card-danger-zone { display: flex; }
+  .kb-card-footer { display: flex; }
   .kb-card-delete-confirm { margin: 0; }
   .kb-status-live { display: contents; }
 
@@ -1312,6 +1315,17 @@ export const CSS = `
   .kb-show-chip.is-you .kb-show-count { color: var(--accent); }
   .kb-show-chip.is-filtered { border-color: color-mix(in srgb, var(--text) 38%, var(--border)); }
   .kb-show-dot { position: absolute; top: -2px; right: -1px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
+  /* Between a phone and a wide window the four views do not fit beside the
+     board name and used to slide over it. The header measures its own width,
+     not the window's (it may sit in a narrow pane), and when short of room
+     shows the single control a phone uses: same four views, one button.
+     920px of header is a 960px window less the header's side padding. */
+  .kb-board-header { container: kb-header / inline-size; }
+  @container kb-header (max-width: 920px) {
+    .kb-view-switch { display: none; }
+    .kb-show-chip { display: inline-flex; }
+    .kb-presence-label { display: none; }
+  }
   .kb-show-sheet { gap: 12px; }
   .kb-show-sheet .kb-view-switch { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 0; background: transparent; }
   .kb-show-sheet .kb-view-option { justify-content: space-between; min-height: 46px; padding: 0 12px; font-size: 15px; font-weight: 560; }
@@ -1432,7 +1446,8 @@ export const CSS = `
   .kb-popover-menu > .kb-menu-danger, .kb-quiet-action.kb-menu-danger { color: var(--kb-danger, #e5484d); }
   .kb-menu-date { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 10px; color: var(--muted); font-size: 13px; }
   .kb-menu-date input { flex: 1 1 auto; min-width: 0; min-height: 36px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font: 15px var(--font); color-scheme: light dark; }
-  .kb-detail-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px 0 16px; }
+  /* The title's focus ring reaches 4px below its box; 10px keeps it off the chips. */
+  .kb-detail-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 0 16px; }
   .kb-detail-chips > .kb-chip-wrap, .kb-detail-chips .kb-assignee-picker { margin: 0; }
   .kb-detail-chip {
     height: 36px;
@@ -1502,6 +1517,11 @@ export const CSS = `
   .kb-check-delete { opacity: 0; transition: opacity 0.15s ease; }
   .kb-check-item:hover .kb-check-delete, .kb-check-delete:focus-visible { opacity: 1; }
   .kb-pr-section { gap: 2px; }
+  .kb-attach-hint { margin-left: auto; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .kb-attach-notice { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 4px 6px 4px 12px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--text); font-size: 13px; line-height: 1.35; }
+  .kb-attach-notice > svg { flex: 0 0 auto; width: 15px; height: 15px; color: var(--accent-text, var(--accent)); }
+  .kb-attach-notice > span { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
+  .kb-attach-notice .kb-quiet-action { flex: 0 0 auto; min-height: 36px; padding: 0 10px; color: var(--accent-text, var(--accent)); }
   .kb-attachment-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .kb-attachment-tile { position: relative; min-width: 0; margin: 0; }
   .kb-attachment-open { width: 100%; display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; }
@@ -1515,18 +1535,28 @@ export const CSS = `
     .kb-attachment-remove { opacity: 1; }
     .kb-check-item:not(.is-editing) .kb-check-delete { display: none; }
     .kb-check-item.is-editing .kb-check-delete { opacity: 1; }
+    /* A touch screen cannot drop a file, so the hint only offers paste. */
+    .kb-attach-hint-drop { display: none; }
   }
   /* ---- Card tabs: Home | Comments | Activity (CardTabs + Board's panels) ----
-     A saved card is one fixed-height sheet: the toolbar and tabs stay put and
-     only the open panel scrolls, so switching tabs never resizes the card. */
-  .kb-card-sheet { --kb-card-pad: 22px; }
+     Every card, new or saved, is one sheet with the same frame: the toolbar and
+     tabs stay put and only the open panel scrolls, so neither saving a new
+     card nor switching tabs resizes it. */
   /* overflow: clip, not hidden — a hidden box is still a programmatic scroll
      container, so the browser's reveal-the-focused-input scroll (phone keyboard
      opening on the comment composer) shoves the toolbar and tabs out of view
      and strands the sheet mid-scroll. A clipped box cannot scroll; the panels
      below own all scrolling. */
-  .kb-card-sheet.is-tabbed { height: min(calc(100dvh - clamp(72px, 11dvh, 120px)), 820px); overflow: clip; padding-bottom: 0; }
-  .kb-card-sheet.is-tabbed > .kb-card-toolbar, .kb-card-sheet.is-tabbed > .kb-card-tabs { flex: 0 0 auto; }
+  .kb-card-sheet {
+    --kb-card-pad: 22px;
+    --kb-card-room: calc(100dvh - clamp(72px, 11dvh, 120px));
+    height: auto;
+    min-height: min(440px, var(--kb-card-room));
+    max-height: min(var(--kb-card-room), 820px);
+    overflow: clip;
+    padding-bottom: 0;
+  }
+  .kb-card-sheet > .kb-card-toolbar, .kb-card-sheet > .kb-card-tabs { flex: 0 0 auto; }
   .kb-card-tabs { display: flex; gap: 6px; margin: 4px calc(-1 * var(--kb-card-pad)) 0; padding: 0 var(--kb-card-pad); border-bottom: 1px solid var(--border); }
   .kb-card-tab { position: relative; min-height: 44px; display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; border: 0; background: transparent; color: var(--muted); font: 620 14px/1 var(--font); white-space: nowrap; cursor: pointer; }
   .kb-card-tab:first-child { margin-left: -10px; }
@@ -1536,12 +1566,20 @@ export const CSS = `
   .kb-card-tab[aria-selected="true"]::after { background: var(--accent); }
   .kb-card-tab .kb-view-count { font-weight: 650; }
   .kb-card-tab[aria-selected="true"] .kb-view-count { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
-  .kb-card-sheet.is-tabbed > .kb-card-panel { flex: 1 1 auto; min-height: 0; margin: 0 calc(-1 * var(--kb-card-pad)); padding: 16px var(--kb-card-pad) 18px; overflow-y: auto; overscroll-behavior: contain; }
-  .kb-card-sheet.is-tabbed > .kb-card-panel-comments { display: flex; flex-direction: column; padding-top: 0; overflow: visible; }
-  .kb-card-sheet.is-tabbed > .kb-card-panel[hidden] { display: none; }
+  /* The three panels share one box, as tall as the Home tab: Home stays in
+     layout while another tab shows (hidden from sight, not removed), and the
+     other two are size-contained, so they fill that box and scroll inside it
+     instead of stretching it. A short card therefore ends where its content
+     ends, and a long one reaches the sheet's limit and scrolls. */
+  .kb-card-sheet > .kb-card-panels { flex: 0 1 auto; min-height: 0; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); margin: 0 calc(-1 * var(--kb-card-pad)); }
+  .kb-card-panel { grid-area: 1 / 1; min-height: 0; padding: 16px var(--kb-card-pad) 18px; overflow-y: auto; overscroll-behavior: contain; }
+  .kb-card-panel[hidden] { display: block; visibility: hidden; }
+  .kb-card-panel:not(.kb-card-panel-home) { contain: size; }
+  .kb-card-panel-comments, .kb-card-panel-comments[hidden] { display: flex; flex-direction: column; padding-top: 0; overflow: visible; }
   @media (max-width: 640px) {
-    .kb-card-sheet { --kb-card-pad: 16px; }
-    .kb-card-sheet.is-tabbed { height: calc(100dvh - max(16px, env(safe-area-inset-top))); }
+    /* A phone's sheet fills the screen, so its panels do too. */
+    .kb-card-sheet { --kb-card-pad: 16px; height: calc(100dvh - max(16px, env(safe-area-inset-top))); min-height: 0; max-height: none; }
+    .kb-card-sheet > .kb-card-panels { flex: 1 1 auto; }
   }
   .kb-card-comments, .kb-card-activity { min-height: 100%; display: flex; flex-direction: column; }
   .kb-card-comments { flex: 1 1 auto; min-height: 0; }
@@ -1598,8 +1636,10 @@ export const CSS = `
   .kb-activity-item.is-assignment .kb-activity-dot { background: var(--kb-success); }
   .kb-activity-copy strong { font-weight: 650; }
   .kb-activity-note { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
-  .kb-card-sheet .kb-card-danger-zone { display: flex; align-items: center; gap: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .kb-card-sheet .kb-card-footer { display: flex; align-items: center; gap: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
   .kb-card-created { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  /* Done closes a card you are creating. It takes the place of the created date. */
+  .kb-card-sheet .kb-card-done { margin-left: auto; min-height: 40px; padding: 0 18px; }
   .kb-card-sheet .kb-delete-card { width: auto; min-height: 40px; margin-left: -10px; padding: 0 10px; justify-content: flex-start; border: 0; background: transparent; color: var(--kb-danger); }
   .kb-card-sheet .kb-delete-card:hover { background: color-mix(in srgb, var(--kb-danger) 10%, transparent); }
   @media (max-width: 640px) {
@@ -1607,6 +1647,9 @@ export const CSS = `
     .kb-detail-chip { height: 40px; min-height: 40px; }
     .kb-copy-card-btn { width: 40px; height: 40px; flex-basis: 40px; }
     .kb-attachment-tiles { gap: 6px; }
+    /* The heading, the hint and the button do not fit on one phone line: the hint drops under them. */
+    .kb-section-line { flex-wrap: wrap; }
+    .kb-attach-hint { order: 1; flex-basis: 100%; margin: -2px 0 8px; }
   }
 
   /* ---- Board: same-size cards, list menu, folded lists, list drag ---- */

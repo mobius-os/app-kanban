@@ -29,6 +29,12 @@ A clean, mobile-first kanban board for Möbius.
   description shows a Save button beside the close button, Enter saves and
   leaves the field (Shift+Enter makes a new line), and every landed save —
   including autosave on clicking away — flashes ✓ Saved there and fades out.
+- A new card opens in the same sheet as every other card (list control, Home,
+  Comments and Activity), so saving it moves nothing. It joins the board the
+  first time something in it is saved: its title, or a file that is pasted,
+  dropped or picked, so a card can be just a picture and take a title later.
+  While it is being created the sheet says "New card" and offers Done; a file
+  added from the Comments or Activity tab is confirmed on that tab.
 - Deleting a card or a list deletes its files and activity; removing a file from
   a card deletes the file. Files are added and removed one at a time, by id,
   against the card as it is when the edit lands, so two people changing a

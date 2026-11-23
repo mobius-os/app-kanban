@@ -31,10 +31,10 @@ test('the list-delete confirmation uses its dedicated card styling', () => {
 })
 
 test('deleting a card always asks first, and Cancel comes before Delete', () => {
-  assert.match(board, /onClick=\{\(\) => setConfirmDeleteCard\(true\)\}/)
+  assert.match(board, /onDelete=\{canDeleteOpenCard \? \(\) => setConfirmDeleteCard\(true\) : null\}/)
   assert.doesNotMatch(board, /kb-delete-card" onClick=\{\(\) => deleteCard\(/)
   const start = board.indexOf('kb-card-delete-confirm')
-  const end = board.indexOf('kb-card-danger-zone', start)
+  const end = board.indexOf('<CardFooter', start)
   assert.ok(start !== -1 && end > start, 'the confirmation sits beside the delete control')
   const block = board.slice(start, end)
   assert.ok(block.indexOf('>Cancel<') !== -1 && block.indexOf('>Cancel<') < block.indexOf('>Delete<'))

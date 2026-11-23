@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { AtSign, Check, ChevronDown, ChevronLeft, ChevronRight, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, PullRequestOpen, Share, SquareCheckCheckboxChecked, Trash, User, X } from '@openai/apps-sdk-ui/components/Icon'
+import { AtSign, Check, ChevronDown, ChevronLeft, ChevronRight, Filter, Grid, MagnifyingGlassSearch, Paperclip, Plus, PullRequestOpen, Share, SquareCheckCheckboxChecked, User, X } from '@openai/apps-sdk-ui/components/Icon'
 import { uid, subscribeBoard, getBoard, boardPath, normalizeBoard, loadUi, saveBoardView, saveListFolds, saveSeenCards, loadAssignmentLog, subscribeAssignmentLog, updateAssignmentLog } from '../storage.js'
 import {
   assignmentRef,
@@ -32,13 +32,15 @@ import { useModalFocus } from './modalFocus.js'
 import { mentionedMemberIds } from '../comments.js'
 import { appVisible, onAppVisibilityChange } from '../visibility.js'
 import {
-  AttachmentImage, AttachmentsSection, CardActivity, CardComments, CardTabs, CardTileAttachment, ChecklistSection, CopyCardButton, DescriptionSection, DueChip, dueTone,
+  AttachedNotice, AttachmentImage, AttachmentsSection, CardActivity, CardComments, CardFooter, CardTabs, CardTileAttachment, ChecklistSection, CopyCardButton, DescriptionSection, DueChip, dueTone,
   InlineCardText, LabelChip, LinkifiedText, MemberAvatar, memberLabel, MenuButton, pressedOutside, PullRequestSection, SaveControl, StatusPill,
 } from './CardParts.jsx'
 import {
   cardAssigneeLabel,
   boardAccess,
   boardCapacity,
+  canBeUntitled,
+  cardDisplayName,
   hostLimits,
   boardFingerprints,
   cardFingerprint,
@@ -78,6 +80,8 @@ function Card({ boardId, share, card, labelNames, mine, changed, mentions = 0, a
   const assignee = (assigneeLabel ?? card.assignee)?.trim()
   const notePreview = String(card.notes || '').trim()
   const attachments = card.attachments || []
+  // A card with a file and no title is shown by its picture alone.
+  const shownTitle = card.title || (attachments.length ? '' : cardDisplayName(card))
   const pullCount = cardPullUrls(card).length
   const labelled = card.label && card.label !== 'none' && LABELS[card.label]
   const hasDetails = Boolean(mentions || labelled || dueStatus || progress.total || pullCount || attachments.length || assignee)
@@ -89,11 +93,11 @@ function Card({ boardId, share, card, labelNames, mine, changed, mentions = 0, a
       data-card-id={card.id}
       onPointerDown={canWrite ? e => { if (!e.target.closest('a')) onDragStart(e, card.id) } : undefined}
     >
-      <button type="button" className="kb-card-open" aria-label={`Open card details: ${card.title}`} onClick={() => onOpen(card.id)} />
-      <div className="kb-card-title">
+      <button type="button" className="kb-card-open" aria-label={`Open card details: ${cardDisplayName(card)}`} onClick={() => onOpen(card.id)} />
+      {(shownTitle || changed) && <div className={`kb-card-title${card.title ? '' : ' is-placeholder'}`}>
         {changed && <span className="kb-card-new" role="img" aria-label="Changed since you last looked" />}
-        <LinkifiedText text={card.title} compactLinks />
-      </div>
+        <LinkifiedText text={shownTitle} compactLinks />
+      </div>}
       {notePreview && <div className="kb-card-notes">{notePreview}</div>}
       <CardTileAttachment boardId={boardId} share={share} attachments={attachments} />
       {hasDetails && <div className="kb-card-meta">
@@ -445,11 +449,12 @@ function BoardViewSwitch({ view, counts, onChange }) {
   )
 }
 
-function CardTitleEditor({ card, canWrite, onCommit, onCancel, onDirtyChange }) {
+function CardTitleEditor({ card, canWrite, autoFocus, onCommit, onCancel, onDirtyChange }) {
   const commitTitle = value => {
     const title = value.trim()
-    // Blank existing titles are rejected; untitled drafts remain unpersisted.
-    if (!title) return card.title || ''
+    // A blank title is refused unless a file already says what the card is;
+    // an empty new card stays unsaved.
+    if (!title && !canBeUntitled(card)) return card.title || ''
     if (title !== card.title && onCommit(title) === false) return false
     return title
   }
@@ -461,7 +466,7 @@ function CardTitleEditor({ card, canWrite, onCommit, onCancel, onDirtyChange }) 
           key={card.id}
           className="kb-title-display kb-editable-field"
           value={card.title}
-          autoFocus={!card.title}
+          autoFocus={autoFocus}
           placeholder="Card title…"
           label="Card title"
           onCommit={commitTitle}
@@ -672,6 +677,11 @@ export default memo(function Board({
   const [board, setBoard] = useState(null)
   const [openCardId, setOpenCardId] = useState(null)
   const [draftCard, setDraftCard] = useState(null)
+  // The card Add card opened, for as long as that sheet stays open: it keeps
+  // its "New card" label and Done button after its first save creates it.
+  const [newCardId, setNewCardId] = useState(null)
+  // Files added while Comments or Activity was showing, named on those tabs.
+  const [attachNotice, setAttachNotice] = useState(null)
   const [previewAttachment, setPreviewAttachment] = useState(null)
   // The picture viewer is the foremost dialog while open, so Escape closes the
   // picture rather than the card underneath it.
@@ -775,13 +785,24 @@ export default memo(function Board({
   const pendingEntriesRef = useRef([])
   const lastInteractionAtRef = useRef(Date.now())
   const fileInputRef = useRef(null)
+  // An upload finishes after the draft may have been edited; the save that
+  // follows must read the draft as it is then, not as it was at the paste.
+  const draftCardRef = useRef(null)
+  draftCardRef.current = draftCard
   const cardSheetRef = useModalFocus(Boolean(openCardId), () => { setOpenCardId(null); setDraftCard(null) })
   // Every card opens on Home, except one a mention notification opens on Comments.
   useEffect(() => {
     setConfirmDeleteCard(false)
     setCardTab(requestedTabRef.current || 'home')
     requestedTabRef.current = null
+    setNewCardId(id => (id === openCardId ? id : null))
+    setAttachNotice(null)
   }, [openCardId])
+  useEffect(() => {
+    if (!attachNotice) return undefined
+    const timer = setTimeout(() => setAttachNotice(null), 6000)
+    return () => clearTimeout(timer)
+  }, [attachNotice])
   // A mention notification's card opens on its Comments tab once the board has it.
   useEffect(() => {
     if (!cardRequest || handledCardRequestRef.current === cardRequest || !board?.cards?.[cardRequest.cardId]) return
@@ -1557,11 +1578,25 @@ export default memo(function Board({
   const addCard = colId => {
     const card = { id: uid(), title: '', notes: '', pullRequestUrl: '', pullRequestUrls: [], label: 'none', due: '', checklist: [], attachments: [], assignee: '', assigneeHost: '', createdAt: new Date().toISOString() }
     setDraftCard({ boardId, columnId: colId, card })
+    setNewCardId(card.id)
     setOpenCardId(card.id)
   }
 
+  // A new card joins the board the first time something in it is saved: its
+  // title or a file. Whatever was chosen before that travels with it.
+  const createDraftCard = (fields = {}) => {
+    const draft = draftCardRef.current
+    if (!draft || draft.boardId !== boardId) return false
+    const saved = mutate({ type: 'add-card', columnId: draft.columnId, card: { ...draft.card, ...fields } })
+    if (!saved) return false
+    draftCardRef.current = null
+    setDraftCard(null)
+    window.mobius?.signal?.('item_created', { type: 'card' })
+    return true
+  }
+
   // Draft edits use the same operations as saved cards, without creating
-  // an empty board record. All fields travel together when the title commits.
+  // an empty board record. All fields travel together when the card is created.
   const mutateCard = operation => {
     if (draftCard?.boardId === boardId && draftCard.card.id === operation.cardId) {
       setDraftCard(current => {
@@ -1763,15 +1798,16 @@ export default memo(function Board({
   const attachFiles = async filesInput => {
     const files = [...(filesInput || [])]
     const cardId = openCardId
-    // An untitled draft has no card to attach to yet; saving the file first
-    // would leave an orphaned upload.
-    if (!cardId || !boardRef.current?.cards[cardId] || files.length === 0 || attachmentBusy) return
-    const existing = boardRef.current?.cards[cardId]?.attachments || []
+    const savedCard = () => boardRef.current?.cards[cardId]
+    const isDraft = () => draftCardRef.current?.card.id === cardId
+    if (!cardId || !(savedCard() || isDraft()) || files.length === 0 || attachmentBusy) return
+    const existing = savedCard()?.attachments || []
     if (existing.length + files.length > MAX_CARD_ATTACHMENTS) {
       setAttachmentError(`A card can hold up to ${MAX_CARD_ATTACHMENTS} attachments.`)
       return
     }
     setAttachmentBusy(true); setAttachmentError('')
+    const added = []
     try {
       for (const file of files) {
         const attachment = await saveCardAttachment({
@@ -1780,11 +1816,16 @@ export default memo(function Board({
           id: uid(),
           file,
         })
-        if (!mutate({ type: 'attach-file', cardId, attachment })) {
+        // A file is enough to make a new card real. The card is created only
+        // now, after the upload, so a refused file never leaves an empty card.
+        const attached = (savedCard() || createDraftCard()) && mutate({ type: 'attach-file', cardId, attachment })
+        if (!attached) {
           await deleteCardAttachment({ share: shareRef.current, attachment }).catch(() => {})
           throw new Error('This card cannot be changed right now.')
         }
+        added.push(attachment.name)
       }
+      setAttachNotice({ cardId, names: added })
       window.mobius?.signal?.('item_created', { type: 'card-attachment' })
     } catch (error) {
       setAttachmentError(String(error?.message || 'The file could not be attached.'))
@@ -2173,19 +2214,20 @@ export default memo(function Board({
   }
   const isDraftCard = draftCard?.boardId === boardId && draftCard.card.id === openCardId
   const openCard_ = openCardId ? board.cards[openCardId] || (isDraftCard ? draftCard.card : null) : null
-  // Header choices on an untitled draft ride along into its add-card.
+  const isNewCard = newCardId !== null && newCardId === openCardId
   // A saved card's title commit edits it; a draft's first commit creates it.
-  const commitCardTitle = title => {
-    if (!isDraftCard) return updateCard(openCard_.id, { title })
-    const saved = mutate({ type: 'add-card', columnId: draftCard.columnId, card: { ...draftCard.card, title } })
-    if (saved) { setDraftCard(null); window.mobius?.signal?.('item_created', { type: 'card' }) }
-    return saved
-  }
+  const commitCardTitle = title => (isDraftCard ? createDraftCard({ title }) : updateCard(openCard_.id, { title }))
   const patchOpenCard = patch => isDraftCard
     ? setDraftCard(current => ({ ...current, card: { ...current.card, ...patch } }))
     : updateCard(openCard_.id, patch)
-  const openCardColumn = openCard_ ? board.columns.find(column => column.cardIds.includes(openCard_.id)) : null
+  // A new card's list is the one whose Add card was pressed, until it is changed.
+  const openCardColumn = openCard_ ? board.columns.find(column => (isDraftCard ? column.id === draftCard.columnId : column.cardIds.includes(openCard_.id))) : null
+  const moveOpenCard = columnId => (isDraftCard
+    ? setDraftCard(current => ({ ...current, columnId }))
+    : moveCard(openCard_.id, columnId, null))
   const closeCard = () => { setOpenCardId(null); setDraftCard(null) }
+  // A card that is not on the board yet has nothing to delete.
+  const canDeleteOpenCard = access.canWrite && !isDraftCard
   const columnColor = column => column?.color ? (LABELS[column.color] || 'var(--muted)') : 'var(--muted)'
   const openDetails = openCard_ && cardDetails?.cardId === openCard_.id ? cardDetails : null
   // A shared card's long description loads separately; until it has, only a
@@ -2228,11 +2270,16 @@ export default memo(function Board({
   })).filter(member => member.label)
   const openCommentCount = openDetails?.comments?.length
     || (Number.isInteger(openCard_?.commentsCount) && openCard_.commentsCount > 0 ? openCard_.commentsCount : 0)
-  // A draft has one plain body; a saved card's three tabs share one sheet, and
-  // hidden panels stay mounted so a draft comment or an open list survives a switch.
-  const cardPanel = id => isDraftCard ? {} : {
+  // A card has the same frame from the moment Add card opens it: three tabs
+  // sharing one sheet. Hidden panels stay mounted, so a draft comment or an
+  // open list survives a switch. A card not yet saved has nothing to load.
+  const cardPanel = id => ({
     id: `kb-card-panel-${id}`, role: 'tabpanel', 'aria-labelledby': `kb-card-tab-${id}`, hidden: cardTab !== id,
-  }
+  })
+  const openDetailsStatus = isDraftCard ? 'ok' : (openDetails?.status || 'loading')
+  const attachedNotice = attachNotice && attachNotice.cardId === openCard_?.id
+    ? <AttachedNotice names={attachNotice.names} onView={() => { setCardTab('home'); setAttachNotice(null) }} />
+    : null
   const createdLabel = openCard_?.createdAt && !Number.isNaN(Date.parse(openCard_.createdAt))
     ? `Created ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: new Date(openCard_.createdAt).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }).format(new Date(openCard_.createdAt))}`
     : ''
@@ -2503,7 +2550,7 @@ export default memo(function Board({
           className="kb-card kb-ghost"
           style={{ left: drag.x - drag.dx, top: drag.y - drag.dy, width: drag.w }}
         >
-          <div className="kb-card-title">{board.cards[drag.cardId]?.title}</div>
+          <div className="kb-card-title">{cardDisplayName(board.cards[drag.cardId])}</div>
         </div>
       )}
 
@@ -2513,27 +2560,27 @@ export default memo(function Board({
           <div
             ref={cardSheetRef}
             tabIndex={-1}
-            className={`kb-sheet kb-card-sheet${isDraftCard ? '' : ' is-tabbed'}${attachmentDropActive ? ' is-dropping' : ''}`}
+            className={`kb-sheet kb-card-sheet${attachmentDropActive ? ' is-dropping' : ''}`}
             role="dialog"
             aria-modal="true"
             aria-label={isDraftCard ? 'New card' : 'Card details'}
             onPaste={attachFromPaste}
-            onDragOver={event => { if (access.canWrite && !isDraftCard && event.dataTransfer?.types?.includes('Files')) { event.preventDefault(); setAttachmentDropActive(true) } }}
+            onDragOver={event => { if (access.canWrite && event.dataTransfer?.types?.includes('Files')) { event.preventDefault(); setAttachmentDropActive(true) } }}
             onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setAttachmentDropActive(false) }}
             onDrop={event => { if (!event.dataTransfer?.files?.length) return; event.preventDefault(); setAttachmentDropActive(false); if (access.canWrite) attachFiles(event.dataTransfer.files) }}
           >
             <div className="kb-card-toolbar">
-              {isDraftCard || !openCardColumn
-                ? <span className="kb-card-toolbar-title">New card</span>
-                : <StatusPill columns={board.columns} columnId={openCardColumn.id} colorFor={columnColor} canWrite={access.canWrite}
-                  onMove={columnId => moveCard(openCard_.id, columnId, null)} />}
+              {openCardColumn && <StatusPill columns={board.columns} columnId={openCardColumn.id} colorFor={columnColor} canWrite={access.canWrite}
+                onMove={moveOpenCard} />}
+              {isNewCard && <span className="kb-card-new-label">New card</span>}
               <span className="kb-card-toolbar-spacer" />
               <SaveControl state={cardSaveState} tick={savedTick} />
               <button type="button" className="kb-iconbtn kb-card-close" aria-label="Close card" title="Close. Your changes are already saved." onClick={closeCard}><X /></button>
             </div>
-            {!isDraftCard && <CardTabs tab={cardTab} onChange={setCardTab} counts={{ comments: openCommentCount, activity: openTimeline.length }} />}
-            <div className="kb-card-panel" {...cardPanel('home')}>
-              <CardTitleEditor card={openCard_} canWrite={access.canWrite} onDirtyChange={noteCardEditing} onCommit={title => {
+            <CardTabs tab={cardTab} onChange={setCardTab} counts={{ comments: openCommentCount, activity: openTimeline.length }} />
+            <div className="kb-card-panels">
+            <div className="kb-card-panel kb-card-panel-home" {...cardPanel('home')}>
+              <CardTitleEditor card={openCard_} canWrite={access.canWrite} autoFocus={isNewCard && !openCard_.title} onDirtyChange={noteCardEditing} onCommit={title => {
                 setCardSaveState('saving')
                 const saved = commitCardTitle(title)
                 if (saved === false) setCardSaveState('idle')
@@ -2580,7 +2627,7 @@ export default memo(function Board({
                 type="file"
                 multiple
                 tabIndex={-1}
-                disabled={isDraftCard || attachmentBusy}
+                disabled={attachmentBusy}
                 onChange={attachFromInput}
               />}
               <AttachmentsSection
@@ -2589,7 +2636,6 @@ export default memo(function Board({
                 share={share}
                 attachments={openCard_.attachments || []}
                 canWrite={access.canWrite}
-                isDraft={isDraftCard}
                 busy={attachmentBusy}
                 error={attachmentError}
                 onPick={() => fileInputRef.current?.click()}
@@ -2611,8 +2657,7 @@ export default memo(function Board({
                 onUpdate={(previousUrl, nextUrl) => mutateCard({ type: 'edit-pull-request', cardId: openCard_.id, previousUrl, nextUrl })}
                 onRefresh={() => setPullStatusRefresh(value => value + 1)} />
 
-              {!isDraftCard && <>
-              {access.canWrite && (confirmDeleteCard
+              {canDeleteOpenCard && confirmDeleteCard
                 ? <div ref={cardDeleteConfirmRef} tabIndex={-1} className="kb-col-confirm kb-card-delete-confirm" role="alertdialog" aria-modal="true" aria-label="Delete card">
                   <div className="kb-col-confirm-copy">Delete this card{share ? ' for everyone on this board' : ''}? This can’t be undone.</div>
                   <div className="kb-col-confirm-actions">
@@ -2620,23 +2665,21 @@ export default memo(function Board({
                     <button className="kb-btn kb-btn-danger" onClick={() => deleteCard(openCard_.id)}>Delete</button>
                   </div>
                 </div>
-                : <div className="kb-card-danger-zone">
-                  <button ref={deleteCardButtonRef} className="kb-btn kb-delete-card" onClick={() => setConfirmDeleteCard(true)}>
-                    <Trash aria-hidden="true" />
-                    Delete card
-                  </button>
-                  {createdLabel && <span className="kb-card-created">{createdLabel}</span>}
-                </div>)}
-              {!access.canWrite && createdLabel && <div className="kb-card-danger-zone"><span className="kb-card-created">{createdLabel}</span></div>}
-              </>}
+                : <CardFooter
+                  deleteRef={deleteCardButtonRef}
+                  onDelete={canDeleteOpenCard ? () => setConfirmDeleteCard(true) : null}
+                  created={isDraftCard ? '' : createdLabel}
+                  onDone={isNewCard ? closeCard : null}
+                />}
             </div>
-            {!isDraftCard && <>
             <div className="kb-card-panel kb-card-panel-comments" {...cardPanel('comments')}>
               <CardComments
                 card={openCard_}
                 comments={openDetails?.comments || []}
-                status={openDetails?.status || 'loading'}
-                canWrite={access.canWrite}
+                status={openDetailsStatus}
+                canWrite={access.canWrite && !isDraftCard}
+                emptyHint={isDraftCard ? 'Comments open as soon as the card has a title or a file.' : ''}
+                notice={attachedNotice}
                 posting={commentPosting}
                 postError={commentError}
                 actorName={activityActor}
@@ -2652,13 +2695,14 @@ export default memo(function Board({
               <CardActivity
                 card={openCard_}
                 timeline={openTimeline}
-                status={openDetails?.status || 'loading'}
+                status={openDetailsStatus}
                 canWrite={access.canWrite}
                 nameFor={nameForRef}
                 onRestore={ref => assignCard(openCard_.id, ref)}
               />
+              {attachedNotice}
             </div>
-            </>}
+            </div>
           </div>
         </>
       )}

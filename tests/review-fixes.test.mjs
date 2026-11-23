@@ -320,19 +320,19 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
     return at >= 0 && (index === 0 || sheetSource.indexOf(markers[index - 1]) < at)
   })
   const heading = sheetSource.slice(0, sheetSource.indexOf('<CardTitleEditor'))
-  assert.match(heading, /isDraftCard \|\| !openCardColumn\s*\? <span className="kb-card-toolbar-title">New card<\/span>/,
-    'only a card that is still being created is headed New card')
-  assert.match(heading, /<StatusPill columns=\{board\.columns\} columnId=\{openCardColumn\.id\}/,
-    'a saved card is headed by a status control showing the list it sits in')
+  assert.match(heading, /\{openCardColumn && <StatusPill columns=\{board\.columns\} columnId=\{openCardColumn\.id\}/,
+    'every card, new or saved, is headed by a status control showing its list')
+  assert.match(heading, /\{isNewCard && <span className="kb-card-new-label">New card<\/span>\}/,
+    'only a card that is being created also says New card')
   assert.equal(heading.match(/>New card</g).length, 1, 'New card is never the unconditional heading')
   assert.ok(inOrder(['<StatusPill', 'kb-card-close', '<CardTitleEditor', '<AssigneePicker', '<LabelChip', '<DueChip']),
     'the card header reads status then close; the details row reads assignee, label, then due date')
-  assert.ok(inOrder(['<DescriptionSection', '<AttachmentsSection', '<ChecklistSection', '<PullRequestSection', 'kb-card-danger-zone', '<CardComments', '<CardActivity']),
+  assert.ok(inOrder(['<DescriptionSection', '<AttachmentsSection', '<ChecklistSection', '<PullRequestSection', '<CardFooter', '<CardComments', '<CardActivity']),
     'Home reads description, attachments, checklist, pull request, then delete; Comments and Activity follow as their own tabs')
   assert.equal(sheetSource.match(/<AssigneePicker/g).length, 1, 'one assignee control for every screen size')
   assert.equal(sheetSource.match(/<DueChip/g).length, 1, 'one due-date control for every screen size')
   assert.equal(sheetSource.match(/<StatusPill/g).length, 1, 'one status control for every screen size')
-  assert.match(boardSource, /className="kb-card-danger-zone"/)
+  assert.match(partsSource, /className="kb-card-footer"/)
   assert.match(boardSource, /className="kb-title-display kb-editable-field"/)
   assert.match(partsSource, /<LinkifiedText text=\{text\} \/>/)
   assert.match(partsSource, /contentEditable="plaintext-only"/)
@@ -344,9 +344,9 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(themeSource, /\.kb-notes-display \{[^}]*flex: 0 0 auto;[^}]*max-height: none/)
   assert.match(partsSource, /data-modal-inline-editor/)
   assert.match(boardSource, /setDraftCard\(\{ boardId, columnId: colId, card \}\)/)
-  assert.match(boardSource, /if \(!isDraftCard\) return updateCard/)
+  assert.match(boardSource, /isDraftCard \? createDraftCard\(\{ title \}\) : updateCard\(openCard_\.id, \{ title \}\)/)
   assert.doesNotMatch(boardSource, /onCancel=\{\(\) => \{ mutate\(\{ type: 'delete-card'/)
-  assert.match(boardSource, /className="kb-btn kb-delete-card"/)
+  assert.match(partsSource, /className="kb-btn kb-delete-card"/)
   assert.match(boardSource, /className="kb-iconbtn kb-card-close" aria-label="Close card"/)
   assert.doesNotMatch(heading, />Done</, 'closing a card is not labelled like the Done list')
   assert.doesNotMatch(boardSource, /kb-card-more-heading/)
@@ -360,7 +360,7 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(boardSource, /await onRefreshMembers\?\.\(\)/)
   // Board cards read like the open card: title, the start of the description, one attachment, then details.
   const tile = boardSource.slice(boardSource.indexOf('function Card('), boardSource.indexOf('function memberRecords('))
-  assert.ok(['className="kb-card-title"', 'className="kb-card-notes"', '<CardTileAttachment', 'className="kb-card-meta"']
+  assert.ok(['kb-card-title${', 'className="kb-card-notes"', '<CardTileAttachment', 'className="kb-card-meta"']
     .every((marker, index, markers) => tile.indexOf(marker) > (index ? tile.indexOf(markers[index - 1]) : -1)),
     'a board card reads title, description, attachment, then the details row')
   assert.match(partsSource, /Add attachment/)
@@ -391,7 +391,7 @@ test('card-title links open directly and pull-request status stays informational
   const themeSource = await readFile(new URL('../theme.js', import.meta.url), 'utf8')
   const storageSource = await readFile(new URL('../storage.js', import.meta.url), 'utf8')
   // The title area may start with the "changed" dot; the title itself stays a linkified title.
-  assert.match(boardSource, /className="kb-card-title">[^]{0,200}?<LinkifiedText text=\{card\.title\}/)
+  assert.match(boardSource, /kb-card-title[^]{0,260}?<LinkifiedText text=\{shownTitle\}/)
   assert.match(boardSource, /if \(!e\.target\.closest\('a'\)\) onDragStart/)
   assert.match(boardSource, /pullRequestStatus\(response\.status/)
   const partsSource = await readFile(new URL('../ui/CardParts.jsx', import.meta.url), 'utf8')
@@ -408,12 +408,12 @@ test('card-title links open directly and pull-request status stays informational
 test('new cards expose details before a title and keep draft edits in the eventual add', async () => {
   const source = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
   const sheet = source.slice(source.indexOf('className="kb-card-toolbar"'))
-  const draftGate = sheet.indexOf('{!isDraftCard && <>')
+  assert.doesNotMatch(sheet, /\{!isDraftCard && <>/, 'nothing on the card is held back until it is saved')
   for (const field of ['<DueChip', '<DescriptionSection', '<ChecklistSection', '<PullRequestSection', '<AttachmentsSection']) {
-    assert.ok(sheet.indexOf(field) < draftGate, field + ' is visible for drafts')
+    assert.ok(sheet.includes(field), field + ' is visible for drafts')
   }
   assert.match(source, /applyBoardOp\(doc, operation\)/)
-  assert.match(source, /card: \{ \.\.\.draftCard.card, title \}/)
+  assert.match(source, /card: \{ \.\.\.draft\.card, \.\.\.fields \}/)
   const draft = { columns: [], cards: { draft: { id: 'draft', title: '', checklist: [] } } }
   for (const op of [
     { type: 'update-card', patch: { notes: 'Details first', due: '2026-10-01' } },
