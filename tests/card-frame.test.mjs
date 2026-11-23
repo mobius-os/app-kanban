@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { canBeUntitled, cardDisplayName, cardMatchesFilters } from '../domain.js'
 import { applyBoardOp } from '../operations.js'
+import { uploadFilesToCard } from '../attachments.js'
 import { CSS } from '../theme.js'
 
 const source = name => readFile(new URL(`../${name}`, import.meta.url), 'utf8')
@@ -44,15 +45,90 @@ test('a card created by its first file is an ordinary board record', () => {
   assert.equal(board.cards.c1.attachments[0].name, 'whiteboard.png')
 })
 
-test('a new card is created only after its file has uploaded, from the draft as it is then', async () => {
+// A small board with Add card's draft beside it, joined by the real reducer.
+// The fake createDraft creates whichever draft is open, without checking which
+// one it is, so these tests show that the upload itself re-checks its card.
+const uploadBench = () => {
+  const board = { columns: [{ id: 'todo', cardIds: [] }], cards: {} }
+  const bench = { board, draft: null, discarded: [], created: 0 }
+  bench.open = id => { bench.draft = { id, title: '', notes: '', attachments: [] } }
+  bench.handlers = cardId => ({
+    cardId,
+    isSaved: id => Boolean(board.cards[id]),
+    isDraft: id => bench.draft?.id === id,
+    createDraft: () => {
+      if (!bench.draft) return false
+      applyBoardOp(board, { type: 'add-card', columnId: 'todo', card: bench.draft })
+      bench.draft = null
+      bench.created += 1
+      return true
+    },
+    attach: (id, attachment) => Boolean(board.cards[id]) && applyBoardOp(board, { type: 'attach-file', cardId: id, attachment }) !== false,
+    discard: async attachment => { bench.discarded.push(attachment.name) },
+  })
+  return bench
+}
+const deferredUpload = () => {
+  const pending = []
+  const upload = file => new Promise(resolve => pending.push(() => resolve({ ...picture, id: file, name: `${file}.png` })))
+  return { upload, finish: () => pending.shift()(), started: () => pending.length }
+}
+const settle = () => new Promise(resolve => setImmediate(resolve))
+
+test('a new card is created by its file only after the upload, from the draft as it is then', async () => {
+  const bench = uploadBench()
+  const uploads = deferredUpload()
+  bench.open('a')
+  const run = uploadFilesToCard({ ...bench.handlers('a'), files: ['first', 'second'], upload: uploads.upload })
+  await settle()
+  assert.equal(bench.created, 0, 'nothing is on the board while the file uploads, so a refused file leaves no card')
+  bench.draft.notes = 'typed during the upload'
+  uploads.finish(); await settle()
+  uploads.finish()
+  assert.deepEqual(await run, { added: ['first.png', 'second.png'], closed: false })
+  assert.equal(bench.created, 1, 'two files create one card')
+  assert.deepEqual(bench.board.columns[0].cardIds, ['a'])
+  assert.equal(bench.board.cards.a.notes, 'typed during the upload', 'edits made while the file uploaded are kept')
+  assert.deepEqual(bench.board.cards.a.attachments.map(file => file.name), ['first.png', 'second.png'])
+})
+
+test('closing a new card and opening another while its file uploads creates neither and removes the file', async () => {
+  const bench = uploadBench()
+  const uploads = deferredUpload()
+  bench.open('a')
+  const run = uploadFilesToCard({ ...bench.handlers('a'), files: ['first', 'second'], upload: uploads.upload })
+  await settle()
+  bench.draft = null // X on card A
+  bench.open('b') // Add card again
+  uploads.finish()
+  assert.deepEqual(await run, { added: [], closed: true })
+  assert.equal(bench.created, 0, 'the empty draft B is not saved in place of A')
+  assert.deepEqual(bench.board.cards, {})
+  assert.equal(bench.draft.id, 'b', 'the new draft stays open and unsaved')
+  assert.deepEqual(bench.discarded, ['first.png'], 'the upload that lost its card is removed')
+  assert.equal(uploads.started(), 0, 'the remaining files are not uploaded for a card that is gone')
+})
+
+test('a refused card edit removes the uploaded file and says so', async () => {
+  const bench = uploadBench()
+  bench.open('a')
+  const handlers = { ...bench.handlers('a'), createDraft: () => false }
+  await assert.rejects(uploadFilesToCard({ ...handlers, files: ['first'], upload: async file => ({ ...picture, name: `${file}.png` }) }),
+    /This card cannot be changed right now\./)
+  assert.deepEqual(bench.discarded, ['first.png'])
+  assert.deepEqual(bench.board.cards, {})
+})
+
+test('the open card passes its own id to draft creation, which refuses any other draft', async () => {
   const board = await source('ui/Board.jsx')
   const attach = board.slice(board.indexOf('const attachFiles = async'), board.indexOf('const attachFromInput'))
-  assert.ok(attach.indexOf('await saveCardAttachment(') < attach.indexOf('createDraftCard()'),
-    'a refused or failed upload never leaves an empty card behind')
-  assert.match(attach, /\(savedCard\(\) \|\| createDraftCard\(\)\) && mutate\(\{ type: 'attach-file', cardId, attachment \}\)/)
-  assert.match(attach, /await deleteCardAttachment\(\{ share: shareRef\.current, attachment \}\)/, 'an upload that never joined a card is removed')
+  assert.match(attach, /uploadFilesToCard\(\{\s*cardId,/)
+  assert.match(attach, /createDraft: createDraftCard,/)
+  assert.match(attach, /discard: attachment => deleteCardAttachment\(\{ share: shareRef\.current, attachment \}\)/, 'an upload that never joined a card is removed')
   const create = board.slice(board.indexOf('const createDraftCard'), board.indexOf('const mutateCard'))
-  assert.match(create, /const draft = draftCardRef\.current/, 'edits made while the file was uploading are not lost')
+  assert.match(create, /const createDraftCard = \(cardId, fields = \{\}\) =>/)
+  assert.match(create, /draft\.card\.id !== cardId\) return false/, 'a draft that replaced the one being saved is never created by it')
+  assert.match(create, /const draft = draftCardRef\.current/, 'the draft is read as it is when it is created')
   assert.match(create, /draftCardRef\.current = null/, 'two files pasted together create one card')
 })
 

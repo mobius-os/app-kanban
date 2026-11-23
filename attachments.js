@@ -148,6 +148,29 @@ export async function loadCardAttachment({ share, attachment }) {
   return blobToDataUrl(blob)
 }
 
+// Uploads files one at a time and joins each to the card that asked for it.
+// The card is checked again after every upload: a card being created is
+// created by its first file only if that same draft is still open, so a draft
+// closed or replaced while a file uploaded gets no card and its file is
+// removed (`closed: true`). A refused card edit removes the file and throws.
+export async function uploadFilesToCard({ cardId, files, upload, isSaved, isDraft, createDraft, attach, discard }) {
+  const added = []
+  for (const file of files) {
+    const attachment = await upload(file)
+    const saved = isSaved(cardId)
+    if (!saved && !isDraft(cardId)) {
+      await discard(attachment).catch(() => {})
+      return { added, closed: true }
+    }
+    if (!(saved || createDraft(cardId)) || !attach(cardId, attachment)) {
+      await discard(attachment).catch(() => {})
+      throw new Error('This card cannot be changed right now.')
+    }
+    added.push(attachment.name)
+  }
+  return { added, closed: false }
+}
+
 // Discards an upload that never became part of a card (its card edit was
 // refused). A file a card attached is deleted with the edit that removes it
 // (boardRepository.mutate; on a shared board, its host).

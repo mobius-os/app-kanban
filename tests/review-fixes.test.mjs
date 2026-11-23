@@ -344,7 +344,7 @@ test('component-level viewer and keyboard contract gates writes, reorders, and m
   assert.match(themeSource, /\.kb-notes-display \{[^}]*flex: 0 0 auto;[^}]*max-height: none/)
   assert.match(partsSource, /data-modal-inline-editor/)
   assert.match(boardSource, /setDraftCard\(\{ boardId, columnId: colId, card \}\)/)
-  assert.match(boardSource, /isDraftCard \? createDraftCard\(\{ title \}\) : updateCard\(openCard_\.id, \{ title \}\)/)
+  assert.match(boardSource, /isDraftCard \? createDraftCard\(openCard_\.id, \{ title \}\) : updateCard\(openCard_\.id, \{ title \}\)/)
   assert.doesNotMatch(boardSource, /onCancel=\{\(\) => \{ mutate\(\{ type: 'delete-card'/)
   assert.match(partsSource, /className="kb-btn kb-delete-card"/)
   assert.match(boardSource, /className="kb-iconbtn kb-card-close" aria-label="Close card"/)

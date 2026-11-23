@@ -27,6 +27,7 @@ import {
   loadCardAttachment,
   MAX_CARD_ATTACHMENTS,
   saveCardAttachment,
+  uploadFilesToCard,
 } from '../attachments.js'
 import { useModalFocus } from './modalFocus.js'
 import { mentionedMemberIds } from '../comments.js'
@@ -1583,10 +1584,12 @@ export default memo(function Board({
   }
 
   // A new card joins the board the first time something in it is saved: its
-  // title or a file. Whatever was chosen before that travels with it.
-  const createDraftCard = (fields = {}) => {
+  // title or a file. Whatever was chosen before that travels with it. The
+  // caller names the draft it means, so a save that finishes after that draft
+  // was closed or replaced never creates another one.
+  const createDraftCard = (cardId, fields = {}) => {
     const draft = draftCardRef.current
-    if (!draft || draft.boardId !== boardId) return false
+    if (!draft || draft.boardId !== boardId || draft.card.id !== cardId) return false
     const saved = mutate({ type: 'add-card', columnId: draft.columnId, card: { ...draft.card, ...fields } })
     if (!saved) return false
     draftCardRef.current = null
@@ -1807,26 +1810,23 @@ export default memo(function Board({
       return
     }
     setAttachmentBusy(true); setAttachmentError('')
-    const added = []
     try {
-      for (const file of files) {
-        const attachment = await saveCardAttachment({
-          boardId,
-          share: shareRef.current,
-          id: uid(),
-          file,
-        })
-        // A file is enough to make a new card real. The card is created only
-        // now, after the upload, so a refused file never leaves an empty card.
-        const attached = (savedCard() || createDraftCard()) && mutate({ type: 'attach-file', cardId, attachment })
-        if (!attached) {
-          await deleteCardAttachment({ share: shareRef.current, attachment }).catch(() => {})
-          throw new Error('This card cannot be changed right now.')
-        }
-        added.push(attachment.name)
+      // A file is enough to make a new card real. The card is created only
+      // after the upload, so a refused file never leaves an empty card.
+      const { added } = await uploadFilesToCard({
+        cardId,
+        files,
+        upload: file => saveCardAttachment({ boardId, share: shareRef.current, id: uid(), file }),
+        isSaved: () => Boolean(savedCard()),
+        isDraft,
+        createDraft: createDraftCard,
+        attach: (id, attachment) => mutate({ type: 'attach-file', cardId: id, attachment }),
+        discard: attachment => deleteCardAttachment({ share: shareRef.current, attachment }),
+      })
+      if (added.length) {
+        setAttachNotice({ cardId, names: added })
+        window.mobius?.signal?.('item_created', { type: 'card-attachment' })
       }
-      setAttachNotice({ cardId, names: added })
-      window.mobius?.signal?.('item_created', { type: 'card-attachment' })
     } catch (error) {
       setAttachmentError(String(error?.message || 'The file could not be attached.'))
       window.mobius?.signal?.('error', { message: String(error?.message || error), source: 'attach-file' })
@@ -2216,7 +2216,7 @@ export default memo(function Board({
   const openCard_ = openCardId ? board.cards[openCardId] || (isDraftCard ? draftCard.card : null) : null
   const isNewCard = newCardId !== null && newCardId === openCardId
   // A saved card's title commit edits it; a draft's first commit creates it.
-  const commitCardTitle = title => (isDraftCard ? createDraftCard({ title }) : updateCard(openCard_.id, { title }))
+  const commitCardTitle = title => (isDraftCard ? createDraftCard(openCard_.id, { title }) : updateCard(openCard_.id, { title }))
   const patchOpenCard = patch => isDraftCard
     ? setDraftCard(current => ({ ...current, card: { ...current.card, ...patch } }))
     : updateCard(openCard_.id, patch)
