@@ -50,13 +50,23 @@ def mention_targets(row, raw, author_host):
     return keys
 
 
+def card_name(card: dict) -> str:
+    """The card's title, or its first file's name for a card that has none."""
+    title = str(card.get('title') or '').strip()
+    if title:
+        return title
+    files = card.get('attachments') or []
+    first = files[0] if files and isinstance(files[0], dict) else {}
+    return str(first.get('name') or '').strip()
+
+
 def queue(store, now, row, card_id, card, comment, keys):
     """Record one outbox entry per mentioned member, due immediately."""
     for key in keys:
         mention_id = uuid.uuid4().hex
         store.put(OUTBOX, f"{row['id']}/{mention_id}", {
             'id': mention_id, 'oid': row['id'], 'member': key, 'member_host': row['members'][key]['host'],
-            'card_id': card_id, 'card_title': str(card.get('title') or '')[:TITLE_CHARS],
+            'card_id': card_id, 'card_title': card_name(card)[:TITLE_CHARS],
             'comment_id': comment['id'], 'author': comment['by']['name'],
             'snippet': comment['text'][:SNIPPET_CHARS], 'at': comment['at'],
             'attempts': 0, 'next_at': now, 'expires_at': now + MENTION_TTL,

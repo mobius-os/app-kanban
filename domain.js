@@ -101,6 +101,18 @@ export function dueDateStatus(due, today = new Date()) {
   return 'upcoming'
 }
 
+// A card may go without a title once a file says what it is: a pasted
+// screenshot is the whole card. Without a file, a blank title is refused.
+export const canBeUntitled = card => (card?.attachments?.length || 0) > 0
+
+// What to call a card wherever a name is needed (a screen reader, the drag
+// preview, search): its title, else its first file's name.
+export function cardDisplayName(card) {
+  const title = String(card?.title || '').trim()
+  if (title) return title
+  return String(card?.attachments?.[0]?.name || '').trim() || 'Untitled card'
+}
+
 // A list, heading, quote, code block or table only renders as one at the start
 // of a line, so a description opening with one starts below its label.
 const STARTS_WITH_MARKDOWN_BLOCK = /^(?:[-*+]\s|\d+[.)]\s|#{1,6}\s|>|```|~~~|\|)/u
@@ -274,12 +286,13 @@ export function deleteChecklistItem(checklist, itemId) {
 }
 
 // `assigneeLabel` is the name the board shows for the card's owner (for example
-// a verified @handle), so text search finds people the way they appear.
+// a verified @handle), so text search finds people the way they appear. A card
+// without a title is found by the name it goes by instead.
 export function cardMatchesFilters(card, text = '', labels = [], assigneeLabel = '') {
   if (!card || typeof card !== 'object') return false
   const query = String(text || '').trim().toLocaleLowerCase()
   if (query) {
-    const haystack = [card.title, card.notes, card.assignee, assigneeLabel]
+    const haystack = [cardDisplayName(card), card.notes, card.assignee, assigneeLabel]
       .filter(value => typeof value === 'string' && value)
       .join('\n')
       .toLocaleLowerCase()

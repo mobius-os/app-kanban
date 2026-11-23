@@ -257,14 +257,15 @@ test('a host without comments reads as unsupported, never as a failed save', asy
 
 // ---- the card sheet: Home | Comments | Activity tabs; one save control ----
 
-test('a saved card has Home, Comments and Activity tabs; Comments fill the tab, Enter posts, Shift+Enter breaks lines', async () => {
+test('a card has Home, Comments and Activity tabs from the moment it opens; Comments fill the tab, Enter posts, Shift+Enter breaks lines', async () => {
   const board = await readFile(new URL('../ui/Board.jsx', import.meta.url), 'utf8')
   const parts = await readFile(new URL('../ui/CardParts.jsx', import.meta.url), 'utf8')
   const theme = await readFile(new URL('../theme.js', import.meta.url), 'utf8')
   assert.match(parts, /const CARD_TABS = \[\['home', 'Home'\], \['comments', 'Comments'\], \['activity', 'Activity'\]\]/)
   assert.match(parts, /role="tablist"[\s\S]{0,400}role="tab"[\s\S]{0,200}aria-selected=\{tab === id\}/, 'a real tab list')
-  assert.match(board, /\{!isDraftCard && <CardTabs tab=\{cardTab\}/, 'a card still being created has no tabs')
-  assert.match(board, /setCardTab\(requestedTabRef\.current \|\| 'home'\)[\s\S]{0,80}\}, \[openCardId\]\)/,
+  assert.match(board, /\n\s*<CardTabs tab=\{cardTab\}/)
+  assert.doesNotMatch(board, /isDraftCard && <CardTabs/, 'a card being created already has its tabs, so saving it adds none')
+  assert.match(board, /setCardTab\(requestedTabRef\.current \|\| 'home'\)[\s\S]{0,200}\}, \[openCardId\]\)/,
     'every card opens on Home, except one a mention notification opens on Comments')
   assert.match(board, /hidden: cardTab !== id/, 'hidden panels stay mounted, so a draft comment survives a tab switch')
   assert.match(board, /active=\{cardTab === 'comments'\}/, 'the newest comment is scrolled into view when the tab opens')
@@ -272,10 +273,16 @@ test('a saved card has Home, Comments and Activity tabs; Comments fill the tab, 
   assert.doesNotMatch(section, /FoldingSection/, 'comments no longer fold')
   assert.match(section, /if \(active && scroller\) scroller\.scrollTop = scroller\.scrollHeight/)
   assert.match(section, /event\.key !== 'Enter' \|\| event\.shiftKey/, 'Enter posts; Shift+Enter makes a new line')
-  assert.match(theme, /\.kb-card-sheet\.is-tabbed \{ height: [^;]+; overflow: clip;/,
-    'one fixed height, and clip (never hidden): a hidden box is still a scroll container, so the phone keyboard’s reveal-the-focused-input scroll would shove the toolbar out of view')
+  const frame = theme.slice(theme.indexOf('---- Card tabs: Home'), theme.indexOf('.kb-card-comments, .kb-card-activity'))
+  assert.match(frame, /\.kb-card-sheet \{[^}]*overflow: clip;/,
+    'clip (never hidden): a hidden box is still a scroll container, so the phone keyboard’s reveal-the-focused-input scroll would shove the toolbar out of view')
+  assert.match(frame, /\.kb-card-panel \{ grid-area: 1 \/ 1;/, 'the three panels share one box, so switching tabs never resizes the card')
+  assert.match(frame, /\.kb-card-panel:not\(\.kb-card-panel-home\) \{ contain: size; \}/,
+    'Comments and Activity fill the box Home sets instead of stretching it')
+  assert.match(frame, /@media \(max-width: 640px\) \{[^}]*\.kb-card-sheet \{[^}]*height: calc\(100dvh/, 'a phone keeps its full-height sheet')
   assert.match(theme, /\.kb-comments-window \{ flex: 1 1 auto;[^}]*overflow-y: auto/, 'the conversation fills the tab and scrolls')
-  assert.match(theme, /\.kb-card-sheet\.is-tabbed > \.kb-card-panel\[hidden\] \{ display: none; \}/, 'a flex panel still hides')
+  assert.match(frame, /\.kb-card-panel\[hidden\] \{ display: block; visibility: hidden; \}/,
+    'a hidden panel is out of sight and out of reach but keeps its place, so Home still sets the height')
   assert.doesNotMatch(theme, /\.kb-comments-window[^\n]*scrollbar/, 'the app-wide rule already hides the scrollbar')
   // The presence stack's overlap margin must not pull comment or picker
   // avatars outside their (clipping) scroll containers.

@@ -166,6 +166,12 @@ class Mentions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.badges(self.c), {'c1': 1})
         self.assertEqual([r['member_host'] for r in self.outbox()], ['b.example'], 'only the offline one waits for a retry')
 
+    def test_a_card_without_a_title_is_named_by_its_first_file_in_the_notification(self):
+        self.assertEqual(mentions.card_name({'title': '  Venue  ', 'attachments': [{'name': 'plan.png'}]}), 'Venue')
+        self.assertEqual(mentions.card_name({'title': '', 'attachments': [{'name': 'plan.png'}, {'name': 'b.png'}]}), 'plan.png')
+        self.assertEqual(mentions.card_name({'attachments': ['not-a-file']}), '')
+        self.assertEqual(mentions.card_name({}), '', 'with neither, the notification falls back to "a card"')
+
     def test_the_notification_opens_the_cards_comments_tab_with_a_safe_tag(self):
         entry = {'oid': 'f' * 32, 'card_id': 'card-1', 'author': 'Maya', 'card_title': 'Venue', 'snippet': 'hi'}
         push = mentions.notification(entry, 9)

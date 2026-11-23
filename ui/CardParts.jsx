@@ -887,9 +887,11 @@ export const ATTACHMENT_PREVIEW_ITEMS = 3
 
 // Attachments show their first row of files and "Show N more", like the
 // checklist. A card without attachments shows the add action on the heading
-// line instead. Each card mounts its own section (keyed by card), so a file
-// added past the first row expands the list to show it.
-export function AttachmentsSection({ boardId, share, attachments, canWrite, isDraft, busy, error, onPick, onPreview, onDownload, onRemove }) {
+// line instead, beside a visible reminder that files can be pasted or dropped:
+// a tooltip alone never reaches touch or keyboard users. Each card mounts its
+// own section (keyed by card), so a file added past the first row expands the
+// list to show it.
+export function AttachmentsSection({ boardId, share, attachments, canWrite, busy, error, onPick, onPreview, onDownload, onRemove }) {
   const count = attachments.length
   const [expanded, setExpanded] = useState(false)
   const shownCount = useRef(count)
@@ -901,14 +903,15 @@ export function AttachmentsSection({ boardId, share, attachments, canWrite, isDr
   const full = count >= MAX_CARD_ATTACHMENTS
   const addProps = {
     type: 'button',
-    disabled: isDraft || busy || full,
+    disabled: busy || full,
     onClick: onPick,
-    title: isDraft ? 'Add a title to attach files' : full ? `Limit of ${MAX_CARD_ATTACHMENTS} reached` : 'Images or files. You can also drop or paste them onto the card.',
+    title: full ? `Limit of ${MAX_CARD_ATTACHMENTS} reached` : 'Images or files. You can also drop or paste them onto the card.',
   }
   const errorLine = error && <p className="kb-attachment-error" role="alert">{error}</p>
   if (!count) return <section className="kb-section" aria-label="Attachments">
     <div className="kb-section-line">
       <h3>Attachments</h3>
+      {canWrite && <span className="kb-attach-hint">Paste <span className="kb-attach-hint-drop">or drop </span>files here</span>}
       <button className="kb-detail-chip is-empty" {...addProps}><Plus aria-hidden="true" />{busy ? 'Adding files…' : 'Add attachment'}</button>
     </div>
     {errorLine}
@@ -940,6 +943,34 @@ export function AttachmentsSection({ boardId, share, attachments, canWrite, isDr
   </CardSection>
 }
 
+// A file pasted or dropped while Comments or Activity is showing lands on the
+// Home tab, out of sight. This line says so where the person is looking.
+export function AttachedNotice({ names, onView }) {
+  const text = names.length === 1
+    ? `“${names[0]}” was added to this card’s attachments`
+    : `${names.length} files were added to this card’s attachments`
+  return <div className="kb-attach-notice" role="status">
+    <Paperclip aria-hidden="true" />
+    <span>{text}</span>
+    <button type="button" className="kb-quiet-action" onClick={onView}>View</button>
+  </div>
+}
+
+// The last row of a card's Home tab: Delete on the left and, on the right,
+// Done while the card is being created or the day an existing card was made.
+export function CardFooter({ deleteRef, onDelete, created, onDone }) {
+  if (!onDelete && !created && !onDone) return null
+  return <div className="kb-card-footer">
+    {onDelete && <button ref={deleteRef} type="button" className="kb-btn kb-delete-card" onClick={onDelete}>
+      <Trash aria-hidden="true" />
+      Delete card
+    </button>}
+    {onDone
+      ? <button type="button" className="kb-btn kb-btn-primary kb-card-done" onClick={onDone}>Done</button>
+      : created && <span className="kb-card-created">{created}</span>}
+  </div>
+}
+
 // ---- comments ----
 
 // Mention-aware comment text: a member's label (and any other @word) reads as
@@ -956,7 +987,7 @@ function CommentText({ text, labels, selfLabel }) {
 // the newest comment in view whenever the tab opens (`active`).
 // Enter posts, Shift+Enter makes a new line; typing @ lists the board's
 // members (`mentionables`) and Enter/Tab or a click inserts the picked name.
-export function CardComments({ card, comments, status, canWrite, posting, postError, actorName, avatarFor, isOwn, onPost, mentionables = [], selfLabel = '', active }) {
+export function CardComments({ card, comments, status, canWrite, posting, postError, actorName, avatarFor, isOwn, onPost, mentionables = [], selfLabel = '', active, emptyHint, notice }) {
   const [draft, setDraft] = useState('')
   // The @ the composer is completing: {start, query}, null when none.
   const [mention, setMention] = useState(null)
@@ -1058,8 +1089,9 @@ export function CardComments({ card, comments, status, canWrite, posting, postEr
       </Fragment>)}
     </div>}
     {comments.length === 0 && status === 'ok' && <EmptyTab icon={Chat} title="No comments yet">
-      {canWrite ? 'Ask a question or bring someone in with an @mention.' : 'Nobody has commented on this card yet.'}
+      {emptyHint || (canWrite ? 'Ask a question or bring someone in with an @mention.' : 'Nobody has commented on this card yet.')}
     </EmptyTab>}
+    {notice}
     {canWrite && status !== 'unsupported' && <div className="kb-comment-composer">
       {/* The card's modal hears Escape first (capture phase); while the
           picker is open the field claims it so Escape closes only the picker. */}
