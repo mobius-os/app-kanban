@@ -63,12 +63,12 @@ const LIST_COLOURS = [[null, 'No colour'], ...COLUMN_COLOR_KEYS.map(key => [key,
 
 export const LABELS = {
   none: 'transparent',
-  red: 'var(--kb-label-red, #ef4444)',
-  amber: 'var(--kb-label-amber, #f59e0b)',
-  green: 'var(--kb-label-green, #10b981)',
-  blue: 'var(--kb-label-blue, #3b82f6)',
-  purple: 'var(--kb-label-purple, #8b5cf6)',
-  pink: 'var(--kb-label-pink, #ec4899)',
+  red: 'var(--kb-label-red)',
+  amber: 'var(--kb-label-amber)',
+  green: 'var(--kb-label-green)',
+  blue: 'var(--kb-label-blue)',
+  purple: 'var(--kb-label-purple)',
+  pink: 'var(--kb-label-pink)',
 }
 
 // A card on the board reads top to bottom like the open card: the full title,

@@ -10,10 +10,12 @@ export const CSS = `
   *::-webkit-scrollbar { display: none; }
   ::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); color: var(--text); }
   /* Phone menus render in document.body, outside .kb-root, and need the same colours. */
-  .kb-root, .kb-popover-menu.is-sheet {
-    --kb-danger: color-mix(in srgb, #ef4444 55%, var(--text));
-    --kb-warning: color-mix(in srgb, #f59e0b 52%, var(--text));
-    --kb-success: color-mix(in srgb, #10b981 55%, var(--text));
+  /* Label colours are user-picked categories, not theme chrome; they are defined
+     on :root too so a label swatch rendered in any portal keeps its colour. */
+  :root, .kb-root, .kb-popover-menu.is-sheet {
+    --kb-danger: var(--danger-text, var(--danger));
+    --kb-warning: var(--warning-text, var(--warning));
+    --kb-success: var(--green-text, var(--green));
     --kb-label-red: color-mix(in srgb, #ef4444 55%, var(--text));
     --kb-label-amber: color-mix(in srgb, #f59e0b 52%, var(--text));
     --kb-label-green: color-mix(in srgb, #10b981 55%, var(--text));
@@ -105,7 +107,7 @@ export const CSS = `
     height: 10px;
     border: 2px solid var(--surface);
     border-radius: 999px;
-    background: #22c55e;
+    background: var(--green);
   }
   .kb-presence-more {
     width: 30px;
@@ -352,7 +354,7 @@ export const CSS = `
   .kb-card-count > svg { width: 13px; height: 13px; }
   .kb-card-count.is-complete { color: var(--kb-success); }
   /* Unread mentions of you: purple, like everything that means "you". */
-  .kb-card-mention { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px 1px 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11.5px; font-weight: 700; line-height: 18px; font-variant-numeric: tabular-nums; }
+  .kb-card-mention { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px 1px 5px; border-radius: 999px; background: var(--accent-fill, var(--accent)); color: var(--accent-fg); font-size: 11.5px; font-weight: 700; line-height: 18px; font-variant-numeric: tabular-nums; }
   .kb-card-mention > svg { width: 12px; height: 12px; }
   /* A label is a tinted chip with a dot and, when the board names it, its name. */
   .kb-card-label { min-width: 0; flex: 0 1 auto; display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 1px 6px; overflow: hidden; border-radius: 6px; background: color-mix(in srgb, var(--kb-lc) 15%, transparent); color: var(--kb-lc); font-size: 11.5px; font-weight: 600; line-height: 18px; white-space: nowrap; text-overflow: ellipsis; }
@@ -374,8 +376,8 @@ export const CSS = `
     letter-spacing: 0.01em;
   }
   .kb-due { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 3px 7px; }
-  .kb-due-overdue { color: var(--kb-danger); background: color-mix(in srgb, #ef4444 13%, transparent); }
-  .kb-due-today { color: var(--kb-warning); background: color-mix(in srgb, #f59e0b 14%, transparent); }
+  .kb-due-overdue { color: var(--kb-danger); background: color-mix(in srgb, var(--danger) 13%, transparent); }
+  .kb-due-today { color: var(--kb-warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
   /* Muted text on --surface-2 sits just under 4.5:1 in the light palette; a step toward --text clears it in both. */
   .kb-due-upcoming { color: color-mix(in srgb, var(--muted) 80%, var(--text)); background: var(--surface-2); }
   .kb-card.kb-lifted { opacity: 0.35; }
@@ -695,7 +697,7 @@ export const CSS = `
   .kb-pr-status-open { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
   .kb-pr-status-draft { background: var(--surface-2); color: var(--muted); }
   .kb-pr-status-unknown { border: 1px dashed var(--border); color: var(--muted); }
-  .kb-pr-status-merged { background: color-mix(in srgb, #38b875 18%, transparent); color: #319867; }
+  .kb-pr-status-merged { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green-text, var(--green)); }
   .kb-pr-status-closed { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
   .kb-pr-hint { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
   .kb-card-sheet {
@@ -970,12 +972,12 @@ export const CSS = `
   .kb-tile-meta { min-width: 0; font-size: 12px; line-height: 1.35; color: var(--muted); margin-top: auto; }
   .kb-tile-preview { height: 18px; display: flex; align-items: flex-end; gap: 4px; }
   .kb-tile-bar { width: 5px; min-height: 3px; max-height: 18px; border-radius: 999px; background: var(--muted); opacity: 0.82; }
-  .kb-tile-bar[data-status='red'] { background: #ef4444; }
-  .kb-tile-bar[data-status='amber'] { background: #f59e0b; }
-  .kb-tile-bar[data-status='green'] { background: #10b981; }
-  .kb-tile-bar[data-status='blue'] { background: #3b82f6; }
-  .kb-tile-bar[data-status='purple'] { background: #8b5cf6; }
-  .kb-tile-bar[data-status='pink'] { background: #ec4899; }
+  .kb-tile-bar[data-status='red'] { background: var(--kb-label-red); }
+  .kb-tile-bar[data-status='amber'] { background: var(--kb-label-amber); }
+  .kb-tile-bar[data-status='green'] { background: var(--kb-label-green); }
+  .kb-tile-bar[data-status='blue'] { background: var(--kb-label-blue); }
+  .kb-tile-bar[data-status='purple'] { background: var(--kb-label-purple); }
+  .kb-tile-bar[data-status='pink'] { background: var(--kb-label-pink); }
   .kb-tile-del { position: absolute; z-index: 1; top: 4px; right: 4px; width: 44px; height: 44px; border-radius: 9px; }
   .kb-tile-del > svg { width: 16px; height: 16px; }
   .kb-tile-confirm { cursor: default; justify-content: center; }
@@ -1026,7 +1028,7 @@ export const CSS = `
     .kb-btn-primary:hover, .kb-card-toolbar-done:hover, .kb-btn-danger:hover { filter: brightness(0.94); }
     .kb-chip:not(:disabled):hover { border-color: color-mix(in srgb, var(--accent) 62%, var(--border)); background: var(--surface-2); }
     .kb-addcol:hover { color: var(--text); border-color: var(--muted); background: color-mix(in srgb, var(--surface-2) 52%, transparent); }
-    .kb-danger:hover { background: color-mix(in srgb, #ef4444 12%, transparent); color: var(--kb-danger); }
+    .kb-danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--kb-danger); }
     .kb-tile:not(.kb-tile-confirm):hover { border-color: color-mix(in srgb, var(--accent) 72%, var(--border)); transform: translateY(-1px); }
     .kb-newtile:hover { color: var(--text); background: color-mix(in srgb, var(--surface-2) 52%, transparent); }
     .kb-card:not(.kb-ghost):not(.kb-lifted):hover {
@@ -1221,9 +1223,9 @@ export const CSS = `
   }
 
 
-  /* Filled buttons keep white labels at AA contrast on the platform accent. */
-  .kb-btn-primary, .kb-card-toolbar-done { background: color-mix(in srgb, var(--accent) 78%, #000); color: #fff; }
-  .kb-btn-danger { background: color-mix(in srgb, var(--danger) 78%, #000); color: #fff; }
+  /* Filled buttons use the platform fill roles, which keep their labels at AA contrast. */
+  .kb-btn-primary, .kb-card-toolbar-done { background: var(--accent-fill, var(--accent)); color: var(--accent-fg); }
+  .kb-btn-danger { background: var(--danger-fill, var(--danger)); color: var(--accent-fg); }
 
   /* Card sheet. */
   .kb-notes-display.kb-notes-empty { min-height: 44px; display: flex; align-items: center; color: var(--muted); }
@@ -1443,7 +1445,7 @@ export const CSS = `
   .kb-menu-meta { margin-left: auto; color: var(--muted); font-size: 12.5px; }
   .kb-menu-heading { padding: 6px 10px 4px; color: var(--muted); font-size: 13px; font-weight: 620; letter-spacing: -0.005em; }
   .kb-menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
-  .kb-popover-menu > .kb-menu-danger, .kb-quiet-action.kb-menu-danger { color: var(--kb-danger, #e5484d); }
+  .kb-popover-menu > .kb-menu-danger, .kb-quiet-action.kb-menu-danger { color: var(--kb-danger); }
   .kb-menu-date { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 10px; color: var(--muted); font-size: 13px; }
   .kb-menu-date input { flex: 1 1 auto; min-width: 0; min-height: 36px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font: 15px var(--font); color-scheme: light dark; }
   /* The title's focus ring reaches 4px below its box; 10px keeps it off the chips. */
@@ -1653,7 +1655,7 @@ export const CSS = `
   }
 
   /* ---- Board: same-size cards, list menu, folded lists, list drag ---- */
-  .kb-due.kb-due-tone-soon { color: var(--kb-warning); background: color-mix(in srgb, #f59e0b 14%, transparent); }
+  .kb-due.kb-due-tone-soon { color: var(--kb-warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
   .kb-col-head { cursor: grab; user-select: none; }
   .kb-col-head .kb-col-name { cursor: text; }
   .kb-col-menu { margin-left: auto; margin-right: -6px; }

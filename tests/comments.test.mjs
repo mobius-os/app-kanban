@@ -389,7 +389,7 @@ test('the board shows unread mentions of you as a purple pill and clears it when
   assert.match(board, /cardTab !== 'comments'[\s\S]{0,260}markMentionsRead\(share, openCardId\)/)
   assert.match(board, /mentionedMemberIds\(text, mentionables\)/)
   assert.match(parts, /forYou = !own && mentionParts/, 'someone else\'s comment naming you is outlined')
-  assert.match(theme, /\.kb-card-mention \{[^}]*background: var\(--accent\)/)
+  assert.match(theme, /\.kb-card-mention \{[^}]*background: var\(--accent-fill, var\(--accent\)\); color: var\(--accent-fg\)/)
   const app = await readFile(new URL('../index.jsx', import.meta.url), 'utf8')
   assert.match(app, /moebius:app-intent[\s\S]{0,120}parseMentionIntent/)
 })
